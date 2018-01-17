@@ -17,7 +17,7 @@ bool shouldAlign = true; //If the script should attempt to stabalize by default
 bool referenceOnSameGridAsProgram = true; //if true, only searches for reference blocks on
                                           //the same grid as the program block (should help with docking small vessels)
 
-const double angleTolerance = 5; //How many degrees the code will allow before it overrides user control
+const double angleTolerance = 0; //How many degrees the code will allow before it overrides user control
 
 //---PID Constants
 const double proportionalConstant = 2;
