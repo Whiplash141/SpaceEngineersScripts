@@ -123,10 +123,6 @@ bool GrabBlocks()
         {
             Echo("Optional: No gyros found on same grid as controller");
         }
-        else
-        {
-            GetGyroOrientation(controller, gyros);
-        }
     }
     
     leftWheels = new List<IMyMotorSuspension>();
