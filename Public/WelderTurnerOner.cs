@@ -1,5 +1,3 @@
-//Whip's Welder Turner Oner v1 - 1/20/18
-
 string welderGroupName = "Welders";
 
 Program()
@@ -8,9 +6,25 @@ Program()
 }
 
 List<IMyShipWelder> welderList = new List<IMyShipWelder>();
+bool turnOn = true;
 
 void Main(string arg, UpdateType updateSource)
 {
+    switch (arg.ToUpperInvariant())
+    {
+        case "ON":
+            turnOn = true;
+            break;
+
+        case "OFF":
+            turnOn = false;
+            break;
+
+        case "TOGGLE":
+            turnOn = !turnOn;
+            break;
+    }
+
     if ((updateSource & UpdateType.Update100) == 0) //only run on update loop
         return;
 
@@ -32,6 +46,6 @@ void Main(string arg, UpdateType updateSource)
 
     foreach (var block in welderList)
     {
-        block.Enabled = true;
+        block.Enabled = turnOn;
     }
 }
