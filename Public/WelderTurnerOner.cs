@@ -28,6 +28,10 @@ void Main(string arg, UpdateType updateSource)
     if ((updateSource & UpdateType.Update100) == 0) //only run on update loop
         return;
 
+    Echo("Whip's Welder Turner Oner...");
+    string status = turnOn ? "Enabled" : "Disabled";
+    Echo($"\n  Status: {turnOn}");
+
     var group = GridTerminalSystem.GetBlockGroupWithName(welderGroupName);
 
     if (group == null)
