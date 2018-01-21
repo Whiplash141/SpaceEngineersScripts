@@ -323,7 +323,7 @@ void OverrideGyros(bool overrideOn, IMyShipController reference, Vector2 mouseIn
 
     //var worldMouseInput = Vector3D.TransformNormal(localMouseInput, reference.WorldMatrix);
 
-    if (Vector3D.IsZero(localMouseInput, 1E-3))
+    if (!Vector3D.IsZero(localMouseInput, 1E-3))
     {
         overrideOn = false;
     }
