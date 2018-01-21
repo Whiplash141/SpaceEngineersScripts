@@ -1,6 +1,5 @@
-
 /*
-/// Whip's Directional Gravity Drive Control Script v15 - 12/12/17 ///
+/// Whip's Directional Gravity Drive Control Script v15 - 12/20/17 ///
 ________________________________________________
 Description:
 
@@ -44,7 +43,7 @@ Author's Notes
 const string gravityDriveGroupName = "Gravity Drive";
 //place all gravity drive generators and masses in this group
 
-float gravityDriveDampenerScalingFactor = 1f;
+float gravityDriveDampenerScalingFactor = 0.01f;
 //larger values will quicken the dampening using gravity gens but will also risk causing oscillations
 //The lighter your ship, the smaller this should be
 
@@ -63,7 +62,7 @@ bool useGravityDriveAsInertialDampeners = true;
 bool enableDampenersWhenNotControlled = true;
 //This will force gravity dampeners on if no one is controlling the ship
 
-const double fullBurnToleranceAngle = 30; 
+const double fullBurnToleranceAngle = 30;
 //Max angle (in degrees) that a thruster can be off axis of input direction and still
 //receive maximum thrust output
 
@@ -106,12 +105,12 @@ void Main(string arg, UpdateType updateType)
     if ((updateType & (UpdateType.Trigger | UpdateType.Terminal | UpdateType.Script)) != 0)
         ProcessArguments(arg);
 
-    
+
     if ((updateType & UpdateType.Update1) == 0)
         return;
-    
-    timeCurrentCycle += 1.0/60.0;
-    refreshTime += 1.0/60.0;
+
+    timeCurrentCycle += 1.0 / 60.0;
+    refreshTime += 1.0 / 60.0;
 
     try
     {
@@ -127,21 +126,21 @@ void Main(string arg, UpdateType updateType)
         if (timeCurrentCycle >= timeMaxCycle)
         {
             Echo("WMI Gravity Drive Manager... " + RunningSymbol());
-            
+
             Echo($"Next refresh in {Math.Max(refreshInterval - refreshTime, 0):N0} seconds");
 
             if (turnOn)
                 Echo("\nGravity Drive is Enabled");
             else
                 Echo("\nGravity Drive is Disabled");
-            
+
             if (useGravityDriveAsInertialDampeners)
                 Echo("\nGravity Dampeners Enabled");
             else
                 Echo("\nGravity Dampeners Disabled");
 
             Echo($"\nGravity Drive Stats:\n Artificial Masses: {artMasses.Count}\n Gravity Generators:\n >Forward: {fowardGens.Count}\n >Backward: {backwardGens.Count}\n >Left: {leftGens.Count}\n >Right: {rightGens.Count}\n >Up: {upGens.Count}\n >Down: {downGens.Count}\n >Other: {otherGens.Count}");
-            
+
             Echo($"\nGyro Stabilization: {useGyrosToStabilize}\n Gyro count: {gyros.Count}");
 
             ManageGravDrive(turnOn);
@@ -171,15 +170,15 @@ void ProcessArguments(string arg)
         case "toggle":
             turnOn = !turnOn; //switches boolean value
             break;
-            
+
         case "dampeners_on":
             useGravityDriveAsInertialDampeners = true;
             break;
-            
+
         case "dampeners_off":
             useGravityDriveAsInertialDampeners = false;
             break;
-            
+
         case "dampeners_toggle":
             useGravityDriveAsInertialDampeners = !useGravityDriveAsInertialDampeners;
             break;
@@ -312,35 +311,40 @@ void OverrideGyros(bool overrideOn, IMyShipController reference, Vector2 mouseIn
         hasVector = true;
         lastForwardVector = reference.WorldMatrix.Forward;
     }
-    
+
     double pitch = 0, yaw = 0, roll = 0;
     GetRotationAngles(lastForwardVector, reference.WorldMatrix.Forward, reference.WorldMatrix.Left, reference.WorldMatrix.Up, out yaw, out pitch);
-    
+
     var localAngularDeviation = new Vector3D(-pitch, yaw, roll);
     var worldAngularDeviation = Vector3D.TransformNormal(localAngularDeviation, reference.WorldMatrix);
     var worldAngularVelocity = worldAngularDeviation / timeMaxCycle;
-    var localMouseInput = new Vector3(mouseInput.X, mouseInput.Y, rollInput);
-    var worldMouseInput = Vector3D.TransformNormal(localMouseInput, reference.WorldMatrix);
     
+    var localMouseInput = new Vector3(mouseInput.X, mouseInput.Y, rollInput);
+
+    //var worldMouseInput = Vector3D.TransformNormal(localMouseInput, reference.WorldMatrix);
+
+    if (Vector3D.IsZero(localMouseInput, 1E-3))
+    {
+        overrideOn = false;
+    }
+
     foreach (var block in gyros)
     {
         if (overrideOn)
         {
             var gyroAngularVelocity = Vector3D.TransformNormal(worldAngularVelocity, MatrixD.Transpose(block.WorldMatrix));
-            var gyroMouseInput = Vector3D.TransformNormal(worldMouseInput, MatrixD.Transpose(block.WorldMatrix));
-            var multiplier = Vector3D.IsZeroVector(gyroMouseInput, 1E-3);
-            gyroAngularVelocity *= multiplier * updatesPerSecond / 60.0;
-
-            block.Pitch = (float)Math.Round(gyroAngularVelocity.X + gyroMouseInput.X, 2);
-            block.Yaw = (float)Math.Round(gyroAngularVelocity.Y + gyroMouseInput.Y, 2);
-            block.Roll = (float)Math.Round(gyroAngularVelocity.Z + gyroMouseInput.Z, 2);
+            //var gyroMouseInput = Vector3D.TransformNormal(worldMouseInput, MatrixD.Transpose(block.WorldMatrix));
+            
+            block.Pitch = (float)Math.Round(gyroAngularVelocity.X, 2);
+            block.Yaw = (float)Math.Round(gyroAngularVelocity.Y, 2);
+            block.Roll = (float)Math.Round(gyroAngularVelocity.Z, 2);
             block.GyroOverride = true;
             block.GyroPower = 100f; //im assuming this is a percentage
         }
         else
-            block.GyroOverride = false; 
+            block.GyroOverride = false;
     }
-    
+
     lastForwardVector = reference.WorldMatrix.Forward;
 }
 
@@ -381,7 +385,7 @@ Vector3D VectorProjection(Vector3D a, Vector3D b)
     if (Vector3D.IsZero(b))
         return Vector3D.Zero;
 
-    return a.Dot(b) / b.LengthSquared() * b;  
+    return a.Dot(b) / b.LengthSquared() * b;
 }
 
 double VectorAngleBetween(Vector3D a, Vector3D b) //returns radians 
@@ -395,9 +399,9 @@ double VectorAngleBetween(Vector3D a, Vector3D b) //returns radians
 void ManageGravDrive(bool turnOn)
 {
     IMyShipController reference = GetControlledShipController(shipControllers);
-    
+
     bool hasPilot = reference != null;
-    
+
     if (!hasPilot)
     {
         reference = shipControllers[0];
@@ -408,30 +412,30 @@ void ManageGravDrive(bool turnOn)
     var inputVec = reference.MoveIndicator; //raw input vector
     var rollVec = reference.RollIndicator;
     var mouseInputVec = reference.RotationIndicator;
-    
+
     if (useGyrosToStabilize)
     {
-        //This method was derived from Rod-Serling's The One Gravity Drive Script
-        //Much simpler than the Differential Equations I was trying to solve
-        OverrideGyros(turnOn, reference, mouseInputVec, rollVec); //rollVec == 0 && mouseInputVec.LengthSquared() == 0 && 
+        OverrideGyros(turnOn, reference, mouseInputVec, rollVec);
     }
-    
+
     var desiredDirection = Vector3D.TransformNormal(inputVec, referenceMatrix);
-    
+
     if (!Vector3D.IsZero(desiredDirection))
     {
         desiredDirection = Vector3D.Normalize(desiredDirection);
     }
 
     var velocityVec = reference.GetShipVelocities().LinearVelocity;
-    
+
     bool hasThrust = true;
     if (onGridThrust.Count == 0)
         hasThrust = false;
 
     bool dampenersOn = hasThrust ? useGravityDriveAsInertialDampeners ? reference.DampenersOverride : false : useGravityDriveAsInertialDampeners;
-    
-    if ((velocityVec.LengthSquared() <= speedThreshold * speedThreshold && Vector3D.IsZero(desiredDirection)) || !turnOn )
+
+    Echo($"Dampeners: {dampenersOn}");
+
+    if ((velocityVec.LengthSquared() <= speedThreshold * speedThreshold && Vector3D.IsZero(desiredDirection)) || !turnOn)
     {
         ToggleMass(artMasses, false);
         ToggleDirectionalGravity(desiredDirection, velocityVec, false, dampenersOn);
@@ -441,12 +445,12 @@ void ManageGravDrive(bool turnOn)
         if (enableDampenersWhenNotControlled)
         {
             ToggleMass(artMasses, true); //default all masses to turn on
-            ToggleDirectionalGravity(Vector3D.Zero, velocityVec, turnOn, true);
+            ToggleDirectionalGravity(Vector3D.Zero, velocityVec, turnOn, true); //force dampeners on
         }
         else
         {
             ToggleMass(artMasses, true); //default all masses to turn on
-            ToggleDirectionalGravity(Vector3D.Zero, velocityVec, turnOn, dampenersOn);
+            ToggleDirectionalGravity(Vector3D.Zero, velocityVec, turnOn, dampenersOn); //input is forced to zero
         }
     }
     else
@@ -480,30 +484,36 @@ void ToggleDirectionalGravity(Vector3D direction, Vector3D velocityVec, bool tur
         if (turnOn)
         {
             SetGravityPower(list, true);
-            
+
             double gravThrustRatio = referenceGen.WorldMatrix.Down.Dot(direction);
-            double gravDampingRatio = referenceGen.WorldMatrix.Up.Dot(velocityVec);
-            
+            double gravDampingRatio = dampenersOn ? referenceGen.WorldMatrix.Up.Dot(velocityVec) : 0;
+
             if (Math.Abs(gravThrustRatio) > maxThrustDotProduct)
             {
                 gravThrustRatio /= fullBurnDotProduct;
                 SetGravityAcceleration(list, (float)gravThrustRatio * 9.81f);
             }
-           
-            if (dampenersOn)
+
+            if (gravThrustRatio == 0 && gravDampingRatio == 0)
             {
-                double targetOverride = 0;
+                SetGravityAcceleration(list, 0f);
+                continue;
+            }
+
+            //if (dampenersOn)
+            //{
+            double dampenerOverride = 0;
 
                 if (Math.Abs(gravDampingRatio) < 1)
-                    targetOverride = gravDampingRatio * gravityDriveDampenerScalingFactor;
+                    dampenerOverride = gravDampingRatio * gravityDriveDampenerScalingFactor;
                 else
-                    targetOverride = Math.Sign(gravDampingRatio) * gravDampingRatio * gravDampingRatio * gravityDriveDampenerScalingFactor;
+                    dampenerOverride = Math.Sign(gravDampingRatio) * gravDampingRatio * gravDampingRatio * gravityDriveDampenerScalingFactor;
 
-                if (targetOverride < 0 && gravThrustRatio <= 0 && Math.Abs(targetOverride) > Math.Abs(gravThrustRatio * 9.81f))
-                    SetGravityAcceleration(list, (float)targetOverride);
-                else if (targetOverride > 0 && gravThrustRatio >= 0 && Math.Abs(targetOverride) > Math.Abs(gravThrustRatio * 9.81f))
-                    SetGravityAcceleration(list, (float)targetOverride);
-            }
+                if (dampenerOverride < 0 && gravThrustRatio <= 0 && Math.Abs(dampenerOverride) > Math.Abs(gravThrustRatio * 9.81f))
+                    SetGravityAcceleration(list, (float)dampenerOverride);
+                else if (dampenerOverride > 0 && gravThrustRatio >= 0 && Math.Abs(dampenerOverride) > Math.Abs(gravThrustRatio * 9.81f))
+                    SetGravityAcceleration(list, (float)dampenerOverride);
+            //}
         }
         else
         {
@@ -518,27 +528,31 @@ void ToggleDirectionalGravity(Vector3D direction, Vector3D velocityVec, bool tur
         if (turnOn)
         {
             double gravThrustRatio = thisGravGen.WorldMatrix.Down.Dot(direction);
-            double gravDampingRatio;
-
-            gravDampingRatio = thisGravGen.WorldMatrix.Up.Dot(velocityVec);
+            double gravDampingRatio = dampenersOn ? thisGravGen.WorldMatrix.Up.Dot(velocityVec) : 0;
 
             thisGravGen.GravityAcceleration = (float)gravThrustRatio * 9.81f;
             thisGravGen.Enabled = true;
 
-            if (dampenersOn)
+            if (gravThrustRatio == 0 && gravDampingRatio == 0)
             {
-                double targetOverride = 0;
-
-                if (Math.Abs(gravDampingRatio) < 1)
-                    targetOverride = gravDampingRatio * gravityDriveDampenerScalingFactor;
-                else
-                    targetOverride = Math.Sign(gravDampingRatio) * gravDampingRatio * gravDampingRatio * gravityDriveDampenerScalingFactor;
-
-                if (targetOverride < 0 && gravThrustRatio <= 0 && Math.Abs(targetOverride) > Math.Abs(gravThrustRatio * 9.81f))
-                    thisGravGen.GravityAcceleration = (float)targetOverride;
-                else if (targetOverride > 0 && gravThrustRatio >= 0 && Math.Abs(targetOverride) > Math.Abs(gravThrustRatio * 9.81f))
-                    thisGravGen.GravityAcceleration = (float)targetOverride;
+                thisGravGen.GravityAcceleration =  0f;
+                continue;
             }
+
+            //if (dampenersOn)
+            //{
+            double dampenerOverride = 0;
+
+            if (Math.Abs(gravDampingRatio) < 1)
+                dampenerOverride = gravDampingRatio * gravityDriveDampenerScalingFactor;
+            else
+                dampenerOverride = Math.Sign(gravDampingRatio) * gravDampingRatio * gravDampingRatio * gravityDriveDampenerScalingFactor;
+
+            if (dampenerOverride < 0 && gravThrustRatio <= 0 && Math.Abs(dampenerOverride) > Math.Abs(gravThrustRatio * 9.81f))
+                thisGravGen.GravityAcceleration = (float)dampenerOverride;
+            else if (dampenerOverride > 0 && gravThrustRatio >= 0 && Math.Abs(dampenerOverride) > Math.Abs(gravThrustRatio * 9.81f))
+                thisGravGen.GravityAcceleration = (float)dampenerOverride;
+            //}
         }
         else
         {
@@ -592,4 +606,5 @@ void ToggleMass(List<IMyVirtualMass> artMasses, bool toggleOn)
 * Added additional check for player input - v12
 * Added self triggering - v13
 * Implemented actual rotational dampening - v14
+* Fixed issue where dampeners fired when they shouldn't - v15
 */
