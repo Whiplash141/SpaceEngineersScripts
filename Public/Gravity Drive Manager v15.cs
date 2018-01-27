@@ -12,16 +12,9 @@ How do I use this?
 
     1) Place this program on your main grid (the grid your control seat is on)
 
-    2) Make a timer block with actions:
-    - "Run" this program with NO ARGUMENT
-    - "Trigger Now" itself 
-    - "Start" itself 
+    2) Make a group with all of your gravity drive artificial masses and gravity gens. Name it "Gravity Drive"
 
-    3) Make a group with all of your gravity drive artificial masses and gravity gens. Name it "Gravity Drive"
-
-    4) Trigger the timer
-
-    5) Enjoy!
+    3) Enjoy!
 ________________________________________________
 Arguments
 
