@@ -1,0 +1,72 @@
+// Whip's Speed Based Lights v1 - 12/12/17
+
+const string lightGroupName = "Thruster Lights"; //change this to whatever
+const double maxSpeed = 100;
+const float maxLightRadius = 160f;
+const float maxLightIntensity = 5f;
+
+// No touchey
+List<IMyLightingBlock> lightList;
+const double oneOverMaxSpeed = 1.0 / maxSpeed;
+
+Program()
+{
+    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+    lightList = new List<IMyLightingBlock>();
+}
+
+void Main(string argument, UpdateType updateType)
+{
+    if ((updateType & UpdateType.Update10) == 0)
+        return;
+
+	Echo("WMI Speed Lights Online");
+    var lightGroup = GridTerminalSystem.GetBlockGroupWithName(lightGroupName);
+    if (lightGroup == null)
+    {
+        Echo($"> Error: No group named '{lightGroupName}' was found");
+        return;
+    }
+
+    lightGroup.GetBlocksOfType(lightList);
+    if (lightList.Count == 0)
+    {
+        Echo($"> Error: No lights found in light group");
+        return;
+    }
+
+    var controller = GetFirstBlockOfType<IMyShipController>();
+    if (controller == null)
+    {
+        Echo("> Error: No ship controller found");
+        return;
+    }
+
+    var velocity = controller.GetShipVelocities().LinearVelocity;
+
+    foreach(var block in lightList)
+    {
+        var lightDirection = block.WorldMatrix.Backward; //backward because we want the direction the light would "thrust" if it were a thruster
+        var forwardVelocity = velocity.Dot(lightDirection);
+        if (forwardVelocity < 1)
+        {
+            block.Enabled = false;
+            continue;
+        }
+        else
+            block.Enabled = true;
+
+        var forwardVelocityProportion = forwardVelocity * oneOverMaxSpeed; //scale to get a proportion
+        block.Radius = maxLightRadius * (float)forwardVelocityProportion;
+        block.Intensity = maxLightIntensity * (float)forwardVelocityProportion;
+    }
+
+}
+
+T GetFirstBlockOfType<T>() where T : class, IMyTerminalBlock
+{
+    var blocks = new List<T>();
+    GridTerminalSystem.GetBlocksOfType(blocks);
+
+    return blocks.Count > 0 ? blocks[0] : null;
+}
