@@ -40,27 +40,11 @@ void Main(string argument, UpdateType updateType)
             break;
         case 6:
             //GrabBlocks();
-            SetRotorDisplacement(rotors, -0.4f);
+            //SetRotorDisplacement(rotors, -0.4f);
             SetMergePower(merges, true);
             Runtime.UpdateFrequency = UpdateFrequency.None;
             isFiring = false;
             break;
-        
-        /*
-        case 1:
-            SetRotorDisplacement(rotors, -0.4f);
-            break;
-        case 2:
-            AttachDetachRotors(detachRotors, true);
-            SetRotorDisplacement(rotors, 0.2f);
-            break;
-        case 6:
-            AttachDetachRotors(detachRotors, false);
-            SetMergePower(merges, true);
-            Runtime.UpdateFrequency = UpdateFrequency.None;
-            isFiring = false;
-            break;
-        */
     }
 
     if ((updateType & UpdateType.Update1) != 0)
