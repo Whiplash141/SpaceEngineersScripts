@@ -1,5 +1,6 @@
-// Whip's Rotor Displacement Cannon v4 - 1/16/18
+// Whip's Rotor Displacement Cannon v4-1 - 2/10/18
 
+bool shareInertiaTensor = true;
 string displacementRotorGroupName = "Displacement";
 string displacementRotorName = "Displacement";
 string detachRotorName = "Detach";
@@ -96,13 +97,13 @@ bool GrabBlocks()
     
     foreach(var block in rotors)
     {
-        block.SetValue("ShareInertiaTensor", true);
+        block.SetValue("ShareInertiaTensor", shareInertiaTensor);
         block.SetValue("RotorLock", true);
     }
     
     foreach(var block in detachRotors)
     {
-        block.SetValue("ShareInertiaTensor", true);
+        block.SetValue("ShareInertiaTensor", shareInertiaTensor);
         block.SetValue("RotorLock", true);
     }
 
