@@ -32,7 +32,6 @@ void Main(string argument, UpdateType updateType)
             break;
         case 2:
             SetRotorDisplacement(rotors, 0.2f);
-            AttachDetachRotors(detachRotors, true);
             break;
         case 3:
             SetMergePower(merges, false);
@@ -41,6 +40,7 @@ void Main(string argument, UpdateType updateType)
         case 6:
             //GrabBlocks();
             //SetRotorDisplacement(rotors, -0.4f);
+            AttachDetachRotors(detachRotors, true);
             SetMergePower(merges, true);
             Runtime.UpdateFrequency = UpdateFrequency.None;
             isFiring = false;
