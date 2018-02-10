@@ -28,22 +28,38 @@ void Main(string argument, UpdateType updateType)
     {
         case 1:
             SetRotorDisplacement(rotors, -0.4f);
-            AttachDetachRotors(detachRotors, true);
             break;
         case 2:
             SetRotorDisplacement(rotors, 0.2f);
-            AttachDetachRotors(detachRotors, false);
+            AttachDetachRotors(detachRotors, true);
             break;
         case 3:
             SetMergePower(merges, false);
+             AttachDetachRotors(detachRotors, false);
             break;
-        case 4:
+        case 6:
             //GrabBlocks();
             SetRotorDisplacement(rotors, -0.4f);
             SetMergePower(merges, true);
             Runtime.UpdateFrequency = UpdateFrequency.None;
             isFiring = false;
             break;
+        
+        /*
+        case 1:
+            SetRotorDisplacement(rotors, -0.4f);
+            break;
+        case 2:
+            AttachDetachRotors(detachRotors, true);
+            SetRotorDisplacement(rotors, 0.2f);
+            break;
+        case 6:
+            AttachDetachRotors(detachRotors, false);
+            SetMergePower(merges, true);
+            Runtime.UpdateFrequency = UpdateFrequency.None;
+            isFiring = false;
+            break;
+        */
     }
 
     if ((updateType & UpdateType.Update1) != 0)
