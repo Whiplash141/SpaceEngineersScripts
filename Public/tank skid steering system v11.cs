@@ -2,7 +2,7 @@
 
 const float driveFriction = 50f;
 const float turnFriction = 10f;
-const float rotationSpeed = 10f;
+const float rotationSpeed = 0.5f;
 bool invertSteerWhenReversing = true;
 bool useGyros = true;
 
