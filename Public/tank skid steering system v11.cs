@@ -1,4 +1,4 @@
-//Whip's Tank Skid Steering System v11 - 2/5/18
+//Whip's Tank Skid Steering System v11 - 2/23/18
 
 const float driveFriction = 50f;
 const float turnFriction = 10f;
