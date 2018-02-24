@@ -39,6 +39,10 @@ void Main(string argument, UpdateType updateType)
             isSetup = GrabBlocks();
             timeSinceRefresh = 0;
         }
+        else
+        {
+            controller = GetControlledShipController(controllers);
+        }
         
         if (!isSetup)
             return;
@@ -51,7 +55,7 @@ void Main(string argument, UpdateType updateType)
         Echo("WMI Skid Steering \nSystem Online..." + RunningSymbol());
         Echo($"\nTime until next block refresh:\n{Math.Round(Math.Max(0, refreshInterval - timeSinceRefresh))} seconds\n");
 
-        controller = GetControlledShipController(controllers);
+        
         var inputVec = controller.MoveIndicator;
    
         if (inputVec.Z <= 0 || !invertSteerWhenReversing) //W 
@@ -106,6 +110,7 @@ bool GrabBlocks()
         Echo($"Error: No ship controller named found");
         return false;
     }
+    controller = GetControlledShipController(controllers);
     
     GridTerminalSystem.GetBlocksOfType(wheels, block => block.CubeGrid == controller.CubeGrid);
     if (wheels.Count == 0)
