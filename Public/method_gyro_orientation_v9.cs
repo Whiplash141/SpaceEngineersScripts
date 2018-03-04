@@ -3,7 +3,7 @@ void Main()
     var gyros = new List<IMyGyro>();
     GridTerminalSystem.GetBlocksOfType<IMyGyro>(gyros);
 
-    double pitchSpeed = 0; //these are broke
+    double pitchSpeed = 0;
     double yawSpeed = .1;
     double rollSpeed = 0;
 
@@ -31,28 +31,6 @@ void ApplyGyroOverride(double pitch_speed, double yaw_speed, double roll_speed, 
         thisGyro.GyroOverride = true; 
     } 
 }
-
-/*
-//Some magic conjured up by Inflex
-void ApplyGyroOverride(double pitch_speed, double yaw_speed, double roll_speed, List<IMyGyro> gyro_list, IMyTerminalBlock reference) 
-{ 
-    var rotationVec = new Vector4D(-pitch_speed, yaw_speed, roll_speed, 0);
-    
-    var shipLocalMatrix = reference.WorldMatrix;
-    var relativeRotationVec = Vector4D.Transform(rotationVec, shipLocalMatrix); 
-
-    foreach (var thisGyro in gyro_list) 
-    { 
-        var localMatrix = thisGyro.WorldMatrix;
-        var transformedRotationVec = Vector4D.Transform(relativeRotationVec, Matrix.Transpose(localMatrix)); 
- 
-        thisGyro.Pitch = (float)transformedRotationVec.X; //because keen does some weird stuff with signs 
-        thisGyro.Yaw = (float)transformedRotationVec.Y; 
-        thisGyro.Roll = (float)transformedRotationVec.Z; 
-        thisGyro.GyroOverride = true; 
-    } 
-}
-*/
 
 
 
