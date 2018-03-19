@@ -26,7 +26,7 @@ Program()
 void Main(string argument, UpdateType updateType)
 {
     //Bigass bandaid bc of keen
-    if ((updateType & UpdateType.Once) == 0)
+    if ((updateType & UpdateType.Once) != 0)
         Runtime.UpdateFrequency = UpdateFrequency.Update1;
     
     if ((updateType & UpdateType.Update1) == 0)
