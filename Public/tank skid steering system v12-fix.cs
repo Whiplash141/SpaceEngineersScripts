@@ -1,7 +1,7 @@
-//Whip's Tank Skid Steering System v14 - 3/19/18
+//Whip's Tank Skid Steering System v12-fix - 3/19/18
 
 const float driveFriction = 50f;
-const float turnFriction = 5f;
+const float turnFriction = 10f;
 const float rotationSpeed = 1f;
 bool invertSteerWhenReversing = true;
 bool useGyros = true;
@@ -12,15 +12,11 @@ bool useGyros = true;
 
 const double updatesPerSecond = 10;
 const double updateTime = 1 / updatesPerSecond;
-float driveFrictionIncrement = (float)(Math.Abs(driveFriction - turnFriction) / updatesPerSecond * 2);
-float turnFrictionIncrement = (float)(Math.Abs(driveFriction - turnFriction) / updatesPerSecond * 4);
 double currentTime = 0;
 
 const double refreshInterval = 10;
 double timeSinceRefresh = 141;
 bool isSetup = false;
-
-float currentFriction = driveFriction;
 
 Program()
 {
@@ -37,8 +33,8 @@ void Main(string argument, UpdateType updateType)
         return;
     //implied else
 
-    currentTime += (1.0 / 60.0);
-    timeSinceRefresh += (1.0 / 60.0);
+    currentTime += 1.0/60.0;
+    timeSinceRefresh += 1.0/60.0;
 
     if (!isSetup || timeSinceRefresh >= refreshInterval)
     {
@@ -102,12 +98,6 @@ void Main(string argument, UpdateType updateType)
     }
 }
 
-void IncrementWheelFriction(ref float friction, float increment, float minFriction, float maxFriction)
-{
-    friction += increment;
-    friction = MathHelper.Clamp(friction, minFriction, maxFriction);
-}
-
 List<IMyMotorSuspension> wheels = new List<IMyMotorSuspension>();
 List<IMyShipController> controllers = new List<IMyShipController>();
 List<IMyGyro> gyros = new List<IMyGyro>();
@@ -154,11 +144,8 @@ void NoTurn(List<IMyMotorSuspension> leftWheels, List<IMyMotorSuspension> rightW
     InvertWheelPropulsion(rightWheels, false);
     InvertSteering(leftWheels, false);
     InvertSteering(rightWheels, false);
-    
-    IncrementWheelFriction(ref currentFriction, driveFrictionIncrement, Math.Min(driveFriction, turnFriction), Math.Max(driveFriction, turnFriction));
-    
-    SetFriction(leftWheels, currentFriction);
-    SetFriction(rightWheels, currentFriction);
+    SetFriction(leftWheels, driveFriction);
+    SetFriction(rightWheels, driveFriction);
     ApplyGyroOverride(0, 0, 0, gyros, controller);
     SetGyroPower(gyros, .1f);
 }
@@ -169,12 +156,8 @@ void TurnRight(List<IMyMotorSuspension> leftWheels, List<IMyMotorSuspension> rig
     InvertWheelPropulsion(rightWheels, false);
     InvertSteering(leftWheels, true);
     InvertSteering(rightWheels, false);
-    
-    IncrementWheelFriction(ref currentFriction, -turnFrictionIncrement, Math.Min(driveFriction, turnFriction), Math.Max(driveFriction, turnFriction));
-    //currentFriction = turnFriction;
-    
-    SetFriction(leftWheels, currentFriction);
-    SetFriction(rightWheels, currentFriction);
+    SetFriction(leftWheels, turnFriction);
+    SetFriction(rightWheels, turnFriction);
     SetGyroPower(gyros, 1f);
     if (inputVec.Z <= 0)
         ApplyGyroOverride(0, -rotationSpeed, 0, gyros, controller);
@@ -188,12 +171,8 @@ void TurnLeft(List<IMyMotorSuspension> leftWheels, List<IMyMotorSuspension> righ
     InvertWheelPropulsion(rightWheels, true);
     InvertSteering(leftWheels, false);
     InvertSteering(rightWheels, true);
-    
-    IncrementWheelFriction(ref currentFriction, -turnFrictionIncrement, Math.Min(driveFriction, turnFriction), Math.Max(driveFriction, turnFriction));
-    //currentFriction = turnFriction;
-    
-    SetFriction(leftWheels, currentFriction);
-    SetFriction(rightWheels, currentFriction);
+    SetFriction(leftWheels, turnFriction);
+    SetFriction(rightWheels, turnFriction);
     SetGyroPower(gyros, 1f);
     if (inputVec.Z <= 0)
         ApplyGyroOverride(0, rotationSpeed, 0, gyros, controller);
