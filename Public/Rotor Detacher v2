@@ -1,4 +1,4 @@
-// Whip's Rotor Detacher v1 - 3/26/18
+// Whip's Rotor Detacher v2 - 3/27/18
 
 string rotorGroupName = "Detach";
 int numberToDetach = 0;
@@ -14,11 +14,11 @@ void Main(string arg)
         return;
     }
 
-    group.GetBlocksOfType(mechanicalConnections);
+    group.GetBlocksOfType(mechanicalConnections, x => x.Top != null);
 
     if (mechanicalConnections.Count == 0)
     {
-        Echo(">> Error: No rotors or pistons in group");
+        Echo(">> Error: No rotors or pistons in group with heads attached");
         return;
     }
 
