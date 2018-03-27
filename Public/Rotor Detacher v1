@@ -1,0 +1,43 @@
+// Whip's Rotor Detacher v1 - 3/26/18
+
+string rotorGroupName = "Detach";
+int numberToDetach = 0;
+
+List<IMyMechanicalConnectionBlock> mechanicalConnections = new List<IMyMechanicalConnectionBlock>();
+void Main(string arg)
+{
+    var group = GridTerminalSystem.GetBlockGroupWithName(rotorGroupName);
+
+    if (group == null)
+    {
+        Echo($">> Error: No group named '{rotorGroupName}'");
+        return;
+    }
+
+    group.GetBlocksOfType(mechanicalConnections);
+
+    if (mechanicalConnections.Count == 0)
+    {
+        Echo(">> Error: No rotors or pistons in group");
+        return;
+    }
+
+    if (string.IsNullOrWhiteSpace(arg))
+        return;
+
+    bool hasNumber = int.TryParse(arg, out numberToDetach);
+
+    if (!hasNumber)
+        return;
+
+    mechanicalConnections.Sort((x, y) => x.CustomName.CompareTo(y.CustomName));
+    numberToDetach = Math.Min(mechanicalConnections.Count, numberToDetach);
+
+    for (int i = 0; i < numberToDetach; i++)
+    {
+        var block = mechanicalConnections[i];
+        block.Detach();
+    }
+
+    Echo($"{numberToDetach} mechanical blocks detached");
+}
