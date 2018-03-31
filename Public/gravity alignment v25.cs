@@ -1,5 +1,5 @@
 /*
-/// Whip's Gravity Alignment Systems v24 - revision: 1/16/18 ///    
+/// Whip's Gravity Alignment Systems v25 - revision: 3/31/18 ///    
 
 Written by Whiplash141    
 */
@@ -16,6 +16,7 @@ const string shipName = "\n         [SHIP NAME GOES HERE]"; //(Optional) Name of
 bool shouldAlign = true; //If the script should attempt to stabalize by default
 bool referenceOnSameGridAsProgram = true; //if true, only searches for reference blocks on
                                           //the same grid as the program block (should help with docking small vessels)
+bool useArtificialGravity = false;
 
 const double angleTolerance = 0; //How many degrees the code will allow before it overrides user control
 
@@ -160,7 +161,7 @@ void AlignWithGravity()
 
     //---Get gravity vector    
     var referenceOrigin = referenceBlock.GetPosition();
-    var gravityVec = referenceBlock.GetNaturalGravity();
+    var gravityVec = useArtificialGravity ? referenceBlock.GetArtificialGravity() : referenceBlock.GetNaturalGravity();
     var gravityVecLength = gravityVec.Length();
     gravityMagnitudeString = Math.Round(gravityVecLength, 2).ToString() + " m/s²";
     if (gravityVec.LengthSquared() == 0)
