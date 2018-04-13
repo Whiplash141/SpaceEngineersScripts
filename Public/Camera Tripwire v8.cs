@@ -1,5 +1,5 @@
 /*
-/// Whip's Raycast Tripwire Code v7 - 12/17/17 ///
+/// Whip's Raycast Tripwire Code v8 - 4/12/18 ///
 _____________________________________________________________________________________________________
 ///DESCRIPTION///
 
@@ -42,17 +42,17 @@ double currentTimeElapsed = 0;
 
 void Main(string argument, UpdateType update)
 {
-    if (argument.ToLower().Equals("activate"))
+    if (argument.Equals("activate", StringComparison.OrdinalIgnoreCase))
     {
         Runtime.UpdateFrequency = UpdateFrequency.Update1;
     }
-    
+
     if ((update & UpdateType.Update1) == 0) //does not contain update1 flag
         return;
-    
+
     if (currentTimeElapsed < minumumArmTime)
     {
-        currentTimeElapsed += 1.0/60.0;
+        currentTimeElapsed += 1.0 / 60.0;
         Echo($"Arming... \nTime Left: {minumumArmTime - currentTimeElapsed}");
         return;
     }
@@ -80,12 +80,12 @@ void Main(string argument, UpdateType update)
             Echo("No target detected");
             continue;
         }
-        else if (ignorePlanetSurface && targetInfo.Type.ToString() == "Planet")
+        else if (ignorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet)
         {
             Echo("Planet detected\nIgnoring...");
             continue;
         }
-        else if(ignoreFriends && (targetInfo.Relationship == MyRelationsBetweenPlayerAndBlock.FactionShare || targetInfo.Relationship == MyRelationsBetweenPlayerAndBlock.Owner))
+        else if (ignoreFriends && (targetInfo.Relationship == MyRelationsBetweenPlayerAndBlock.FactionShare || targetInfo.Relationship == MyRelationsBetweenPlayerAndBlock.Owner))
         {
             Echo("Friendly detected\nIgnoring...");
             continue;
@@ -111,12 +111,12 @@ void Detonate()
     GridTerminalSystem.GetBlocksOfType(warheads);
     foreach (var thisWarhead in warheads)
     {
-        thisWarhead.SetValue<bool>("Safety", true);
+        thisWarhead.IsArmed = true;
 
         if (thisWarhead.CustomName.ToLower().Contains("start"))
-            thisWarhead.ApplyAction("StartCountdown");
+            thisWarhead.StartCountdown();
         else
-            thisWarhead.ApplyAction("Detonate");
+            thisWarhead.Detonate();
     }
 }
 
@@ -124,8 +124,8 @@ void Trigger()
 {
     var timers = new List<IMyTimerBlock>();
     GridTerminalSystem.GetBlocksOfType(timers, block => block.CustomName.Contains(timerName));
-    foreach (IMyWarhead thisTimer in timers)
+    foreach (IMyTimerBlock thisTimer in timers)
     {
-        thisTimer.ApplyAction("TriggerNow");
+        thisTimer.Trigger();
     }
 }
