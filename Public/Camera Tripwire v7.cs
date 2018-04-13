@@ -17,13 +17,9 @@ ________________________________________________________________________________
 ///INSTRUCTIONS///
 
 1.) Place this code in a program block
-2.) Make a timer block with the actions:
-    - Trigger Now itself
-    - Start itself
-    - Run this program
-3.) Add "Tripwire" into the name of your camera
-4.) (Optional): Add "Tripwire" to the name of any timer you want triggered when the tripwire is tripped
-5.) Trigger the timer to begin the arming sequence
+2.) Add "Tripwire" into the name of your camera
+3.) (Optional): Add "Tripwire" to the name of any timer you want triggered when the tripwire is tripped
+4.) Run the code with the argument "activate" to begin the arming sequence
 
 */
 
