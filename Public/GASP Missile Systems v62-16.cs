@@ -203,7 +203,7 @@ PID yawPID;
 double max_distance = 10000; //static b/c we change it on kill command 
 const double degToRad = Math.PI / 180;
 const double radToDeg = 180 / Math.PI;
-const double max_time_to_guide = 300; //in seconds  
+const double max_time_to_guide = 150; //in seconds  
 
 Program()
 {
