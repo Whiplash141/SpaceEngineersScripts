@@ -67,6 +67,7 @@ void SteerDrone()
     if (targetingTurrets.Count == 0)
     {
         Echo("No targets detected...");
+        FireWeapons(fixedGuns, false);
         return;
     }
 
