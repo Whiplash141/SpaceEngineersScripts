@@ -13,7 +13,7 @@ Instructions:
 const string droneGroupName = "Drone Blocks";
 const double fixedWeaponMuzzleVelocity = 400; // m/s
 
-const double kP = 2;
+const double kP = 5;
 const double kI = 0;
 const double kD = 0.1;
 
