@@ -13,6 +13,7 @@ int currentFrame = 0;
 int releaseIndex = 0;
 bool shouldTrigger = false;
 List<IMyTerminalBlock> releaseBlocks = new List<IMyTerminalBlock>();
+List<IMyWarhead> warheads = new List<IMyWarhead>();
 
 void Main(string arg, UpdateType updateSource)
 {
@@ -23,6 +24,7 @@ void Main(string arg, UpdateType updateSource)
             currentFrame = framesBetweenReleases;
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
             shouldTrigger = true;
+            ArmWarheads();
         }
         else
         {
@@ -58,6 +60,8 @@ bool GetBlocks()
     }
 
     group.GetBlocks(releaseBlocks, x => x is IMyMotorStator || x is IMyShipConnector || x is IMyShipMergeBlock);
+    
+    group.GetBlocksOfType(warheads);
 
     if (releaseBlocks.Count == 0)
     {
@@ -114,5 +118,13 @@ void ResetReleaseBlocks()
         var connector = block as IMyShipConnector;
         if (connector != null)
             connector.Connect();
+    }
+}
+
+void ArmWarheads()
+{
+    foreach (var block in warheads)
+    {
+        block.IsArmed = true;
     }
 }
