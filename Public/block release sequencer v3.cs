@@ -64,6 +64,8 @@ bool GetBlocks()
         Echo($"Error: No merges, connectors, or rotors found in '{releaseGroupName}' group");
         return false;
     }
+    
+    releaseBlocks.Sort((a, b) => a.CustomName.CompareTo(b.CustomName));
 
     return true;
 }
