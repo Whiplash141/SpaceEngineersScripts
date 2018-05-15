@@ -99,7 +99,7 @@ void SequenceRelease()
         Runtime.UpdateFrequency = UpdateFrequency.None;
         releaseIndex = 0;
         shouldTrigger = false;
-        ResetReleaseBlocks();
+        //ResetReleaseBlocks();
     }
 }
 
