@@ -1,8 +1,15 @@
 /*
 / //// / Whip's Warhead Airburst Script / //// /
 
-Instructions:
+Description:
+This code will constantly check a remote's altitude to determine if it
+should detonate attached warheads.
 
+Instructions:
+1. Put warheads and a single remote control on each bomb
+2. Put this program on each bomb
+3. Run this program with the argument 'arm' to arm the bombs
+4. (Optional) Run this program with 'safety' to disarm the bombs
 
 */
 
