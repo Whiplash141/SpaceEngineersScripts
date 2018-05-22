@@ -1,5 +1,5 @@
 /*
-/// Whip's Gravity Alignment Systems v25 - revision: 3/31/18 ///    
+/// Whip's Gravity Alignment Systems v25 - revision: 5/22/18 ///    
 
 Written by Whiplash141    
 */
@@ -10,13 +10,13 @@ Written by Whiplash141
 ==============================  
 */
 
+const string gyroExcludeName = "Exclude";
 const string statusScreenName = "Alignment"; //(Optional) Name of status screen
 const string shipName = "\n         [SHIP NAME GOES HERE]"; //(Optional) Name of your ship
 
 bool shouldAlign = true; //If the script should attempt to stabalize by default
 bool referenceOnSameGridAsProgram = true; //if true, only searches for reference blocks on
                                           //the same grid as the program block (should help with docking small vessels)
-bool useArtificialGravity = false;
 
 const double angleTolerance = 0; //How many degrees the code will allow before it overrides user control
 
@@ -36,12 +36,7 @@ const double timeLimit = 1 / updatesPerSecond;
 double angleRoll = 0;
 double anglePitch = 0;
 double timeElapsed = 0;
-double timeFlash = 0;
-
-
 bool canTolerate = true;
-bool flashOn = true;
-
 string stableStatus = ">> Disabled <<";
 string gravityMagnitudeString;
 string overrideStatus;
@@ -54,13 +49,20 @@ PID rollPID;
 
 Program()
 {
-    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    Runtime.UpdateFrequency = UpdateFrequency.Once;
+    Echo("If you can read this\nclick the 'Run' button!");
     pitchPID = new PID(proportionalConstant, 0, derivativeConstant, -10, 10, timeLimit);
     rollPID = new PID(proportionalConstant, 0, derivativeConstant, -10, 10, timeLimit);
 }
 
 void Main(string arg, UpdateType updateSource)
 {
+    //------------------------------------------
+    //This is a bandaid
+    if ((Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0)
+        Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    //------------------------------------------
+    
     timeElapsed += Runtime.TimeSinceLastRun.TotalSeconds;
 
     switch (arg.ToLower())
@@ -151,7 +153,7 @@ void AlignWithGravity()
 
     //---Populate gyro list
     gyros.Clear();
-    GridTerminalSystem.GetBlocksOfType(gyros, block => block.CubeGrid == referenceBlock.CubeGrid);
+    GridTerminalSystem.GetBlocksOfType(gyros, block => block.CubeGrid == referenceBlock.CubeGrid && !block.CustomName.Contains(gyroExcludeName));
 
     if (gyros.Count == 0)
     {
@@ -161,7 +163,7 @@ void AlignWithGravity()
 
     //---Get gravity vector    
     var referenceOrigin = referenceBlock.GetPosition();
-    var gravityVec = useArtificialGravity ? referenceBlock.GetArtificialGravity() : referenceBlock.GetNaturalGravity();
+    var gravityVec = referenceBlock.GetNaturalGravity();
     var gravityVecLength = gravityVec.Length();
     gravityMagnitudeString = Math.Round(gravityVecLength, 2).ToString() + " m/s²";
     if (gravityVec.LengthSquared() == 0)
@@ -485,4 +487,5 @@ public class PID
 * Fixed angles spazzing out
 * Added yaw control while safety override is active - v23
 * Removed the need for a name tag for the control seat - v24
+* Added gyro exclude name tag - v25
 */
