@@ -110,7 +110,7 @@ void FreefallPrediction()
     
     angleDiff = Math.Round(angleDiff, 2) * Math.Sign(leftVec.Dot(rotor.WorldMatrix.Up));
     
-    rotor.TargetVelocityRPM = 20f * (float)angleDiff;
+    rotor.TargetVelocityRPM = 10f * (float)angleDiff;
     
     WriteToTextPanel($"Altitude: {altitude:N2}\nLength:{displacementVec.Length():N2}\nVertical Disp: {verticalDistance:N2}\nHorizontalDisp: {horizontalDistance:N2}\nIteratons: {numberOfIterations}\n Drop angle: {MathHelper.ToDegrees(gunsightAngle):N2}°");
 }
