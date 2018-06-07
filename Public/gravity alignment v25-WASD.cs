@@ -211,7 +211,7 @@ void AlignWithGravity()
     double pitchSpeed = pitchPID.Control(anglePitch); //Math.Round(anglePitch * proportionalConstant + (anglePitch - lastAnglePitch) / timeElapsed * derivativeConstant, 2);                                                                                                                                                            //w.H]i\p
 
     //var mouseInput = referenceBlock.RotationIndicator;
-    var inputVec = controller.MoveIndicator;
+    var inputVec = referenceBlock.MoveIndicator;
     
     //rollSpeed = rollSpeed / gyros.Count;
     //pitchSpeed = pitchSpeed / gyros.Count;
