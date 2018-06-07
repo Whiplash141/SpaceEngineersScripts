@@ -24,6 +24,8 @@ const double angleTolerance = 0; //How many degrees the code will allow before i
 const double proportionalConstant = 2;
 const double derivativeConstant = .5;
 
+const double yawSpeedModifier = 1;
+
 /*  
 ====================================================  
     Don't touch anything below this <3 - Whiplash  
@@ -231,7 +233,7 @@ void AlignWithGravity()
     if (shouldAlign && !canTolerate)
     {
         //do gyros
-        ApplyGyroOverride(pitchSpeed, inputVec.X, -rollSpeed, gyros, referenceBlock);
+        ApplyGyroOverride(pitchSpeed, inputVec.X * yawSpeedModifier, -rollSpeed, gyros, referenceBlock);
 
         overrideStatus = $"\n\n           SAFETY OVERRIDE ACTIVE"; //\nYaw : {yawSpeed}";
     }
@@ -472,4 +474,6 @@ public class PID
 * Added yaw control while safety override is active - v23
 * Removed the need for a name tag for the control seat - v24
 * Added gyro exclude name tag - v25
+* Changed code to yaw with A and D for Extevious :) - v25 WASD
+* Added yaw speed modifier - v25 WASD
 */
