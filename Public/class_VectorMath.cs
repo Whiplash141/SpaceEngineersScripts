@@ -47,15 +47,13 @@ class VectorMath
     }
 
     /// <summary>
-    /// Computes angle between 2 vectors
+    /// Computes angle between 2 vectors in radians
     /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b, bool useSmallestAngle = false) //returns radians
+    public static double AngleBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return 0;
-        else if (useSmallestAngle)
-            return Math.Acos(MathHelper.Clamp(Math.Abs(a.Dot(b)) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+        
+        return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
     }
 }
