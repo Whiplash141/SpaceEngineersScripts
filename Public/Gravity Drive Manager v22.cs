@@ -28,7 +28,7 @@ Arguments
 ________________________________________________
 Author's Notes
 
-    This code was written pon request of my friend Avalash for his big cool carrier thing. I've decided to polish this code
+    This code was written upon request of my friend Avalash for his big cool carrier thing. I've decided to polish this code
     and release it to the public. Leave any questions, comments, or converns on the workshop page!
 
 - Whiplash141
