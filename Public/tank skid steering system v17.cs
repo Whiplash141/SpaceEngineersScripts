@@ -37,7 +37,7 @@ void Main(string argument, UpdateType updateType)
     //implied else
 
     //currentTime += 1.0/6.0;
-    timeSinceRefresh += 1.0/6.0;
+    timeSinceRefresh += (1.0 / 0.96) * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0);
 
     if (!isSetup || timeSinceRefresh >= refreshInterval)
     {
