@@ -1,6 +1,17 @@
 class VectorMath
 {
     /// <summary>
+    ///  Normalizes a vector only if it is non-zero
+    /// </summary?
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+    
+    /// <summary>
     /// Reflects vector a over vector b with an optional rejection factor
     /// </summary>
     public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
@@ -15,7 +26,7 @@ class VectorMath
     /// </summary>
     public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
     {
-        if (Vector3D.IsZero(b))
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return Vector3D.Zero;
 
         return a - a.Dot(b) / b.LengthSquared() * b;
@@ -26,7 +37,7 @@ class VectorMath
     /// </summary>
     public static Vector3D Projection(Vector3D a, Vector3D b)
     {
-        if (Vector3D.IsZero(b))
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return Vector3D.Zero;
 
         return a.Dot(b) / b.LengthSquared() * b;
@@ -37,7 +48,7 @@ class VectorMath
     /// </summary>
     public static double ScalarProjection(Vector3D a, Vector3D b)
     {
-        if (Vector3D.IsZero(b))
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return 0;
 
         if (Vector3D.IsUnit(ref b))
@@ -47,13 +58,24 @@ class VectorMath
     }
 
     /// <summary>
-    /// Computes angle between 2 vectors in radians
+    /// Computes angle between 2 vectors
     /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
+    public static double AngleBetween(Vector3D a, Vector3D b) //returns radians
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return 0;
-        
-        return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+        else
+            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+    }
+    
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b, bool useSmallestAngle = false) //returns radians
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
     }
 }
