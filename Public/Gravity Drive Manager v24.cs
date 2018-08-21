@@ -1,6 +1,6 @@
 
 /*
-/ //// / Whip's Directional Gravity Drive Control Script v23 - 8/20/18 / //// /
+/ //// / Whip's Directional Gravity Drive Control Script v24 - 8/20/18 / //// /
 ________________________________________________
 Description:
 
