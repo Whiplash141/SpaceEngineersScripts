@@ -249,7 +249,7 @@ bool GrabBlocks()
         critFailure = true;
     }
 
-    if (gravityGens.Count == 0)
+    if (gravityGens.Count == 0 && otherGens.Count == 0)
     {
         Echo($"Critical Error: No gravity generators found in the {gravityDriveGroupName} group");
         critFailure = true;
