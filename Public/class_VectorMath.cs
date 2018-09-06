@@ -2,7 +2,7 @@ class VectorMath
 {
     /// <summary>
     ///  Normalizes a vector only if it is non-zero
-    /// </summary?
+    /// </summary>
     public static Vector3D SafeNormalize(Vector3D a)
     {
         if (Vector3D.IsZero(a))
