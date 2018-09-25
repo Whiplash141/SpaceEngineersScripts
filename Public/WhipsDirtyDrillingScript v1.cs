@@ -15,9 +15,12 @@ List<IMyTerminalBlock> _groupBlocks = new List<IMyTerminalBlock>();
 List<IMyPistonBase> _pistons = new List<IMyPistonBase>();
 List<IMyShipDrill> _drills = new List<IMyShipDrill>();
 List<IMyTextPanel> _textPanels = new List<IMyTextPanel>();
+RunningSymbol _runningSymbol = new RunningSymbol();
 
 void Main(string argument, UpdateType updateSource)
 {
+    Echo(_runningSymbol.Iterate());
+            
     #region Argument Handling
     switch (argument.ToLowerInvariant())
     {
@@ -178,5 +181,51 @@ void WriteToTextPanels(List<IMyTextPanel> textPanels, double currentExtension, d
         block.WritePublicText(output);
         if (!block.ShowText)
             block.ShowPublicTextOnScreen();
+    }
+}
+
+public class RunningSymbol
+{
+    int _runningSymbolVariant = 0;
+    int _runningSymbolCount = 0;
+    int _increment = 1;
+    string[] _runningSymbols = new string[] { "−", "\\", "|", "/" };
+
+    public RunningSymbol() { }
+
+    public RunningSymbol(int increment)
+    {
+        _increment = increment;
+    }
+
+    public RunningSymbol(string[] runningSymbols)
+    {
+        if (runningSymbols.Length != 0)
+            _runningSymbols = runningSymbols;
+    }
+
+    public RunningSymbol(int increment, string[] runningSymbols)
+    {
+        _increment = increment;
+        if (runningSymbols.Length != 0)
+            _runningSymbols = runningSymbols;
+    }
+
+    public string Iterate(int ticks = 1)
+    {
+        if (_runningSymbolCount >= _increment)
+        {
+            _runningSymbolCount = 0;
+            _runningSymbolVariant++;
+            _runningSymbolVariant = _runningSymbolVariant++ % _runningSymbols.Length;
+        }
+        _runningSymbolCount += ticks;
+
+        return this.ToString();
+    }
+
+    public override string ToString()
+    {
+        return _runningSymbols[_runningSymbolVariant];
     }
 }
