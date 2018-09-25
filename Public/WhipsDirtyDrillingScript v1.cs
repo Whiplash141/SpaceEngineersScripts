@@ -28,14 +28,11 @@ void Main(string argument, UpdateType updateSource)
             break;
         case "stop":
             _shouldDrill = false;
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
             break;
         case "toggle":
             _shouldDrill = !_shouldDrill;
-            if (_shouldDrill)
-            {
-                Runtime.UpdateFrequency = UpdateFrequency.Update10;
-                _isSetup = false;
-            }
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
             break;
     }
     #endregion
