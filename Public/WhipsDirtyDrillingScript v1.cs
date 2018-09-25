@@ -172,7 +172,7 @@ void GetPistonExtensions(List<IMyPistonBase> pistons, out double currentExtensio
 void WriteToTextPanels(List<IMyTextPanel> textPanels, double currentExtension, double maxExtension, double minExtension, bool shouldDrill)
 {
     string status = shouldDrill ? "Drilling..." : currentExtension == maxExtension ? "Retracted" : "Retracting...";
-    string progress = shouldDrill ? $"{currentExtension / maxExtension:n0}%" : $"{(maxExtension - currentExtension) / (maxExtension - minExtension):n0}%";
+    string progress = shouldDrill ? $"{(float)currentExtension / maxExtension * 100:n0}%" : $"{(float)(maxExtension - currentExtension) / (maxExtension - minExtension) * 100:n0}%";
 
     string output = $"Status: {status}\nProgress: {currentExtension:000.00} meters ({progress})";
 
