@@ -19,7 +19,7 @@ List<IMyTextPanel> _textPanels = new List<IMyTextPanel>();
 void Main(string argument, UpdateType updateSource)
 {
     #region Argument Handling
-    switch (argument.ToUpperInvariant())
+    switch (argument.ToLowerInvariant())
     {
         case "start":
             _shouldDrill = true;
