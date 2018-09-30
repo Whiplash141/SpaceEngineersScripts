@@ -39,7 +39,7 @@ void Main(string arg, UpdateType updateType)
     Vector3D currentVector = GetVectorFromRotorAngle(rotor.Angle, rotor);
     
     double angularError = VectorAngleBetween(desiredVector, currentVector);
-    angularError *= Math.Sign(Vector3D.Dot(rotor.WorldMatrix.Up, currentVector.Cross(desiredVector)));
+    angularError *= -Math.Sign(Vector3D.Dot(rotor.WorldMatrix.Up, currentVector.Cross(desiredVector)));
     double velocity = _pid.Control(angularError);
 
     rotor.TargetVelocityRPM = (float)velocity;
