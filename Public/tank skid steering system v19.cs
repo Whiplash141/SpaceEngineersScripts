@@ -4,8 +4,8 @@ const string ignoreGyroNameTag = "Ignore";
 const float driveFriction = 50f;
 const float turnFriction = 10f;
 const float rotationSpeed = 1f;
-const float driveGyroPower = 1f;
-const float turnGyroPower = 0.1f;
+const float driveGyroPower = 0.1f;
+const float turnGyroPower = 1f;
 bool invertSteerWhenReversing = true;
 bool useGyros = true;
 
