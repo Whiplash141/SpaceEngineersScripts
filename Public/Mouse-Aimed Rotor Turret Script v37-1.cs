@@ -488,16 +488,15 @@ public class RotorTurret
         //thisProgram.Echo($"shouldStabilizeAz: {shouldStabilizeAz}\nazimuthStabilizationVelocity: {azimuthStabilizationVelocity}\nelevationStabilizationVelocity: {elevationStabilizationVelocity}");
 
         //apply rotor velocities
-        double finalAzimuthSpeed = (float)adjustedAzimuthSpeed + (float)azimuthStabilizationVelocity;
-        double finalElevationSpeed = (float)adjustedElevationSpeed + (float)elevationStabilizationVelocity
+        float finalAzimuthSpeed = (float)adjustedAzimuthSpeed + (float)azimuthStabilizationVelocity;
+        float finalElevationSpeed = (float)adjustedElevationSpeed + (float)elevationStabilizationVelocity;
         
         azimuthRotor.TargetVelocityRPM = finalAzimuthSpeed;
         elevationRotor.TargetVelocityRPM = finalElevationSpeed;
         
         azimuthRotor.Enabled = true;
         elevationRotor.Enabled = true;
-        
-        
+
         //gyro assistance
         GetListBlocksOnGrid(azimuthRotor.TopGrid, gyros, gridGyros);
         ApplyGyroOverride(0, azimuthSpeed, 0, gridGyros, shipMatrix);
