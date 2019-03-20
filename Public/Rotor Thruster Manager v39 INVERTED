@@ -1,0 +1,428 @@
+/*   
+/ //// / Whip's Rotor Thruster Manager v39 - INVERTED - 03/19/2019 / //// /  
+MODIFIED TO ONLY INCLUDE TAGGED THRUSTERS
+
+MADE BY REQUEST FOR BOZ
+/________________________________________________  
+Description:  
+
+    This code allows you to control your thrusters that are attached through rotors, connectors, or pistone!  
+________________________________________________  
+How do I use this?  
+
+    1) Name a seat or remote on the main grid with the name tag "Reference"  
+
+    2) Place a program block with this code  
+
+    3) Attach your off-grid thrusters however you like.
+    
+    4) NEW: Add "Include" to the name of any subgrid thruster you want controlled
+
+    5) Enjoy!  
+
+________________________________________________
+Arguments
+
+"on":
+    Toggles program control of rotor thrusters on
+
+"off":
+    Toggles program control of rotor thrusters off
+
+"toggle":
+    Toggles program control of rotor thrusters on/off
+
+"dampeners_on":
+    Toggles dampener function of rotor thrust on
+
+"dampeners_off":
+    Toggles dampener function of rotor thrust off
+
+"dampeners_toggle" or "dampeners_switch":
+    Toggles dampener function of rotor thrust on/off
+
+________________________________________________  
+Author's Notes  
+
+    I hope y'all enjoy this code. I hope it makes VTOL and vector thrust craft more feasible :)  
+
+- Whiplash141   
+*/
+
+//-----------------------------------------------  
+//         CONFIGURABLE VARIABLES 
+//----------------------------------------------- 
+
+// Whether the program should look across connectors to detect rotor thrust
+bool detectBlocksOverConnectors = false;
+
+//Name of the reference control seat
+const string controlSeatNameTag = "Reference";
+
+//Name tag of thrusters that the code will ignore
+const string includedThrustNameTag = "Include";
+
+//If the rotor thrusters will be treated as inertial dampeners
+bool useRotorThrustAsInertialDampeners = true;
+
+//This controls how responsive the dampeners are. Higher numbers mean quicker response but
+//can also lead to oscillations
+const double dampenerScalingFactor = 50;
+
+//Max angle (in degrees) that a thruster can be off axis of input direction and still
+//receive maximum thrust output
+const double fullBurnToleranceAngle = 30;
+
+//Max angle (in degrees) that a thruster can deviate from the desired travel direction 
+//and still be controlled with movement keys
+const double maxThrustAngle = 90;
+
+//Minimum angle (in degrees) between a thruster's dampening direction and desired move direction
+//that is allowed for dampener function
+const double minDampeningAngle = 75;
+
+//-----------------------------------------------  
+//         No touching below this line  
+//-----------------------------------------------  
+const double updatesPerSecond = 10;
+//Number of updates per second  
+const double timeMaxCycle = 1 / updatesPerSecond;
+const double runtimeToRealTime = 1.0 / 0.96;
+double timeCurrentCycle = 0;
+const double refreshInterval = 10;
+double refreshTime = 141;
+bool isSetup = false;
+bool turnOn = true;
+
+double maxThrustDotProduct = Math.Cos(maxThrustAngle * Math.PI / 180);
+double minDampeningDotProduct = Math.Cos(minDampeningAngle * Math.PI / 180);
+double fullBurnDotProduct = Math.Cos(fullBurnToleranceAngle * Math.PI / 180);
+
+List<IMyShipController> referenceList = new List<IMyShipController>();
+List<IMyThrust> offGridThrust = new List<IMyThrust>();
+List<IMyThrust> onGridThrust = new List<IMyThrust>();
+
+IMyShipController thisReferenceBlock = null;
+
+
+Program()
+{
+    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    //Echo("If this code is not running\nclick the 'Run' button!");
+}
+
+void Main(string argument, UpdateType updateType)
+{
+    //------------------------------------------
+    //This is a bandaid
+    //if ((Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0)
+    //    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    //------------------------------------------
+
+    if ((updateType & (UpdateType.Trigger | UpdateType.Terminal | UpdateType.Script)) != 0) //if not in an update loop
+        ProcessArgument(argument);
+
+    //if ((updateType & UpdateType.Update1) == 0) //only runs bulk of logic when triggered by itself
+    //    return;
+
+    var lastRuntime = runtimeToRealTime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0);
+    timeCurrentCycle += lastRuntime;
+    refreshTime += lastRuntime;
+
+    if (!isSetup || refreshTime >= refreshInterval)
+    {
+        isSetup = GrabBlocks();
+        refreshTime = 0;
+    }
+
+    if (!isSetup)
+        return;
+
+    if (timeCurrentCycle >= timeMaxCycle)
+    {
+        try
+        {
+            Echo("WMI Rotor Thruster\nManager... " + RunningSymbol() + "\n");
+
+            //Gets reference block that is under control 
+            thisReferenceBlock = GetControlledShipController(referenceList);
+            Echo($"Next block refresh in {Math.Max(0, refreshInterval - refreshTime):N0} seconds\n");
+
+            Echo($"Total Rotor Thrusters: {offGridThrust.Count}");
+
+            int workingThrusters = offGridThrust.Count(x => x.IsWorking);
+            Echo($"Active Rotor Thrusters: {workingThrusters}");
+
+            var shipSpeed = thisReferenceBlock.GetShipSpeed();
+
+            var travelVec = thisReferenceBlock.GetShipVelocities().LinearVelocity;
+            if (travelVec.LengthSquared() > 0)
+            {
+                travelVec = Vector3D.Normalize(travelVec);
+            }
+
+            //Desired travel vector construction
+            var inputVec = thisReferenceBlock.MoveIndicator; //raw input vector     
+            var desiredDirection = Vector3D.TransformNormal(inputVec, thisReferenceBlock.WorldMatrix); //world relative input vector
+            if (desiredDirection.LengthSquared() > 0)
+            {
+                desiredDirection = Vector3D.Normalize(desiredDirection);
+            }
+
+            bool dampenersOn = thisReferenceBlock.DampenersOverride;
+            if (onGridThrust.Count == 0)
+            {
+                dampenersOn = useRotorThrustAsInertialDampeners;
+            }
+
+            string codeStatus = turnOn ? "Enabled" : "Disabled";
+            string dampenerStatus = dampenersOn ? "Enabled" : "Disabled";
+
+            Echo($"Code status: {codeStatus}\nDampeners: {dampenerStatus}");
+
+            if (dampenersOn)
+                CancelGravity(offGridThrust, onGridThrust, thisReferenceBlock);
+
+            ApplyThrust(offGridThrust, travelVec, shipSpeed, desiredDirection, dampenersOn, turnOn);
+            timeCurrentCycle = 0;
+        }
+        catch
+        {
+            isSetup = false;
+        }
+    }
+}
+
+void ProcessArgument(string arg)
+{
+    switch (arg.ToLower())
+    {
+        case "on":
+            turnOn = true;
+            break;
+        case "off":
+            turnOn = false;
+            break;
+        case "toggle":
+            turnOn = !turnOn;
+            break;
+        case "dampeners_on":
+            useRotorThrustAsInertialDampeners = true;
+            break;
+        case "dampeners_off":
+            useRotorThrustAsInertialDampeners = false;
+            break;
+        case "dampeners_toggle":
+        case "dampeners_switch":
+            useRotorThrustAsInertialDampeners = !useRotorThrustAsInertialDampeners;
+            break;
+    }
+}
+
+bool ShouldGetBlock(IMyTerminalBlock block)
+{
+    if (detectBlocksOverConnectors)
+        return true;
+    else
+        return Me.IsSameConstructAs(block);
+}
+
+bool GrabBlocks()
+{
+    GridTerminalSystem.GetBlocksOfType(referenceList, x => ShouldGetBlock(x) && x.CustomName.ToLower().Contains(controlSeatNameTag.ToLower()));
+
+    if (referenceList.Count == 0)
+    {
+        Echo($">> Error: No remote or control seat with name\ntag '{controlSeatNameTag}'");
+        return false;
+    }
+
+    GridTerminalSystem.GetBlocksOfType(offGridThrust, x => x.CubeGrid != referenceList[0].CubeGrid && ShouldGetBlock(x) && x.CustomName.ToLower().Contains(includedThrustNameTag.ToLower()));
+
+    if (offGridThrust.Count == 0)
+    {
+        Echo(">> Error: No off grid thrusters found");
+        return false;
+    }
+
+    //Get number of on-grid thrusters to determine if dampeners should be turned on
+    GridTerminalSystem.GetBlocksOfType(onGridThrust, block => block.CubeGrid == referenceList[0].CubeGrid);
+    if (onGridThrust.Count == 0)
+    {
+        Echo("> Info: No on grid thrusters found");
+    }
+
+    return true;
+}
+
+IMyShipController GetControlledShipController(List<IMyShipController> SCs)
+{
+    foreach (IMyShipController thisController in SCs)
+    {
+        if (thisController.IsUnderControl && thisController.CanControlShip)
+            return thisController;
+    }
+
+    return SCs[0];
+}
+
+List<IMyThrust> upwardThrusters = new List<IMyThrust>();
+
+const double sqrt2Inv = 1 / MathHelper.Sqrt2;
+
+void CancelGravity(List<IMyThrust> offGridThrusters, List<IMyThrust> onGridThrusters, IMyShipController controller)
+{
+    var gravityVec = controller.GetNaturalGravity();
+
+    if (Vector3D.IsZero(gravityVec))
+    {
+        foreach (var block in offGridThrusters)
+        {
+            SetThrusterOverride(block, 0f); //.0001f
+        }
+        return;
+    }
+
+    upwardThrusters.Clear();
+
+    var gravityVecNorm = Vector3D.Normalize(gravityVec);
+    var mass = controller.CalculateShipMass().PhysicalMass;
+    var velocityDot = gravityVecNorm.Dot(controller.GetShipVelocities().LinearVelocity);
+    var num = velocityDot <= -1 ? 0 : velocityDot <= 0 ? .95 : 1; //For whatever reason, doing the math yields too much thrust in practice... So... fudge factor!
+                                                                  //Echo($"num: {num}");
+    var requiredHoverForce = mass * gravityVec.Length() * num;
+    //Echo($"requiredHoverForce: {requiredHoverForce/num:n1}");
+
+    double maxThrustSum = 0;
+    foreach (var block in offGridThrusters)
+    {
+        if (!block.IsWorking)
+            continue;
+
+        var dot = block.WorldMatrix.Forward.Dot(gravityVecNorm);
+        if (dot > sqrt2Inv && dot < 1)
+        {
+            upwardThrusters.Add(block);
+            maxThrustSum += dot * block.MaxEffectiveThrust;
+        }
+        else
+        {
+            SetThrusterOverride(block, 0f); //this should be sorted by the next method
+        }
+    }
+
+    foreach (var block in onGridThrusters)
+    {
+        if (!block.IsWorking)
+            continue;
+
+        var dot = block.WorldMatrix.Forward.Dot(gravityVecNorm);
+        if (dot > 0)
+            requiredHoverForce -= dot * block.CurrentThrust;
+    }
+
+    requiredHoverForce = Math.Max(requiredHoverForce, 0);
+    //Echo($"requiredHoverForce: {requiredHoverForce:n1}");
+
+    //Echo($"requiredHoverForce: {requiredHoverForce:N1}" );
+    //Echo($"maxThrustSum: {maxThrustSum:N1}" );
+
+    var thrustProportion = requiredHoverForce / maxThrustSum;
+    Echo($"Hover Thrust Output: {(thrustProportion * 100):N1}%");
+    foreach (var block in upwardThrusters)
+    {
+        SetThrusterOverride(block, 100f * (float)thrustProportion);
+    }
+}
+
+void ApplyThrust(List<IMyThrust> thrusters, Vector3D travelVec, double speed, Vector3D desiredDirectionVec, bool dampenersOn, bool turnOn)
+{
+    if (!turnOn)
+    {
+        foreach (IMyThrust thisThrust in thrusters)
+        {
+            SetThrusterOverride(thisThrust, 0.0001f);
+        }
+        return;
+    }
+
+    foreach (IMyThrust thisThrust in thrusters)
+    {
+        var thrustDirection = thisThrust.WorldMatrix.Forward; //gets the direction that the thruster flame fires
+        float scale = -(float)thrustDirection.Dot(desiredDirectionVec); //projection of the thruster's direction onto the desired direction 
+
+        if (scale > maxThrustDotProduct)
+        {
+            scale /= (float)fullBurnDotProduct; //scales it so that the thruster output ramps down after the fullBurnToleranceAngle is exceeded
+
+            //Dampener approximations
+            var velocityInThrustDirection = thrustDirection.Dot(travelVec) * speed;
+            double targetOverride = 0;
+
+            //if (velocityInThrustDirection < 1)  
+            targetOverride = velocityInThrustDirection * dampenerScalingFactor;
+            //else  
+            //targetOverride = velocityInThrustDirection * Math.Abs(velocityInThrustDirection) * dampenerScalingFactor; 
+
+            if (dampenersOn)
+                SetThrusterOverride(thisThrust, (float)Math.Max(scale * 100f, targetOverride + GetThrusterOverride(thisThrust)));
+            else
+                SetThrusterOverride(thisThrust, (float)(scale * 100f));
+        }
+
+        //Dampener approximations
+        //Checks if :
+        // - dampeners are allowed
+        // - thruster is opposing the motion of the vessel
+        // - Checks if thruster is within the dampening angle tolerance
+        else if (dampenersOn && thrustDirection.Dot(travelVec) > 0 && thrustDirection.Dot(desiredDirectionVec) <= minDampeningDotProduct)
+        {
+            var velocityInThrustDirection = thrustDirection.Dot(travelVec) * speed;
+            double targetOverride = 0;
+
+            //if (velocityInThrustDirection < 1)  
+            targetOverride = velocityInThrustDirection * dampenerScalingFactor;
+            //else  
+            //targetOverride = velocityInThrustDirection * velocityInThrustDirection * dampenerScalingFactor; 
+
+            SetThrusterOverride(thisThrust, (float)targetOverride + GetThrusterOverride(thisThrust));
+        }
+        else //disables thruster
+        {
+            //thisThrust.Enabled = false;
+            if (!upwardThrusters.Contains(thisThrust) || thrustDirection.Dot(desiredDirectionVec) > minDampeningDotProduct || !dampenersOn)
+                SetThrusterOverride(thisThrust, 0.0001f);
+        }
+    }
+}
+
+void SetThrusterOverride(IMyThrust thruster, float overrideValue)
+{
+    thruster.ThrustOverridePercentage = overrideValue * 0.01f;
+    //thruster.Enabled = true;  
+}
+
+float GetThrusterOverride(IMyThrust thruster)
+{
+    return thruster.ThrustOverridePercentage * 100f;
+}
+
+//Whip's Running Symbol Method v8
+//•
+int runningSymbolVariant = 0;
+int runningSymbolCount = 0;
+const int increment = 1;
+string[] runningSymbols = new string[] { "−", "\\", "|", "/" };
+
+string RunningSymbol()
+{
+    if (runningSymbolCount >= increment)
+    {
+        runningSymbolCount = 0;
+        runningSymbolVariant++;
+        if (runningSymbolVariant >= runningSymbols.Length)
+            runningSymbolVariant = 0;
+    }
+    runningSymbolCount++;
+    return runningSymbols[runningSymbolVariant];
+}
