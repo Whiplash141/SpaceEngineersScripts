@@ -34,6 +34,7 @@ const double minimumTargetSize = 10;
 const double maximumLiveTime = -1; //seconds, -1 means infinite
 const bool ignorePlanetSurface = true; //if the code should ignore planet surfaces
 const bool ignoreFriends = false; //if the code should ignore friendlies
+const bool useWarheads = true;
 
 //===================================================================================================
 // DO NOT TOUCH ANYTHING BELOW // DO NOT TOUCH ANYTHING BELOW // DO NOT TOUCH ANYTHING BELOW //
@@ -115,6 +116,8 @@ void Main(string argument, UpdateType update)
 
 void Detonate()
 {
+    if (!useWarheads)
+        return;
     var warheads = new List<IMyWarhead>();
     GridTerminalSystem.GetBlocksOfType(warheads);
     foreach (var thisWarhead in warheads)
