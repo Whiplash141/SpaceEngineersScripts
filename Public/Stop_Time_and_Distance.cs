@@ -1,6 +1,7 @@
+
 #region In-game Script
 /*
-/ //// / Whip's Stop Time and Distance Script / //// /
+/ //// / Whip's Stop Distance Calculator / //// /
 */
 
 //-------------------------------------------------------------------------
@@ -8,8 +9,8 @@
 //-------------------------------------------------------------------------
 
 #region Fields
-const string DATE = "08/01/2019";
-const string VERSION = "7.2.2";
+const string DATE = "09/02/2019";
+const string VERSION = "7.2.1";
 const string TEXT_PANEL_NAME_TAG = "Stop Distance";
 
 readonly Scheduler scheduler;
@@ -19,15 +20,19 @@ readonly StringBuilder _textOutput = new StringBuilder();
 readonly List<IMyThrust> _thrusters = new List<IMyThrust>();
 readonly List<IMyShipController> _shipControllers = new List<IMyShipController>();
 readonly List<IMyTextPanel> _textPanels = new List<IMyTextPanel>();
-readonly ScheduledAction _setupAction;
+readonly ScheduledAction _setupActionTenSeconds;
 readonly Vector3D[] _baseDirection = new Vector3D[3]
 {
-    Vector3D.Right,
-    Vector3D.Up,
-    Vector3D.Backward,
+Vector3D.Right,
+Vector3D.Up,
+Vector3D.Backward,
 };
 
+readonly Dictionary<Vector3D, double> _thrustDirectionDict = new Dictionary<Vector3D, double>();
+readonly ThrustDirectionCalculator _thrustCalculator;
+
 IMyShipController _reference = null;
+ScheduledAction _setupAction = null;
 double _shipMass = 0;
 #endregion
 
@@ -36,12 +41,14 @@ Program()
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
     scheduler = new Scheduler(this);
-    scheduler.AddScheduledAction(CalculateStopParameters, 10);
+    scheduler.AddScheduledAction(CalculateStopParameters, 6);
     scheduler.AddScheduledAction(PrintEchos, 1);
-    _setupAction = new ScheduledAction(GrabBlocks, 0.1);
-    scheduler.AddScheduledAction(_setupAction);
-    
-    GrabBlocks();
+
+    _setupAction = new ScheduledAction(Setup, 0.1, true);
+    scheduler.AddQueuedAction(_setupAction);
+
+    _thrustCalculator = new ThrustDirectionCalculator(Me.CubeGrid, _thrusters);
+    Setup();
 }
 
 void Main(string arg, UpdateType updateSource)
@@ -56,7 +63,7 @@ void PrintEchos()
     Echo(_setupOutput.ToString());
 }
 
-void GrabBlocks()
+void Setup()
 {
     _setupOutput.Clear();
     _setupOutput.AppendLine("\nLast setup results: ");
@@ -70,6 +77,8 @@ void GrabBlocks()
      * to reduce iterations.
      */
     GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks);
+
+    _thrustCalculator.ThrusterList = _thrusters;
 
     bool setup = true;
     if (_shipControllers.Count == 0)
@@ -103,6 +112,8 @@ void GrabBlocks()
     {
         _setupOutput.AppendLine("> Setup successful!");
     }
+
+    scheduler.AddQueuedAction(_setupAction);
 }
 
 bool CollectBlocks(IMyTerminalBlock block)
@@ -114,6 +125,7 @@ bool CollectBlocks(IMyTerminalBlock block)
     if (thrust != null)
     {
         _thrusters.Add(thrust);
+
         return false;
     }
 
@@ -138,7 +150,7 @@ void CalculateStopParameters()
 {
     _textOutput.Clear();
     _echoOutput.Clear();
-    _echoOutput.AppendLine($"Whip's Stop Time and Distance\nCalculator\n(Version {VERSION} - {DATE})");
+    _echoOutput.AppendLine($"Whip's Stop Distance Calculator\n(Version {VERSION} - {DATE})");
     _echoOutput.AppendLine($"\nNext block refresh in {Math.Max(0, _setupAction.RunInterval - _setupAction.TimeSinceLastRun):n0} second(s).");
 
     if (_reference == null || _thrusters.Count == 0 || _textPanels.Count == 0)
@@ -146,32 +158,8 @@ void CalculateStopParameters()
 
     Vector3D worldVelocity = _reference.GetShipVelocities().LinearVelocity;
     Vector3D localVelocity = Vector3D.TransformNormal(worldVelocity, MatrixD.Transpose(_reference.WorldMatrix));
-    Vector3D worldWeight = _reference.CalculateShipMass().PhysicalMass * _reference.GetNaturalGravity();
-    Vector3D localWeight = Vector3D.TransformNormal(worldWeight, MatrixD.Transpose(_reference.WorldMatrix));
-    Vector3D thrustSumVector = Vector3D.Zero;
-    foreach (IMyThrust thrust in _thrusters)
-    {
-        double thisThrust = thrust.IsWorking ? thrust.MaxEffectiveThrust : 0;
-
-        if (Vector3D.Dot(worldVelocity, thrust.WorldMatrix.Forward) > 0)
-        {
-            Vector3D thrustDirection = thrust.WorldMatrix.Forward * thisThrust;
-            Vector3D localThrustDirection = Vector3D.TransformNormal(thrustDirection, MatrixD.Transpose(_reference.WorldMatrix)); //TODO: Optimize this
-
-            /*
-             * We need to verify that we only add the thrust components if they are the same direction as the
-             * local velocity. To do this, we check the sign of the element-wise multiplication of the thrust
-             * direction and the velocity direction.
-             * NOTE: This gives us a low estimate, dont want this.
-             */
-            thrustSumVector += localThrustDirection;
-        }
-    }
-    
-    /*
-     * We need to account for reduced thrust potential due to gravity
-     */
-    thrustSumVector -= localWeight;
+    Vector3D thrustSumVector = _thrustCalculator.GetThrustInDirection(worldVelocity);
+    thrustSumVector = Vector3D.Rotate(thrustSumVector, MatrixD.Transpose(_reference.WorldMatrix));
 
     /*
      * This vector sum needs to be along orthagonal axes (subgrids will botch this). Will need to check
@@ -201,51 +189,56 @@ void CalculateStopParameters()
     _textOutput.AppendLine($" Stop dist: {PrefixMetricUnits(displacementVector.Length(), "m", 2)}");
     _textOutput.Append($" Stop time: {maxTimeToStop:n1} s");
 
+    WriteText(_textOutput);
+}
+
+void WriteText(StringBuilder output)
+{
     foreach (IMyTextPanel textPanel in _textPanels)
     {
-        textPanel.WritePublicText(_textOutput);
+        textPanel.WriteText(output);
 
-        if (!textPanel.ShowText)
-            textPanel.ShowPublicTextOnScreen();
+        if (textPanel.ContentType != ContentType.TEXT_AND_IMAGE)
+            textPanel.ContentType = ContentType.TEXT_AND_IMAGE;
 
         if (!textPanel.Font.Equals("Monospace"))
             textPanel.Font = "Monospace";
     }
 }
 
+string[] prefixes = new string[]
+{
+"Y",
+"Z",
+"E",
+"P",
+"T",
+"G",
+"M",
+"k",
+};
+
+double[] exponents = new double[]
+{
+1e24,
+1e21,
+1e18,
+1e15,
+1e12,
+1e9,
+1e6,
+1e3,
+};
+
 string PrefixMetricUnits(double num, string unit, int digits)
 {
     string prefix = "";
-
-    string[] prefixes = new string[]
-    {
-        "Y",
-        "Z",
-        "E",
-        "P",
-        "T",
-        "G",
-        "M",
-        "k",
-    };
-
-    double[] exponents = new double[]
-    {
-        1e24,
-        1e21,
-        1e18,
-        1e15,
-        1e12,
-        1e9,
-        1e6,
-        1e3,
-    };
 
     for (int i = 0; i < exponents.Length; ++i)
     {
         double thisExponent = exponents[i];
 
-        if (num > thisExponent)
+        if (num >= thisExponent)
         {
             prefix = prefixes[i];
             num /= thisExponent;
@@ -255,6 +248,124 @@ string PrefixMetricUnits(double num, string unit, int digits)
 
     return (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
 }
+
+#region Thruster Direction Container
+public class ThrustDirectionCalculator
+{
+    #region Fields
+    public List<IMyThrust> ThrusterList
+    {
+        private get
+        {
+            return _thrusterList;
+        }
+
+        set
+        {
+            _thrusterList = value;
+            UpdateThrustDirectionSums();
+        }
+    }
+    List<IMyThrust> _thrusterList = null;
+
+
+    public IMyCubeGrid ReferenceGrid
+    {
+        get
+        {
+            return _referenceGrid;
+        }
+
+        set
+        {
+            if (value != _referenceGrid)
+            {
+                _referenceGrid = value;
+                UpdateThrustDirectionSums();
+            }
+        }
+    }
+    IMyCubeGrid _referenceGrid = null;
+
+    Vector3D[] _directions = new Vector3D[6]
+    {
+Vector3D.Right,
+Vector3D.Left,
+Vector3D.Up,
+Vector3D.Down,
+Vector3D.Backward,
+Vector3D.Forward,
+    };
+
+    /// <summary>
+    /// Index map:
+    /// 0: right    +X
+    /// 1: left     -X
+    /// 2: up       +Y
+    /// 3: down     -Y
+    /// 4: back     +Z
+    /// 5: forward  -Z
+    /// </summary>
+    public double[] _thrustSums = new double[6];
+    #endregion
+
+    public ThrustDirectionCalculator(IMyCubeGrid referenceGrid, List<IMyThrust> thrusters)
+    {
+        ThrusterList = thrusters;
+        ReferenceGrid = referenceGrid;
+    }
+
+    void UpdateThrustDirectionSums()
+    {
+        if (_referenceGrid == null)
+            return;
+
+        for (int i = 0; i < _thrustSums.Length; ++i)
+        {
+            _thrustSums[i] = 0;
+        }
+
+        MatrixD transposedWm = MatrixD.Transpose(ReferenceGrid.WorldMatrix);
+        foreach (var thrust in ThrusterList)
+        {
+            Vector3D dirn = Vector3D.Rotate(thrust.WorldMatrix.Forward * thrust.MaxEffectiveThrust, transposedWm);
+            if (dirn.X >= 0)
+                _thrustSums[0] += dirn.X;
+            else
+                _thrustSums[1] -= dirn.X;
+
+            if (dirn.Y >= 0)
+                _thrustSums[2] += dirn.Y;
+            else
+                _thrustSums[3] -= dirn.Y;
+
+            if (dirn.Z >= 0)
+                _thrustSums[4] += dirn.Z;
+            else
+                _thrustSums[5] -= dirn.Z;
+        }
+    }
+
+    public Vector3D GetThrustInDirection(Vector3D worldDirection)
+    {
+        MatrixD transposedWm = MatrixD.Transpose(ReferenceGrid.WorldMatrix);
+        Vector3D localDirection = Vector3D.Rotate(worldDirection, transposedWm);
+        Vector3D thrustSum = Vector3D.Zero;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            var thrustDirn = _directions[i] * _thrustSums[i];
+            double dot = 0;
+            Vector3D.Dot(ref thrustDirn, ref localDirection, out dot);
+            if (dot > 0)
+                thrustSum += thrustDirn;
+        }
+
+        return Vector3D.Rotate(thrustSum, _referenceGrid.WorldMatrix);
+    }
+
+}
+#endregion
 
 #region Scheduler
 /// <summary>
