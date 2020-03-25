@@ -39,7 +39,7 @@ void Main(string arg, UpdateType updateSource)
     
     if (altitude > maxActiveAltitude)
     {
-        foreach (var block in wheels);
+        foreach (var block in wheels)
         {
             block.SetValue("Height", minHeight);
         }
