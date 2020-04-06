@@ -1,6 +1,6 @@
 /*
 / //// / Gyro Memory Script / //// /
-Version 1.0.0 - 04/06/2020
+Version 1.0.1 - 04/06/2020
 
 Description
     Saves the orientation of a ship so that you can align yourself to that same
@@ -39,7 +39,7 @@ Program()
 {
     Load();
 
-    GridTerminalSystem.GetBlocksOfType(_gyros);
+    GridTerminalSystem.GetBlocksOfType(_gyros, x => x.IsSameConstructAs(Me));
 }
 
 // Called automatically on game save
