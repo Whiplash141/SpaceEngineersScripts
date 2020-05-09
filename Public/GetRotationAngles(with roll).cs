@@ -22,7 +22,7 @@ void GetRotationAngles(Vector3D desiredForwardVector, Vector3D desiredUpVector, 
         pitch = VectorMath.AngleBetween(localTargetVector, flattenedTargetVector) * pitchSign; //up is positive
     }
 
-    if (Vector3D.IsZero(desiredUpVector)) 
+    if (Vector3D.IsZero(desiredUpVector)) {
         roll = 0;
         return;
     }
