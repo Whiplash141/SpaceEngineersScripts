@@ -1,6 +1,6 @@
 /*
 / //// / Whip's Piston Controller  / //// /
-v1.0.0 - 05/19/2020 
+v1.0.1 - 05/19/2020 
 ______________________________________________________________
 SETUP:
 1) Place this code in a programmable block
@@ -167,6 +167,8 @@ void ParseArguments(string argument)
             Echo($">> Warning: Fourth argument '{cmdLine.Argument(3)}'\nis not an number!\nUsing default speed.");
         }
     }
+    
+    speed = Math.Abs(speed);
 
     foreach (var block in pistons)
     {
@@ -209,12 +211,12 @@ class PistonController
 
     public void IncrementExtension(float extension)
     {
-        _targetExtension += extension;
+        _targetExtension = MathHelper.Clamp(extension + _targetExtension, Piston.LowestPosition, Piston.HighestPosition);
     }
 
     public void SetExtension(float extension)
     {
-        _targetExtension = extension;
+        _targetExtension = MathHelper.Clamp(extension, Piston.LowestPosition, Piston.HighestPosition);
     }
 
     public void ExtendPiston()
