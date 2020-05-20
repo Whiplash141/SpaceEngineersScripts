@@ -1,6 +1,6 @@
 /*
 / //// / Whip's Piston Controller  / //// /
-v1.0.1 - 05/19/2020 
+v1.0.2 - 05/20/2020 
 ______________________________________________________________
 SETUP:
 1) Place this code in a programmable block
@@ -55,7 +55,9 @@ Examples:
 
 */
 
-const float EXTENSION_GAIN = 5;
+const float MAX_PISTON_SPEED = 5f;
+const float EXTENSION_GAIN = 5f;
+
 Dictionary<IMyPistonBase, PistonController> activePistonControllers = new Dictionary<IMyPistonBase, PistonController>();
 List<IMyPistonBase> pistonsToRemove = new List<IMyPistonBase>();
 List<IMyPistonBase> pistons = new List<IMyPistonBase>();
@@ -230,6 +232,6 @@ class PistonController
             return;
         }
 
-        Piston.Velocity = ExtensionSpeedGain * err;
+        Piston.Velocity = MathHelper.Clamp(ExtensionSpeedGain * err, -MAX_PISTON_SPEED, MAX_PISTON_SPEED);
     }
 }
