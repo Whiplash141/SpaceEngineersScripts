@@ -1,7 +1,6 @@
 /*
 / //// / Gyro Memory Script / //// /
-Version 1.0.1 - 04/06/2020
-
+Version 1.1.0 - 2020/07/27
 Description
     Saves the orientation of a ship so that you can align yourself to that same
     orientation later. (Requested by reddit user u/Thelycan001)
@@ -23,7 +22,6 @@ Arguments
     be saved.
     
 Enjoy!
-
 */
 
 
@@ -192,7 +190,7 @@ void Main(string arg, UpdateType updateSource)
     Echo($"\nGyro count: {_gyros.Count}");
 
     double pitch, yaw, roll = 0;
-    GetRotationAngles(_savedOrientation.Forward, _savedOrientation.Up, Me.WorldMatrix, out yaw, out pitch, out roll);
+    GetRotationAnglesSimultaneous(_savedOrientation, Me.WorldMatrix, out yaw, out pitch, out roll);
 
     Echo($"\nYaw angle: {MathHelper.ToRadians(yaw):n2}°");
     Echo($"Pitch angle: {MathHelper.ToRadians(pitch):n2}°");
@@ -211,7 +209,7 @@ void Main(string arg, UpdateType updateSource)
 
     if (Math.Abs(pitch) > RollTolerance || Math.Abs(yaw) > RollTolerance)
     {
-        roll = 0;
+        //roll = 0;
     }
     ApplyGyroOverride(pitch, yaw, roll, _gyros, Me.WorldMatrix);
 
@@ -241,32 +239,48 @@ void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, Lis
 }
 
 /*
-/// Whip's Get Rotation Angles Method v16 - 9/25/18 ///
-Dependencies: VectorAngleBetween
-Note: Set desiredUpVector to Vector3D.Zero if you don't care about roll
+Whip's GetRotationAnglesSimultaneous - Last modified: 07/27/2020
+
+Gets axis angle rotation and decomposes it upon each cardinal axis.
+Has the desired effect of not causing roll oversteer. Does NOT use
+sequential rotation angles.
+
+MODIFIED:
+Uses a desiredWorldMatrix instead of desired forward and up vectors now
+
+Dependencies:
+VectorMath.SafeNormalize
 */
-void GetRotationAngles(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double yaw, out double pitch, out double roll)
+void GetRotationAnglesSimultaneous(MatrixD desiredWorldMatrix, MatrixD worldMatrix, out double yaw, out double pitch, out double roll)
 {
-    var localTargetVector = Vector3D.Rotate(desiredForwardVector, MatrixD.Transpose(worldMatrix));
-    var flattenedTargetVector = new Vector3D(localTargetVector.X, 0, localTargetVector.Z);
+    MatrixD transposedWm;
+    MatrixD.Transpose(ref worldMatrix, out transposedWm);
+    Vector3D axis;
+    double angle;
+    MatrixD targetMatrix = desiredWorldMatrix * transposedWm;
+    axis = new Vector3D(targetMatrix.M23 - targetMatrix.M32,
+                        targetMatrix.M31 - targetMatrix.M13,
+                        targetMatrix.M12 - targetMatrix.M21);
 
-    yaw = VectorAngleBetween(Vector3D.Forward, flattenedTargetVector) * Math.Sign(localTargetVector.X); //right is positive
-    if (Math.Abs(yaw) < 1E-6 && localTargetVector.Z > 0) //check for straight back case
-        yaw = Math.PI;
+    double trace = targetMatrix.M11 + targetMatrix.M22 + targetMatrix.M33;
+    angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1, 1));
 
-    if (Vector3D.IsZero(flattenedTargetVector)) //check for straight up case
-        pitch = MathHelper.PiOver2 * Math.Sign(localTargetVector.Y);
-    else
-        pitch = VectorAngleBetween(localTargetVector, flattenedTargetVector) * Math.Sign(localTargetVector.Y); //up is positive
-
-    if (Vector3D.IsZero(desiredUpVector))
+    if (Vector3D.IsZero(axis))
     {
+        angle = targetMatrix.Forward.Z < 0 ? 0 : Math.PI;
+        yaw = angle;
+        pitch = 0;
         roll = 0;
         return;
     }
-    var localUpVector = Vector3D.Rotate(desiredUpVector, MatrixD.Transpose(worldMatrix));
-    var flattenedUpVector = new Vector3D(localUpVector.X, localUpVector.Y, 0);
-    roll = VectorAngleBetween(flattenedUpVector, Vector3D.Up) * Math.Sign(Vector3D.Dot(Vector3D.Right, flattenedUpVector));
+
+    if (!Vector3D.IsZero(axis) && !Vector3D.IsUnit(ref axis))
+    {
+        axis = Vector3D.Normalize(axis); 
+    }
+    yaw = -axis.Y * angle;
+    pitch = axis.X * angle;
+    roll = -axis.Z * angle;
 }
 
 // Computes angle between 2 vectors in radians.
