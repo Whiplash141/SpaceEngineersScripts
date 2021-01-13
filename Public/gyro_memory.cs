@@ -283,15 +283,6 @@ void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desir
     roll = -axis.Z * angle;
 }
 
-// Computes angle between 2 vectors in radians.
-public static double VectorAngleBetween(Vector3D a, Vector3D b)
-{
-    if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-        return 0;
-    else
-        return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-}
-
 public static Vector3D SafeNormalize(Vector3D a)
 {
     if (Vector3D.IsZero(a))
