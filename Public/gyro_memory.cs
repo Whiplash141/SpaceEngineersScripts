@@ -1,6 +1,6 @@
 /*
 / //// / Gyro Memory Script / //// /
-Version 1.1.0 - 2020/07/27
+Version 1.1.1 - 2021/1/13
 Description
     Saves the orientation of a ship so that you can align yourself to that same
     orientation later. (Requested by reddit user u/Thelycan001)
@@ -190,28 +190,12 @@ void Main(string arg, UpdateType updateSource)
     Echo($"\nGyro count: {_gyros.Count}");
 
     double pitch, yaw, roll = 0;
-    GetRotationAnglesSimultaneous(_savedOrientation, Me.WorldMatrix, out yaw, out pitch, out roll);
+    GetRotationAnglesSimultaneous(_savedOrientation.Forward, _savedOrientation.Up, Me.WorldMatrix, out yaw, out pitch, out roll);
+    ApplyGyroOverride(pitch, yaw, roll, _gyros, Me.WorldMatrix);
 
     Echo($"\nYaw angle: {MathHelper.ToRadians(yaw):n2}°");
     Echo($"Pitch angle: {MathHelper.ToRadians(pitch):n2}°");
     Echo($"Roll angle: {MathHelper.ToRadians(roll):n2}°");
-
-    // Remove destroyed blocks
-    for (int i = _gyros.Count - 1; i >= 0; --i)
-    {
-        var gyro = _gyros[i];
-        if (IsClosed(gyro))
-        {
-            _gyros.RemoveAt(i);
-            continue;
-        }
-    }
-
-    if (Math.Abs(pitch) > RollTolerance || Math.Abs(yaw) > RollTolerance)
-    {
-        //roll = 0;
-    }
-    ApplyGyroOverride(pitch, yaw, roll, _gyros, Me.WorldMatrix);
 
     FlushEcho();
 }
@@ -239,45 +223,61 @@ void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, Lis
 }
 
 /*
-Whip's GetRotationAnglesSimultaneous - Last modified: 07/27/2020
-
+Whip's GetRotationAnglesSimultaneous - Last modified: 07/05/2020
 Gets axis angle rotation and decomposes it upon each cardinal axis.
 Has the desired effect of not causing roll oversteer. Does NOT use
 sequential rotation angles.
-
-MODIFIED:
-Uses a desiredWorldMatrix instead of desired forward and up vectors now
+Set desiredUpVector to Vector3D.Zero if you don't care about roll.
 
 Dependencies:
-VectorMath.SafeNormalize
+SafeNormalize
 */
-void GetRotationAnglesSimultaneous(MatrixD desiredWorldMatrix, MatrixD worldMatrix, out double yaw, out double pitch, out double roll)
+void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double yaw, out double pitch, out double roll)
 {
+    desiredForwardVector = SafeNormalize(desiredForwardVector);
+
     MatrixD transposedWm;
     MatrixD.Transpose(ref worldMatrix, out transposedWm);
+    Vector3D.Rotate(ref desiredForwardVector, ref transposedWm, out desiredForwardVector);
+    Vector3D.Rotate(ref desiredUpVector, ref transposedWm, out desiredUpVector);
+
+    Vector3D leftVector = Vector3D.Cross(desiredUpVector, desiredForwardVector);
     Vector3D axis;
     double angle;
-    MatrixD targetMatrix = desiredWorldMatrix * transposedWm;
-    axis = new Vector3D(targetMatrix.M23 - targetMatrix.M32,
-                        targetMatrix.M31 - targetMatrix.M13,
-                        targetMatrix.M12 - targetMatrix.M21);
+    if (Vector3D.IsZero(desiredUpVector) || Vector3D.IsZero(leftVector))
+    {
+        axis = new Vector3D(desiredForwardVector.Y, -desiredForwardVector.X, 0);
+        angle = Math.Acos(MathHelper.Clamp(-desiredForwardVector.Z, -1.0, 1.0));
+    }
+    else
+    {
+        leftVector = SafeNormalize(leftVector);
+        Vector3D upVector = Vector3D.Cross(desiredForwardVector, leftVector);
 
-    double trace = targetMatrix.M11 + targetMatrix.M22 + targetMatrix.M33;
-    angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1, 1));
+        // Create matrix
+        MatrixD targetMatrix = MatrixD.Zero;
+        targetMatrix.Forward = desiredForwardVector;
+        targetMatrix.Left = leftVector;
+        targetMatrix.Up = upVector;
+
+        axis = new Vector3D(targetMatrix.M23 - targetMatrix.M32,
+                            targetMatrix.M31 - targetMatrix.M13,
+                            targetMatrix.M12 - targetMatrix.M21);
+
+        double trace = targetMatrix.M11 + targetMatrix.M22 + targetMatrix.M33;
+        angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1, 1));
+    }
 
     if (Vector3D.IsZero(axis))
     {
-        angle = targetMatrix.Forward.Z < 0 ? 0 : Math.PI;
+        angle = desiredForwardVector.Z < 0 ? 0 : Math.PI;
         yaw = angle;
         pitch = 0;
         roll = 0;
         return;
     }
 
-    if (!Vector3D.IsZero(axis) && !Vector3D.IsUnit(ref axis))
-    {
-        axis = Vector3D.Normalize(axis); 
-    }
+    axis = SafeNormalize(axis);
     yaw = -axis.Y * angle;
     pitch = axis.X * angle;
     roll = -axis.Z * angle;
@@ -290,4 +290,15 @@ public static double VectorAngleBetween(Vector3D a, Vector3D b)
         return 0;
     else
         return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+}
+
+public static Vector3D SafeNormalize(Vector3D a)
+{
+    if (Vector3D.IsZero(a))
+        return Vector3D.Zero;
+
+    if (Vector3D.IsUnit(ref a))
+        return a;
+
+    return Vector3D.Normalize(a);
 }
