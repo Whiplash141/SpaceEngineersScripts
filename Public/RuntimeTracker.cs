@@ -9,14 +9,17 @@ public class RuntimeTracker
     public double MaxInstructions {get; private set;}
     public double AverageRuntime {get; private set;}
     public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
     
-    private readonly Queue<double> _runtimes = new Queue<double>();
-    private readonly Queue<double> _instructions = new Queue<double>();
-    private readonly StringBuilder _sb = new StringBuilder();
-    private readonly int _instructionLimit;
-    private readonly Program _program;
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly StringBuilder _sb = new StringBuilder();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
 
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.01)
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
         _program = program;
         Capacity = capacity;
@@ -27,8 +30,18 @@ public class RuntimeTracker
     public void AddRuntime()
     {
         double runtime = _program.Runtime.LastRunTimeMs;
-        AverageRuntime = Sensitivity * (runtime - AverageRuntime) + AverageRuntime;
-        
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
+
         _runtimes.Enqueue(runtime);
         if (_runtimes.Count == Capacity)
         {
@@ -41,6 +54,7 @@ public class RuntimeTracker
     public void AddInstructions()
     {
         double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
         AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
         
         _instructions.Enqueue(instructions);
@@ -55,12 +69,14 @@ public class RuntimeTracker
     public string Write()
     {
         _sb.Clear();
-        _sb.AppendLine("\n_____________________________\nGeneral Runtime Info\n");
-        _sb.AppendLine($"Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"Max runtime: {MaxRuntime:n4} ms");
+        _sb.AppendLine("General Runtime Info");
+        _sb.AppendLine($"  Avg instructions: {AverageInstructions:n2}");
+        _sb.AppendLine($"  Last instructions: {LastInstructions:n0}");
+        _sb.AppendLine($"  Max instructions: {MaxInstructions:n0}");
+        _sb.AppendLine($"  Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
+        _sb.AppendLine($"  Avg runtime: {AverageRuntime:n4} ms");
+        _sb.AppendLine($"  Last runtime: {LastRuntime:n4} ms");
+        _sb.AppendLine($"  Max runtime: {MaxRuntime:n4} ms");
         return _sb.ToString();
     }
 }
