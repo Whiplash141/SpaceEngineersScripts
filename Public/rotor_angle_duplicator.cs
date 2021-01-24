@@ -37,7 +37,7 @@ The script should take care of the rest :)
 */
 
 const string VERSION = "1.0.4";
-const string DATE = "05/28/2020";
+const string DATE = "2021/01/24";
 
 string _childRotorGroupName = "Child Rotors";
 
