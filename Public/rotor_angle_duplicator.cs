@@ -36,7 +36,7 @@ The script should take care of the rest :)
 
 */
 
-const string VERSION = "1.0.3";
+const string VERSION = "1.0.4";
 const string DATE = "05/28/2020";
 
 string _childRotorGroupName = "Child Rotors";
@@ -45,10 +45,12 @@ const string INI_SECTION_ROTOR = "Child Rotor Config";
 const string INI_KEY_ROTOR_PARENT = "Parent name";
 const string INI_KEY_ROTOR_GAIN = "Rotation speed multiplier";
 const string INI_KEY_ROTOR_OFFSET = "Child rotor angle offset (deg)";
+const string INI_KEY_ROTOR_MULT = "Child rotor angle multiplier";
 
 const string DEFAULT_PARENT_NAME = "";
 const float DEFAULT_ROTOR_GAIN = 10f;
 const float DEFAULT_ROTOR_OFFSET = 0f;
+const float DEFAULT_ROTOR_MULT = 1f;
 
 Dictionary<string, IMyMotorStator> _rotorNameDict = new Dictionary<string, IMyMotorStator>();
 List<ChildRotor> _childRotors = new List<ChildRotor>();
@@ -68,13 +70,15 @@ class ChildRotor
     IMyMotorStator _child;
     float _rotationalGain;
     float _offsetRads;
+    float _angleMultiplier;
 
-    public ChildRotor(IMyMotorStator child, IMyMotorStator parent, float rotationalGain, float offsetDegs)
+    public ChildRotor(IMyMotorStator child, IMyMotorStator parent, float rotationalGain, float offsetDegs, float angleMultiplier)
     {
         _child = child;
         _parent = parent;
         _rotationalGain = rotationalGain;
         _offsetRads = MathHelper.ToRadians(offsetDegs);
+        _angleMultiplier = angleMultiplier;
     }
     
     bool BlocksMissing()
@@ -87,7 +91,7 @@ class ChildRotor
         if (BlocksMissing())
             return;
         
-        float currentAngle = _child.Angle + _offsetRads;
+        float currentAngle = _angleMultiplier * _child.Angle + _offsetRads;
         float targetAngle = _parent.Angle;
         float difference = targetAngle - currentAngle;
 
@@ -149,6 +153,7 @@ bool ChildRotorCollect(IMyTerminalBlock b)
     string parentName = DEFAULT_PARENT_NAME;
     float gain = DEFAULT_ROTOR_GAIN;
     float offset = DEFAULT_ROTOR_OFFSET;
+    float mult = DEFAULT_ROTOR_MULT;
 
     _ini.Clear();
     if (_ini.TryParse(b.CustomData))
@@ -156,11 +161,13 @@ bool ChildRotorCollect(IMyTerminalBlock b)
         parentName = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_PARENT).ToString(DEFAULT_PARENT_NAME);
         gain = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_GAIN).ToSingle(DEFAULT_ROTOR_GAIN);
         offset = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_OFFSET).ToSingle(DEFAULT_ROTOR_OFFSET);
+        mult = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_MULT).ToSingle(DEFAULT_ROTOR_OFFSET);
     }
 
     _ini.Set(INI_SECTION_ROTOR, INI_KEY_ROTOR_PARENT, parentName);
     _ini.Set(INI_SECTION_ROTOR, INI_KEY_ROTOR_GAIN, gain);
     _ini.Set(INI_SECTION_ROTOR, INI_KEY_ROTOR_OFFSET, offset);
+    _ini.Set(INI_SECTION_ROTOR, INI_KEY_ROTOR_MULT, mult);
 
 
     string output = _ini.ToString();
@@ -172,7 +179,7 @@ bool ChildRotorCollect(IMyTerminalBlock b)
     IMyMotorStator parent;
     if (_rotorNameDict.TryGetValue(parentName, out parent))
     {
-        _childRotors.Add(new ChildRotor(rotor, parent, gain, offset));
+        _childRotors.Add(new ChildRotor(rotor, parent, gain, offset, mult));
     }
     else
     {
