@@ -36,7 +36,7 @@ The script should take care of the rest :)
 
 */
 
-const string VERSION = "1.0.5";
+const string VERSION = "1.0.6";
 const string DATE = "2021/01/24";
 
 string _childRotorGroupName = "Child Rotors";
@@ -91,8 +91,8 @@ class ChildRotor
         if (BlocksMissing())
             return;
         
-        float currentAngle = _angleMultiplier * _child.Angle + _offsetRads;
-        float targetAngle = _parent.Angle;
+        float currentAngle = _child.Angle + _offsetRads;
+        float targetAngle = _angleMultiplier * _parent.Angle;
         float difference = targetAngle - currentAngle;
 
         difference %= MathHelper.TwoPi; // Wrap around 2*PI and get the remainder such that the difference: (-2PI, PI)
