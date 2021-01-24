@@ -36,7 +36,7 @@ The script should take care of the rest :)
 
 */
 
-const string VERSION = "1.0.4";
+const string VERSION = "1.0.5";
 const string DATE = "2021/01/24";
 
 string _childRotorGroupName = "Child Rotors";
@@ -161,7 +161,7 @@ bool ChildRotorCollect(IMyTerminalBlock b)
         parentName = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_PARENT).ToString(DEFAULT_PARENT_NAME);
         gain = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_GAIN).ToSingle(DEFAULT_ROTOR_GAIN);
         offset = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_OFFSET).ToSingle(DEFAULT_ROTOR_OFFSET);
-        mult = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_MULT).ToSingle(DEFAULT_ROTOR_OFFSET);
+        mult = _ini.Get(INI_SECTION_ROTOR, INI_KEY_ROTOR_MULT).ToSingle(DEFAULT_ROTOR_MULT);
     }
 
     _ini.Set(INI_SECTION_ROTOR, INI_KEY_ROTOR_PARENT, parentName);
