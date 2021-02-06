@@ -1,8 +1,8 @@
 /// <summary>
-/// This estimates an inertial tensor relative to a reference block
+/// This estimates an inertial tensor of a grid in grid local coords
 /// Help provided by Equinox :)
 /// </summary>
-/// <param name="reference">Ship controller block to base tensor off of</param>
+/// <param name="reference">Ship controller used to calculate mass and center of mass</param>
 /// <returns>Inertia tensor of the grid</returns>
 MatrixD EstimateInertiaTensor(IMyShipController reference)
 {
