@@ -1,16 +1,23 @@
 /*
-Whip's GetRotationAnglesSimultaneous - Last modified: 07/05/2020
+Whip's GetRotationAnglesSimultaneous - Last modified: 2020/08/27
 
 Gets axis angle rotation and decomposes it upon each cardinal axis.
 Has the desired effect of not causing roll oversteer. Does NOT use
 sequential rotation angles.
 
-Set desiredUpVector to Vector3D.Zero if you don't care about roll.
+NOTE: 
+This is designed for use with Keen's gyroscopes where:
+  + pitch = -X rotation
+  + yaw   = -Y rotation
+  + roll  = -Z rotation
+
+As such, the resulting angles are negated since they are computed
+using the opposite sign assumption.
 
 Dependencies:
 VectorMath.SafeNormalize
 */
-void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double yaw, out double pitch, out double roll)
+void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
 {
     desiredForwardVector = VectorMath.SafeNormalize(desiredForwardVector);
 
@@ -56,7 +63,8 @@ void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desir
     }
 
     axis = VectorMath.SafeNormalize(axis);
+    // Because gyros rotate about -X -Y -Z, we need to negate our angles
     yaw = -axis.Y * angle;
-    pitch = axis.X * angle;
+    pitch = -axis.X * angle;
     roll = -axis.Z * angle;
 }
