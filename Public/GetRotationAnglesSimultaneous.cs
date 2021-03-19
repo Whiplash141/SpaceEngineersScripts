@@ -5,6 +5,8 @@ Gets axis angle rotation and decomposes it upon each cardinal axis.
 Has the desired effect of not causing roll oversteer. Does NOT use
 sequential rotation angles.
 
+Set desiredUpVector to Vector3D.Zero if you don't care about roll.
+
 NOTE: 
 This is designed for use with Keen's gyroscopes where:
   + pitch = -X rotation
