@@ -7,16 +7,17 @@
 /// <param name="screenPositionPx"></param>
 /// <param name="screenWidthInMeters"></param>
 /// <returns>True if the solution can be displayed on the screen.</returns>
-bool WorldPositionToScreenPosition(Vector3D worldPosition, IMyCameraBlock cam, IMyTextPanel screen, out Vector2 screenPositionPx, double screenWidthInMeters = 0.5)
+bool WorldPositionToScreenPosition(Vector3D worldPosition, IMyCameraBlock cam, IMyTextPanel screen, out Vector2 screenPositionPx)
 {
     screenPositionPx = Vector2.Zero;
 
-    // ASSUMPTION:
-    // The camera and screen are aligned
-    Vector3D cameraPos = cam.GetPosition();
-    Vector3D screenPosition = screen.GetPosition();
-    Vector3D normal = screenPosition - cameraPos;
-    double distanceToScreen = normal.Normalize();
+    Vector3D cameraPos = cam.GetPosition() + cam.WorldMatrix.Forward * 0.25; // There is a ~0.25 meter forward offset for the view origin of cameras
+    Vector3D screenPosition = screen.GetPosition() + screen.WorldMatrix.Forward * 0.5 * screen.CubeGrid.GridSize;
+    Vector3D normal = screen.WorldMatrix.Forward;
+    Vector3D cameraToScreen = screenPosition - cameraPos;
+    double distanceToScreen = Math.Abs(Vector3D.Dot(cameraToScreen, normal));
+    
+    Vector3D viewCenterWorld = distanceToScreen * cam.WorldMatrix.Forward;
 
     // Project direction onto the screen plane (world coords)
     Vector3D direction = worldPosition - cameraPos;
@@ -30,6 +31,9 @@ bool WorldPositionToScreenPosition(Vector3D worldPosition, IMyCameraBlock cam, I
     {
         return false;
     }
+    
+    Vector3D planarCameraToScreen = cameraToScreen - Vector3D.Dot(cameraToScreen, normal) * normal;
+    directionOnScreenWorld -= planarCameraToScreen;
 
     // Convert location to be screen local (world coords)
     Vector2 directionOnScreenLocal = new Vector2(
@@ -38,6 +42,7 @@ bool WorldPositionToScreenPosition(Vector3D worldPosition, IMyCameraBlock cam, I
 
     // ASSUMPTION:
     // The screen is square
+    double screenWidthInMeters = screen.CubeGrid.GridSize * 0.935f; // Digi's magic number
     float metersToPx = (float)(screen.TextureSize.X / screenWidthInMeters);
             
     // Convert dorection to be screen local (pixel coords)
