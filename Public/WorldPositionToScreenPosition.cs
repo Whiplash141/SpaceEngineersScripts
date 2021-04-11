@@ -42,7 +42,7 @@ bool WorldPositionToScreenPosition(Vector3D worldPosition, IMyCameraBlock cam, I
 
     // ASSUMPTION:
     // The screen is square
-    double screenWidthInMeters = screen.CubeGrid.GridSize * 0.935f; // Digi's magic number
+    double screenWidthInMeters = screen.CubeGrid.GridSize * 0.855f; // My magic number for large grid
     float metersToPx = (float)(screen.TextureSize.X / screenWidthInMeters);
             
     // Convert dorection to be screen local (pixel coords)
