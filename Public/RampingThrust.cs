@@ -119,7 +119,7 @@ void Main(string arg, UpdateType updateSource)
         else // Dampening
         {
             double neededThrust = Vector3D.Dot(forwardThrustDirection, desiredDampeningForce);
-            if (neededThrust > 0 && Vector3D.Dot(forwardThrustDirection, worldCommand) >= 0)
+            if (controller.DampenersOverride && neededThrust > 0 && Vector3D.Dot(forwardThrustDirection, worldCommand) >= 0)
             {
                 float outputProportion = (float)MathHelper.Clamp(neededThrust / t.MaxEffectiveThrust, 0, 1);
                 t.ThrustOverridePercentage = outputProportion;
