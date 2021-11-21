@@ -208,7 +208,7 @@ bool IsClosed(IMyTerminalBlock b)
 //Whip's ApplyGyroOverride Method v12 - 11/02/2019
 void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyroList, MatrixD worldMatrix)
 {
-    var rotationVec = new Vector3D(-pitchSpeed, yawSpeed, rollSpeed); //because keen does some weird stuff with signs 
+    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed); 
     var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
 
     foreach (var thisGyro in gyroList)
@@ -279,7 +279,7 @@ void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desir
 
     axis = SafeNormalize(axis);
     yaw = -axis.Y * angle;
-    pitch = axis.X * angle;
+    pitch = -axis.X * angle;
     roll = -axis.Z * angle;
 }
 
