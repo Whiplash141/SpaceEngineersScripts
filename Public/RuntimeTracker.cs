@@ -14,10 +14,18 @@ public class RuntimeTracker
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
-    readonly StringBuilder _sb = new StringBuilder();
     readonly int _instructionLimit;
     readonly Program _program;
     const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
 
     public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
@@ -68,15 +76,14 @@ public class RuntimeTracker
 
     public string Write()
     {
-        _sb.Clear();
-        _sb.AppendLine("General Runtime Info");
-        _sb.AppendLine($"  Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"  Last instructions: {LastInstructions:n0}");
-        _sb.AppendLine($"  Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"  Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"  Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"  Last runtime: {LastRuntime:n4} ms");
-        _sb.AppendLine($"  Max runtime: {MaxRuntime:n4} ms");
-        return _sb.ToString();
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
     }
 }
