@@ -1,7 +1,7 @@
 
 #region This goes in the programmable block
-const string VERSION = "121.5.5";
-const string DATE = "2021/10/08";
+const string VERSION = "122.0.1";
+const string DATE = "2022/02/03";
 
 /*
 / //// / Whip's Turret Slaver / //// /
@@ -166,7 +166,7 @@ const int MaxBlocksToCheckForFF = 50;
 Dictionary<long, FriendlyData>
     _friendlyData = new Dictionary<long, FriendlyData>(),
     _friendlyDataBuffer = new Dictionary<long, FriendlyData>();
-List<IMyLargeTurretBase> _designators = new List<IMyLargeTurretBase>();
+List<TurretInterface> _designators = new List<TurretInterface>();
 List<IMyShipController> _shipControllers = new List<IMyShipController>();
 List<IMyTextPanel> _debugPanels = new List<IMyTextPanel>();
 List<IMyBlockGroup>
@@ -249,7 +249,7 @@ void DrawRunningScreen()
 
 void Main(string arg, UpdateType updateType)
 {
-    try 
+    try
     {
         _runtimeTracker.AddRuntime();
 
@@ -450,10 +450,17 @@ bool CollectDesignatorsDebugAndMech(IMyTerminalBlock b)
         _biggestGrid = b.CubeGrid;
     }
 
+    var tcb = b as IMyTurretControlBlock;
+    if (tcb != null && StringExtensions.Contains(b.CustomName, _defaultVars.DesignatorNameTag))
+    {
+        _designators.Add(new TurretInterface(tcb));
+        return false;
+    }
+
     var t = b as IMyLargeTurretBase;
     if (t != null && StringExtensions.Contains(b.CustomName, _defaultVars.DesignatorNameTag))
     {
-        _designators.Add(t);
+        _designators.Add(new TurretInterface(t));
         return false;
     }
 
@@ -588,8 +595,11 @@ void GetVelocityReference()
 
 void RefreshDesignatorTargeting()
 {
-    foreach (var t in _designators)
+    foreach (var turret in _designators)
     {
+        var t = turret.T;
+        if (t == null)
+            continue;
         if (t.HasTarget)
         {
             // Force a new target selection
@@ -661,8 +671,7 @@ void ResetAllDesignatorTargeting()
 {
     foreach (var t in _designators)
     {
-        t.ResetTargetingToDefault();
-        t.Range = float.MaxValue;
+        t.ResetTargeting();
     }
 }
 #endregion
@@ -936,10 +945,10 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
         int elevationSign = Math.Sign(Vector3D.Dot(turretBaseMatrix.Left, _mainElevationRotor.WorldMatrix.Up));
 
         /*
-         * We need 2 sets of angles to be able to prevent the turret from trying to rotate over 90 deg
-         * vertical to get to a target behind it. This ensures that the elevation angle is always
-         * lies in the domain: -90 deg <= elevation <= 90 deg.
-         */
+            * We need 2 sets of angles to be able to prevent the turret from trying to rotate over 90 deg
+            * vertical to get to a target behind it. This ensures that the elevation angle is always
+            * lies in the domain: -90 deg <= elevation <= 90 deg.
+            */
         double desiredAzimuthAngle, desiredElevationAngle, currentElevationAngle, azimuthAngle, elevationAngle;
         GetRotationAngles(ref targetDirection, ref turretBaseMatrix, out desiredAzimuthAngle, out desiredElevationAngle);
         GetElevationAngle(ref turretFrontVec, ref turretBaseMatrix, out currentElevationAngle);
@@ -953,8 +962,8 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
         elevationSpeed = MathHelper.Clamp(elevationSpeed, -_maxRotorSpeed, _maxRotorSpeed);
 
         /*
-         * Get angular error rate due to ship rotation
-         */
+            * Get angular error rate due to ship rotation
+            */
         double azimuthError, elevationError, azimuthErrorRate, elevationErrorRate;
         azimuthError = ComputeRotorHeadingError(_mainElevationRotor, ref _lastAzimuthMatrix);
         elevationError = ComputeRotorHeadingError(_mainElevationRotor, ref _lastElevationMatrix);
@@ -1305,93 +1314,103 @@ abstract class RotorTurretGroupBase : TurretGroupBase
         if (!block.IsSameConstructAs(_program.Me))
             return false;
 
-        var turret = block as IMyLargeTurretBase;
-        if (turret != null && StringExtensions.Contains(block.CustomName, _designatorName))
+        var tcb = block as IMyTurretControlBlock;
+        if (tcb != null && StringExtensions.Contains(block.CustomName, _designatorName))
         {
-            if (!turret.IsFunctional)
+            if (!tcb.IsFunctional)
                 return false;
-            _designators.Add(turret);
-            EnableTurretAI(turret);
+            _designators.Add(new TurretInterface(tcb));
+            tcb.AIEnabled = true;
+            return false;
+        }
+        
+        var t = block as IMyLargeTurretBase;
+        if (t != null && StringExtensions.Contains(block.CustomName, _designatorName))
+        {
+            if (!t.IsFunctional)
+                return false;
+            _designators.Add(new TurretInterface(t));
+            EnableTurretAI(t);
             return false;
         }
 
-        var weapon = block as IMyUserControllableGun;
-        if (weapon != null)
+        var w = block as IMyUserControllableGun;
+        if (w != null)
         {
-            if (weapon is IMyLargeTurretBase)
+            if (w is IMyLargeTurretBase)
                 return false;
-            _guns.Add(weapon);
+            _guns.Add(w);
             _gunGridDict[block.CubeGrid] = block;
             _weaponGrids.Add(block.CubeGrid);
             return false;
         }
 
-        var cam = block as IMyCameraBlock;
-        if (cam != null)
+        var c = block as IMyCameraBlock;
+        if (c != null)
         {
-            _cameras.Add(cam);
+            _cameras.Add(c);
             _toolGridDict[block.CubeGrid] = block;
             _weaponGrids.Add(block.CubeGrid);
             return false;
         }
 
-        var tool = block as IMyShipToolBase;
-        if (tool != null)
+        var tl = block as IMyShipToolBase;
+        if (tl != null)
         {
-            _tools.Add(tool);
+            _tools.Add(tl);
             _toolGridDict[block.CubeGrid] = block;
             _weaponGrids.Add(block.CubeGrid);
             return false;
         }
 
-        var drill = block as IMyShipDrill;
-        if (drill != null)
+        var d = block as IMyShipDrill;
+        if (d != null)
         {
-            _tools.Add(drill);
+            _tools.Add(d);
             _toolGridDict[block.CubeGrid] = block;
             _weaponGrids.Add(block.CubeGrid);
             return false;
         }
 
-        var light = block as IMyLightingBlock;
-        if (light != null)
+        var l = block as IMyLightingBlock;
+        if (l != null)
         {
-            CollectLight(light);
+            CollectLight(l);
             _lightGridDict[block.CubeGrid] = block;
             _weaponGrids.Add(block.CubeGrid);
             return false;
         }
 
-        var timer = block as IMyTimerBlock;
-        if (timer != null)
+        var ti = block as IMyTimerBlock;
+        if (ti != null)
         {
-            CollectTimer(timer);
+            CollectTimer(ti);
             return false;
         }
 
-        var rotor = block as IMyMotorStator;
-        if (rotor != null && rotor.IsFunctional)
+        var r = block as IMyMotorStator;
+        if (r != null && r.IsFunctional)
         {
-            _unsortedRotors.Add(rotor);
-            _rotorGrids.Add(rotor.CubeGrid);
+            _unsortedRotors.Add(r);
+            _rotorGrids.Add(r.CubeGrid);
             return false;
         }
         return false;
     }
 
-    protected void GetRotorRestAngle(IMyMotorStator rotor)
+    protected void GetRotorRestAngle(IMyMotorStator r)
     {
         bool useManual = false;
         float restAngle = 0;
 
         // Migrate old configs
-        if (!rotor.CustomData.Contains(IniRotorSection) && !string.IsNullOrWhiteSpace(IniRotorSection))
+        if (!r.CustomData.Contains(IniRotorSection) && !string.IsNullOrWhiteSpace(IniRotorSection))
         {
-            useManual = float.TryParse(rotor.CustomData, out restAngle);
+            useManual = float.TryParse(r.CustomData, out restAngle);
         }
 
         Ini.Clear();
-        if (Ini.TryParse(rotor.CustomData))
+        if (Ini.TryParse(r.CustomData))
         {
             useManual = Ini.Get(IniRotorSection, IniRotorManualRestAngle).ToBoolean(useManual);
             restAngle = Ini.Get(IniRotorSection, IniRotorRestAngle).ToSingle(restAngle);
@@ -1401,24 +1420,24 @@ abstract class RotorTurretGroupBase : TurretGroupBase
         Ini.Set(IniRotorSection, IniRotorRestAngle, restAngle);
 
         string output = Ini.ToString();
-        if (!string.Equals(output, rotor.CustomData))
+        if (!string.Equals(output, r.CustomData))
         {
-            rotor.CustomData = output;
+            r.CustomData = output;
         }
 
         if (useManual)
         {
-            _rotorRestAngles[rotor.EntityId] = MathHelper.ToRadians(restAngle) % MathHelper.TwoPi;
+            _rotorRestAngles[r.EntityId] = MathHelper.ToRadians(restAngle) % MathHelper.TwoPi;
         }
     }
 
-    protected void AddRotorGridsToHash(IMyMotorStator rotor, bool addBase = true)
+    protected void AddRotorGridsToHash(IMyMotorStator r, bool addBase = true)
     {
         if (addBase)
-            _thisTurretGrids.Add(rotor.CubeGrid);
+            _thisTurretGrids.Add(r.CubeGrid);
 
-        if (rotor.IsAttached)
-            _thisTurretGrids.Add(rotor.TopGrid);
+        if (r.IsAttached)
+            _thisTurretGrids.Add(r.TopGrid);
     }
 
     protected IMyTerminalBlock GetTurretReferenceOnRotorHead(IMyMotorStator rotor)
@@ -1642,9 +1661,9 @@ abstract class RotorTurretGroupBase : TurretGroupBase
         }
 
         /*
-         * This is a fall-through in case the user has no guns. The code will use the
-         * tools for alignment instead.
-         */
+            * This is a fall-through in case the user has no guns. The code will use the
+            * tools for alignment instead.
+            */
         int toolCount = _lightConfigs.Count + _cameras.Count + _tools.Count;
         if (toolCount == 0)
             return positionSum;
@@ -1746,7 +1765,7 @@ class SlavedAIGroup : TurretGroupBase
 
             if (StringExtensions.Contains(turret.CustomName, _designatorName) && turret.IsFunctional)
             {
-                _designators.Add(turret);
+                _designators.Add(new TurretInterface(turret));
                 EnableTurretAI(turret);
             }
             else
@@ -1936,7 +1955,7 @@ abstract class TurretGroupBase
     protected List<IMyTerminalBlock>
         _groupBlocks = new List<IMyTerminalBlock>(),
         _vitalBlocks = new List<IMyTerminalBlock>();
-    protected List<IMyLargeTurretBase> _designators = new List<IMyLargeTurretBase>();
+    protected List<TurretInterface> _designators = new List<TurretInterface>();
     protected HashSet<IMyCubeGrid>
         _shipGrids = new HashSet<IMyCubeGrid>(),
         _thisTurretGrids = new HashSet<IMyCubeGrid>();
@@ -1970,7 +1989,7 @@ abstract class TurretGroupBase
         _errorCount = 0,
         _warningCount = 0;
     protected string _designatorName;
-    protected IMyLargeTurretBase _designator;
+    protected TurretInterface _designator;
     protected List<TimerConfig> _timerConfigs = new List<TimerConfig>();
     protected List<LightConfig> _lightConfigs = new List<LightConfig>();
     protected enum DominantWeaponType { None = 0, Projectile = 1, Rocket = 2 };
@@ -2250,7 +2269,7 @@ abstract class TurretGroupBase
         _friendlyData = friendlyData;
 
         _averageWeaponPos = GetAverageWeaponPosition();
-        _designator = GetDesignatorTurret(_designators, ref _averageWeaponPos);
+        _designator = GetDesignatorTurret(ref _averageWeaponPos);
         _isTargeting = _designator.IsUnderControl || _designator.HasTarget;
 
         HandleTargeting();
@@ -2315,11 +2334,11 @@ abstract class TurretGroupBase
     #endregion
 
     #region Targeting Functions
-    protected Vector3D GetTargetPoint(ref Vector3D shooterPos, IMyLargeTurretBase designator)
+    protected Vector3D GetTargetPoint(ref Vector3D shooterPos, TurretInterface designator)
     {
         if (designator.IsUnderControl)
         {
-            _targetVec = designator.GetPosition() + VectorAzimuthElevation(designator) * _convergenceRange;
+            _targetVec = designator.WorldPos + designator.Aim * _convergenceRange;
             _lastTargetEntityId = 0;
         }
         else if (designator.HasTarget)
@@ -2327,8 +2346,8 @@ abstract class TurretGroupBase
             var targetInfo = designator.GetTargetedEntity();
 
             /*
-             * We reset our PID controllers and make acceleration compute to zero to handle switching off targets.
-             */
+                * We reset our PID controllers and make acceleration compute to zero to handle switching off targets.
+                */
             if (targetInfo.EntityId != _lastTargetEntityId)
             {
                 _lastTargetVelocity = targetInfo.Velocity;
@@ -2363,7 +2382,7 @@ abstract class TurretGroupBase
             Vector3D targetAccel = UpdatesPerSecond * (targetInfo.Velocity - _lastTargetVelocity);
             _targetVec = TrajectoryEstimation(timeToIntercept, ref targetPos, ref targetVel, ref targetAccel, _gameMaxSpeed,
                 ref shooterPos, ref _gridVelocity, _muzzleVelocity, projectileInitSpeed, projectileAccel, _gravityMultiplier);
-                
+
             if (targetInfo.HitPosition.HasValue) // Not aim at center
             {
                 _targetVec += (targetInfo.HitPosition.Value - targetInfo.Position);
@@ -2491,6 +2510,7 @@ abstract class TurretGroupBase
                 if (projectileVel.LengthSquared() > projectileMaxSpeedSq)
                 {
                     projectileVel = Vector3D.Normalize(projectileVel) * projectileMaxSpeed;
+                    projectileAccStep *= 0; // FIXME: Make this configurable. This is a quick patch for 1.200 rocket behavior 
                 }
             }
 
@@ -2556,36 +2576,36 @@ abstract class TurretGroupBase
     #endregion
 
     #region Designator Selection
-    IMyLargeTurretBase GetDesignatorTurret(List<IMyLargeTurretBase> turretDesignators, ref Vector3D referencePos)
+    TurretInterface GetDesignatorTurret(ref Vector3D referencePos)
     {
-        IMyLargeTurretBase closestTurret = null;
-        double closestDistanceSq = double.MaxValue;
-        foreach (var block in turretDesignators)
+        TurretInterface closest = null;
+        double closestDistSq = double.MaxValue;
+        foreach (var d in _designators)
         {
-            if (block.IsUnderControl)
-                return block;
+            if (d.IsUnderControl)
+                return d;
 
-            if (block.HasTarget)
+            if (d.AiEnabled && d.HasTarget)
             {
-                var distanceSq = Vector3D.DistanceSquared(block.GetPosition(), referencePos);
-                if (distanceSq + 1e-3 < closestDistanceSq)
+                var distSq = Vector3D.DistanceSquared(d.WorldPos, referencePos);
+                if (distSq + 1e-3 < closestDistSq)
                 {
-                    closestDistanceSq = distanceSq;
-                    closestTurret = block;
+                    closestDistSq = distSq;
+                    closest = d;
                 }
             }
         }
 
-        if (closestTurret == null)
+        if (closest == null)
         {
-            closestTurret = turretDesignators.Count == 0 ? null : turretDesignators[0];
+            closest = _designators.Count == 0 ? null : _designators[0];
         }
-        return closestTurret;
+        return closest;
     }
     #endregion
 
     #region Vector Math Functions
-    protected static Vector3D VectorAzimuthElevation(IMyLargeTurretBase turret)
+    public static Vector3D VectorAzimuthElevation(IMyLargeTurretBase turret)
     {
         double el = turret.Elevation;
         double az = turret.Azimuth;
@@ -2771,6 +2791,129 @@ abstract class TurretGroupBase
             min.Z <= point.Z && point.Z <= max.Z;
     }
     #endregion
+}
+
+public class TurretInterface
+{
+    public IMyTurretControlBlock TCB { get; private set; } = null;
+    public IMyLargeTurretBase T { get; private set; } = null;
+
+    List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
+    List<IMyUserControllableGun> _weps = new List<IMyUserControllableGun>();
+
+    private TurretInterface() { }
+
+    public TurretInterface(IMyLargeTurretBase t)
+    {
+        T = t;
+    }
+
+    public TurretInterface(IMyTurretControlBlock tcb)
+    {
+        TCB = tcb;
+        TCB.GetTools(_tools);
+        foreach (var t in _tools)
+        {
+            var w = t as IMyUserControllableGun;
+            if (w != null)
+            {
+                _weps.Add(w);
+            }
+        }
+    }
+
+    public MyDetectedEntityInfo GetTargetedEntity()
+    {
+        return T != null ? T.GetTargetedEntity() : TCB.GetTargetedEntity();
+    }
+
+    public Vector3D Aim
+    {
+        get
+        {
+            if (T != null)
+            {
+                return TurretGroupBase.VectorAzimuthElevation(T);
+            }
+            return TCB.GetShootDirection();
+        }
+    }
+
+    public void ResetTargeting()
+    {
+        if (T != null)
+        {
+            T.ResetTargetingToDefault();
+            T.Range = float.MaxValue;
+            return;
+        }
+        TCB.AIEnabled = true;
+        TCB.Range = float.MaxValue;
+    }
+
+    public bool IsUnderControl
+    {
+        get
+        {
+            return T != null ? T.IsUnderControl : TCB.IsUnderControl;
+        }
+    }
+
+    public bool IsShooting
+    {
+        get
+        {
+            if (T != null)
+            {
+                return T.IsShooting;
+            }
+            foreach (var w in _weps)
+            {
+                if (w.IsShooting)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    public bool IsWorking
+    {
+        get
+        {
+            return T != null ? T.IsWorking : TCB.IsWorking && (TCB.AzimuthRotor != null || TCB.ElevationRotor != null) && (_tools.Count > 0 || TCB.Camera != null);
+        }
+    }
+
+    public bool AiEnabled
+    {
+        get
+        {
+            return T != null ? T.AIEnabled : TCB.AIEnabled;
+        }
+    }
+
+    public bool HasTarget
+    {
+        get
+        {
+            return T != null ? T.HasTarget : TCB.HasTarget;
+        }
+    }
+
+    public Vector3D WorldPos
+    {
+        get
+        {
+            if (T != null)
+                return T.GetPosition();
+            var ds = TCB.GetDirectionSource();
+            if (ds != null)
+                return ds.GetPosition();
+            return Vector3D.Zero;
+        }
+    }
 }
 #endregion
 
