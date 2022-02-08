@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "33.11.4";
-const string DATE = "2021/10/08";
+const string VERSION = "34.0.1";
+const string DATE = "2022/02/03";
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
 
@@ -134,7 +134,7 @@ ScheduledAction grabBlockAction;
 
 Dictionary<long, TargetData> targetDataDict = new Dictionary<long, TargetData>();
 Dictionary<long, TargetData> broadcastDict = new Dictionary<long, TargetData>();
-List<IMyLargeTurretBase> turrets = new List<IMyLargeTurretBase>();
+List<TurretInterface> turrets = new List<TurretInterface>();
 List<IMySensorBlock> sensors = new List<IMySensorBlock>();
 List<IMyTextSurface> textSurfaces = new List<IMyTextSurface>();
 List<IMyShipController> taggedControllers = new List<IMyShipController>();
@@ -475,7 +475,7 @@ void GetTurretTargets()
         if (block.Closed)
             continue;
 
-        if (block.HasTarget && !block.IsUnderControl)
+        if (block.HasTarget)
         {
             var target = block.GetTargetedEntity();
             AddTargetData(target);
@@ -1329,7 +1329,7 @@ IMyShipController GetControlledShipController(List<IMyShipController> SCs)
     return null;
 }
 
-float GetMaxTurretRange(List<IMyLargeTurretBase> turrets)
+float GetMaxTurretRange(List<TurretInterface> turrets)
 {
     float maxRange = 0;
     foreach (var block in turrets)
@@ -1371,7 +1371,14 @@ bool PopulateLists(IMyTerminalBlock block)
     var turret = block as IMyLargeTurretBase;
     if (turret != null)
     {
-        turrets.Add(turret);
+        turrets.Add(new TurretInterface(turret));
+        return false;
+    }
+    
+    var tcb = block as IMyTurretControlBlock;
+    if (tcb != null)
+    {
+        turrets.Add(new TurretInterface(tcb));
         return false;
     }
 
@@ -2074,6 +2081,77 @@ class RadarRunningScreenManager
     #endregion
 }
 #endregion
+
+public class TurretInterface
+{
+    public IMyTurretControlBlock TCB { get; private set; } = null;
+    public IMyLargeTurretBase T { get; private set; } = null;
+
+    List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
+
+    private TurretInterface() { }
+
+    public TurretInterface(IMyLargeTurretBase t)
+    {
+        T = t;
+    }
+
+    public TurretInterface(IMyTurretControlBlock tcb)
+    {
+        TCB = tcb;
+        TCB.GetTools(_tools);
+    }
+
+    public MyDetectedEntityInfo GetTargetedEntity()
+    {
+        return T != null ? T.GetTargetedEntity() : TCB.GetTargetedEntity();
+    }
+    
+    public float Range
+    {
+        get
+        {
+            return T != null ? T.Range : TCB.Range;
+        }
+    }
+
+    public bool Closed
+    {
+        get
+        {
+            return T != null ? T.Closed : TCB.Closed;
+        }
+    }
+
+    public bool IsWorking
+    {
+        get
+        {
+            return T != null ? T.IsWorking : TCB.IsWorking && (TCB.AzimuthRotor != null || TCB.ElevationRotor != null) && (_tools.Count > 0 || TCB.Camera != null);
+        }
+    }
+
+    public bool HasTarget
+    {
+        get
+        {
+            return T != null ? T.HasTarget : TCB.HasTarget;
+        }
+    }
+
+    public Vector3D WorldPos
+    {
+        get
+        {
+            if (T != null)
+                return T.GetPosition();
+            var ds = TCB.GetDirectionSource();
+            if (ds != null)
+                return ds.GetPosition();
+            return Vector3D.Zero;
+        }
+    }
+}
 
 #endregion
 
