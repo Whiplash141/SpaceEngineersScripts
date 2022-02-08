@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "94.10.7";
-const string DATE = "2021/10/06";
+const string VERSION = "94.11.0";
+const string DATE = "2022/02/03";
 const string COMPAT_VERSION = "169.0.0";
 #endregion
 
@@ -240,6 +240,7 @@ List<IMyRadioAntenna> _broadcastList = new List<IMyRadioAntenna>();
 List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 List<IMyShipController> _shipControllers = new List<IMyShipController>();
 List<IMyLargeTurretBase> _turrets = new List<IMyLargeTurretBase>();
+List<IMyTurretControlBlock> _turretControlBlocks = new List<IMyTurretControlBlock>();
 List<IMyTimerBlock> _timersTriggerOnAnyFire = new List<IMyTimerBlock>();
 Dictionary<int, IMyDoor> _siloDoorDict = new Dictionary<int, IMyDoor>();
 Dictionary<int, IMyTimerBlock> _fireTimerDict = new Dictionary<int, IMyTimerBlock>();
@@ -628,7 +629,7 @@ void HandleCameraHoming(ref bool shouldBroadcast)
 void HandleTurretHoming(ref bool shouldBroadcast)
 {
     // TODO: Make turret guidance populate fields
-    TurretGuidance(_turrets);
+    TurretGuidance(_turrets, _turretControlBlocks);
 
     double antennaRange = _stealthySemiActiveAntenna ? 1 : _idleAntennaRange;
     if (_turretLocked)
@@ -1228,6 +1229,7 @@ bool GrabBlocks()
     _textSurfaces.Clear();
     _shipControllers.Clear();
     _turrets.Clear();
+    _turretControlBlocks.Clear();
     _timersTriggerOnAnyFire.Clear();
     _siloDoorDict.Clear();
     _fireTimerDict.Clear();
@@ -1262,7 +1264,7 @@ bool GrabBlocks()
 
     // Turret guidance checks
     _turretAllowed = true;
-    if (_turrets.Count == 0)
+    if (_turrets.Count == 0 && _turretControlBlocks.Count == 0)
     {
         _setupStringbuilder.AppendLine("WARNING: Turret homing unavailable.");
         _setupStringbuilder.AppendLine($"Info: No turrets in '{_fireControlGroupName}' group");
@@ -1502,6 +1504,13 @@ bool CollectionFunction(IMyTerminalBlock block)
     if (turret != null)
     {
         _turrets.Add(turret);
+        return false;
+    }
+    
+    var tcb = block as IMyTurretControlBlock;
+    if (tcb != null)
+    {
+        _turretControlBlocks.Add(tcb);
         return false;
     }
 
@@ -2294,7 +2303,7 @@ List<MyDetectedEntityInfo> _targetInfoList = new List<MyDetectedEntityInfo>();
 MyDetectedEntityInfo _targetInfo = new MyDetectedEntityInfo();
 double _maxTurretRange = 0;
 bool _turretLocked = false;
-void TurretGuidance(List<IMyLargeTurretBase> turrets)
+void TurretGuidance(List<IMyLargeTurretBase> turrets, List<IMyTurretControlBlock> turretControlBlocks)
 {
     //get targets
     _targetInfoList.Clear();
@@ -2306,7 +2315,22 @@ void TurretGuidance(List<IMyLargeTurretBase> turrets)
             _targetInfoList.Add(block.GetTargetedEntity());
         }
 
-        if (block.IsWorking)
+        if (block.IsWorking && block.AIEnabled)
+        {
+            var thisRange = block.Range;
+            if (thisRange > _maxTurretRange)
+                _maxTurretRange = thisRange;
+        }
+    }
+
+    foreach (var block in turretControlBlocks)
+    {
+        if (block.HasTarget && !block.GetTargetedEntity().IsEmpty())
+        {
+            _targetInfoList.Add(block.GetTargetedEntity());
+        }
+
+        if (block.IsWorking && block.AIEnabled)
         {
             var thisRange = block.Range;
             if (thisRange > _maxTurretRange)
@@ -2329,13 +2353,13 @@ void TurretGuidance(List<IMyLargeTurretBase> turrets)
     //prioritize targets
     _targetInfoList.Sort((x, y) =>
     {
-        var num1 = (x.Position - Me.GetPosition()).LengthSquared(); //y.Position - Me.GetPosition()).LengthSquared()
+        var num1 = (x.Position - Me.GetPosition()).LengthSquared();
         var num2 = (y.Position - Me.GetPosition()).LengthSquared();
         return num1.CompareTo(num2);
     });
 
     //pick closest target
-    _targetInfo = _targetInfoList[0];//default(MyDetectedEntityInfo);
+    _targetInfo = _targetInfoList[0];
     Vector3D targetVelocityVec = _targetInfo.Velocity;
 }
 #endregion
