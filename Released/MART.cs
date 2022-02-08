@@ -7,8 +7,8 @@
 //CHANGE THEM IN THE CUSTOM DATA OF THIS PROGRAM THEN RECOMPILE!
 //=============================================================
 
-const string VERSION = "37.3.4";
-const string DATE = "2020/12/13";
+const string VERSION = "38.1.0";
+const string DATE = "2022/02/07";
 
 //name tag of turret groups
 string groupNameTag = "MART";
@@ -89,7 +89,7 @@ void Main(string arg, UpdateType updateType)
 
     if (timeElapsed >= timeMax)
     {
-        Echo($"WMI Mouse-Aimed Rotor\nTurret System Online{RunningSymbol()}\n(Version {VERSION} - {DATE})");
+        Echo($"Whip's Mouse-Aimed Rotor\nTurret Script\n(Version {VERSION} - {DATE})");
 
         if (!hasTurrets || timeSinceRefresh >= refreshInterval) //check if we are not setup or if we have hit our refresh interval
         {
@@ -365,7 +365,7 @@ public class RotorTurret
         {
             StopRotorMovement(thisGroup); //stops rotors from spazzing
             if (fireWeaponsOnCrouch)
-                ControlWeaponsAndTools(weaponsAndTools, false);
+                ControlWeapons(weaponsAndTools, false);
             thisProgram.Echo("Turret is NOT SETUP");
         }
         else
@@ -384,42 +384,43 @@ public class RotorTurret
     {
         var turretController = GetControlledShipController(shipControllers);
 
-        if (!turretController.IsUnderControl)
+        if (!turretController.IsUnderControl || _commandRest)
         {
-            if (returnToRestPosition)
+            if (returnToRestPosition || _commandRest)
             {
-                ReturnToEquilibrium();
+                bool done = ReturnToEquilibrium();
                 foreach (var block in gyros)
                 {
                     block.GyroOverride = false;
                 }
-                return false;
-            }
-
-            StopRotorMovement(thisGroup);
-            foreach (var additionalElevationRotor in additionalElevationRotors)
-            {
-                if (!additionalElevationRotor.IsAttached) //checks if opposite elevation rotor is attached
+                
+                
+                if (_commandRest && done)
                 {
-                    thisProgram.Echo($"\n[WARN] No rotor head for additional\nelevation rotor named\n'{additionalElevationRotor.CustomName}'\nSkipping this rotor...\n");
-                    continue;
+                    _commandRest = false;
                 }
-
-                IMyTerminalBlock temp; 
-                if (!_weaponGridDict.TryGetValue(additionalElevationRotor.TopGrid, out temp))
+            }
+            else
+            {
+                StopRotorMovement(thisGroup);
+                foreach (var additionalElevationRotor in additionalElevationRotors)
                 {
-                    thisProgram.Echo($"\n[WARN] No weapons or tools for additional\nelevation rotor named\n'{additionalElevationRotor.CustomName}'\nSkipping this rotor...\n");
-                    continue;
+                    if (!additionalElevationRotor.IsAttached) //checks if opposite elevation rotor is attached
+                    {
+                        thisProgram.Echo($"\n[WARN] No rotor head for additional\nelevation rotor named\n'{additionalElevationRotor.CustomName}'\nSkipping this rotor...\n");
+                        continue;
+                    }
+
+                    IMyTerminalBlock temp; 
+                    if (!_weaponGridDict.TryGetValue(additionalElevationRotor.TopGrid, out temp))
+                    {
+                        thisProgram.Echo($"\n[WARN] No weapons or tools for additional\nelevation rotor named\n'{additionalElevationRotor.CustomName}'\nSkipping this rotor...\n");
+                        continue;
+                    }
                 }
             }
 
             return false;
-        }
-
-        if (_commandRest)
-        {
-            returnToRestPosition = _returnToRestPositionCached;
-            _commandRest = false;
         }
 
         //get orientation of turret
@@ -543,7 +544,7 @@ public class RotorTurret
         //control weapons
         if (fireWeaponsOnCrouch)
         {
-            ControlWeaponsAndTools(weaponsAndTools, WASDinputVec.Y < 0);
+            ControlWeapons(weaponsAndTools, WASDinputVec.Y < 0);
         }
 
         //Determine how to move opposite elevation rotor (if any)
@@ -641,7 +642,7 @@ public class RotorTurret
             return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
     }
 
-    private void ControlWeaponsAndTools(List<IMyTerminalBlock> weaponsAndTools, bool shouldEnable)
+    private void ControlWeapons(List<IMyTerminalBlock> weaponsAndTools, bool shouldEnable)
     {
         if (shouldEnable == weaponsEnabled)
             return;
@@ -650,14 +651,10 @@ public class RotorTurret
 
         foreach (var b in weaponsAndTools)
         {
-            if (b is IMyUserControllableGun)
+            var gun = b as IMyUserControllableGun;
+            if (gun != null)
             {
-                b.SetValue("Shoot", shouldEnable);
-            }
-            else if ((b is IMyShipToolBase || b is IMyLightingBlock) && b is IMyFunctionalBlock)
-            {
-                var f = (IMyFunctionalBlock)b;
-                f.Enabled = shouldEnable;
+                gun.Shoot = shouldEnable;
             }
         }
     }
@@ -682,7 +679,7 @@ public class RotorTurret
             }
         }
 
-        ControlWeaponsAndTools(weaponsAndTools, false);
+        ControlWeapons(weaponsAndTools, false);
     }
 
     private IMyShipController GetControlledShipController(List<IMyShipController> SCs)
@@ -696,29 +693,28 @@ public class RotorTurret
         return SCs[0];
     }
 
-    bool _returnToRestPositionCached = false;
     public void GoToRest()
     {
-        _returnToRestPositionCached = returnToRestPosition;
-        returnToRestPosition = true;
         _commandRest = true;
     }
 
-    void ReturnToEquilibrium()
+    bool ReturnToEquilibrium()
     {
-        MoveRotorToEquilibrium(azimuthRotor);
-        MoveRotorToEquilibrium(elevationRotor);
+        bool done = true;
+        done &= MoveRotorToEquilibrium(azimuthRotor);
+        done &= MoveRotorToEquilibrium(elevationRotor);
 
         foreach (var block in additionalElevationRotors)
         {
-            MoveRotorToEquilibrium(block);
+            done &= MoveRotorToEquilibrium(block);
         }
+        return done;
     }
 
-    void MoveRotorToEquilibrium(IMyMotorStator rotor)
+    bool MoveRotorToEquilibrium(IMyMotorStator rotor)
     {
         if (rotor == null)
-            return;
+            return true;
 
         double restAngle = 0;
         if (!string.IsNullOrEmpty(rotor.CustomData) && double.TryParse(rotor.CustomData, out restAngle))
@@ -741,7 +737,6 @@ public class RotorTurret
                     restAngleRad += MathHelper.TwoPi;
             }
 
-
             var angularDeviation = (restAngleRad - currentAngle);
             rotor.TargetVelocityRPM = (float)Math.Round(angularDeviation * equilibriumRotationSpeed, 2);
 
@@ -751,6 +746,11 @@ public class RotorTurret
                 {
                     rotor.Enabled = true;
                 }
+                return false;
+            }
+            else
+            {
+                return true;
             }
         }
         else if (rotor.LowerLimitRad >= -MathHelper.TwoPi && rotor.UpperLimitRad <= MathHelper.TwoPi)
@@ -770,11 +770,17 @@ public class RotorTurret
                 {
                     rotor.Enabled = true;
                 }
+                return false;
+            }
+            else
+            {
+                return true;
             }
         }
         else
         {
             rotor.TargetVelocityRPM = 0f;
+            return true;
         }
     }
 
