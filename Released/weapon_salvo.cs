@@ -1,3 +1,4 @@
+
 /*     
 / //// / Whip's Multi-Group Weapon Salvo Script / //// /
 PUBLIC RELEASE
@@ -105,8 +106,8 @@ If you have any questions feel free to post them on the workshop page!
 //=================================================
 
 #region DONT FREAKING TOUCH THESE
-const string VERSION = "44.1.0";
-const string DATE = "2022/01/13";
+const string VERSION = "45.1.1";
+const string DATE = "2022/02/12";
 #endregion
 
 string _salvoGroupNameTag = "Salvo Group";
@@ -116,6 +117,7 @@ readonly MyIni _ini = new MyIni();
 
 const string IniSectionTag = "Weapon Salvo Config";
 const string IniNameTag = "Salvo group nametag";
+const string IniRailgunSubtypes = "Railgun subtype names";
 
 RuntimeTracker _runtimeTracker;
 Scheduler _scheduler;
@@ -250,6 +252,7 @@ void ProcessIni()
     if (_ini.TryParse(Me.CustomData))
     {
         _salvoGroupNameTag = _ini.Get(IniSectionTag, IniNameTag).ToString(_salvoGroupNameTag);
+        MyIniHelper.GetStringList(IniSectionTag, IniRailgunSubtypes, _ini, SequencedWeapon.RailgunSubtypes);
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
@@ -257,6 +260,7 @@ void ProcessIni()
     }
 
     _ini.Set(IniSectionTag, IniNameTag, _salvoGroupNameTag);
+    MyIniHelper.SetStringList(IniSectionTag, IniRailgunSubtypes, _ini, SequencedWeapon.RailgunSubtypes);
 }
 
 void WriteIni()
@@ -310,7 +314,7 @@ void GrabBlockGroups()
 }
 #endregion
 
-public class WeaponSalvoGroup
+class WeaponSalvoGroup
 {
     #region Fields
     public readonly StringBuilder EchoBuilder = new StringBuilder();
@@ -326,19 +330,20 @@ public class WeaponSalvoGroup
         IniCustomRofUnits = "Custom rate of fire units",
         IniCommentCustomRofUnits = " Valid units are: Ticks, RPM, or RPS",
         IniCustomRof = "Custom rate of fire";
-    
+
     int _weaponCount = 0;
     int _ticksSinceLastShot = 0;
     int _ticksBetweenShots = 1;
     int _burstCount = 0;
+    bool _readyToFire = false;
     bool _isShooting = false;
     bool _manualOverride = false;
-    bool _hasEnabledNextWeapon = false;
     bool _shouldBurst = false;
     bool _init = false;
     float _customRof = 0;
 
-    List<IMyUserControllableGun> _weapons = new List<IMyUserControllableGun>();
+    SwapList<IMyUserControllableGun> _gunsToProcess = new SwapList<IMyUserControllableGun>();
+    List<SequencedWeapon> _weapons = new List<SequencedWeapon>();
     #endregion
 
     #region Properties
@@ -410,15 +415,38 @@ public class WeaponSalvoGroup
 
         if (_weapons.Count > 0)
         {
-            // Calibrated for vanilla rocket launchers
-            int defaultTicksBetweenShots = 1;
-            if (_weapons[0].CubeGrid.GridSizeEnum == MyCubeSize.Large)
-                defaultTicksBetweenShots = 2;
-
-            var ticks = 60f / _weapons.Count / defaultTicksBetweenShots;
+            float defaultRpm = GetDefaultWeaponRateOfFireRPM(_weapons[0].Weapon) * _weapons.Count;
+            float ticks = 3600f / defaultRpm;
             TicksBetweenShots = (int)Math.Ceiling(ticks);
         }
         ProcessIni();
+    }
+
+    static float GetDefaultWeaponRateOfFireRPM(IMyUserControllableGun gun)
+    {
+        switch (gun.BlockDefinition.SubtypeId)
+        {
+            case "SmallBlockAutoCannon":
+                return 150f;
+            case "SmallBlockMediumCalibreGun":
+                return 10f;
+            case "LargeBlockLargeCalibreGun":
+                return 5f;
+            case "LargeRailgun":
+                return 1.0133f;
+            case "SmallRailgun":
+                return 20f;
+            default:
+                if (gun is IMySmallGatlingGun)
+                {
+                    return 700f;
+                }
+                else if (gun is IMySmallMissileLauncher)
+                {
+                    return gun.CubeGrid.GridSizeEnum == MyCubeSize.Large ? 120f : 60f;
+                }
+                return 60f;
+        }
     }
     #endregion
 
@@ -428,6 +456,8 @@ public class WeaponSalvoGroup
         _program = program;
         GetBlocks(ini);
         _init = true;
+        _ticksSinceLastShot = TicksBetweenShots;
+        _readyToFire = true;
     }
 
     void Echo(string echoStr)
@@ -480,7 +510,7 @@ public class WeaponSalvoGroup
                 }
             }
         }
-        
+
         // Write
         ini.Set(sectionName, IniUseCustomRof, _manualOverride);
         ini.Set(sectionName, IniCustomRof, _customRof);
@@ -489,12 +519,38 @@ public class WeaponSalvoGroup
     }
     #endregion
 
+    bool CollectBlocks(IMyTerminalBlock x)
+    {
+        var gun = (IMyUserControllableGun)x;
+        if (!(x is IMyLargeTurretBase) && x.IsFunctional && _program.Me.IsSameConstructAs(x))
+        {
+            _gunsToProcess.Active.Add(gun);
+        }
+        return false;
+    }
+
     public void GetBlocks(MyIni ini)
     {
-        BlockGroup.GetBlocksOfType(_weapons, x => !(x is IMyLargeTurretBase) && x.IsFunctional && _program.Me.IsSameConstructAs(x));
+        _gunsToProcess.Swap();
+        _gunsToProcess.Active.Clear();
+
+        // Get current guns
+        BlockGroup.GetBlocksOfType<IMyUserControllableGun>(null, CollectBlocks);
+
+        // Remove no-longer existing guns
+        _weapons.RemoveAll(x => !_gunsToProcess.Active.Contains(x.Weapon));
+
+        // Add new guns
+        foreach (var g in _gunsToProcess.Active)
+        {
+            if (!_gunsToProcess.Inactive.Contains(g))
+            {
+                _weapons.Add(new SequencedWeapon(g));
+            }
+        }
 
         // Sorting alphabetically
-        _weapons.Sort((gun1, gun2) => gun1.CustomName.CompareTo(gun2.CustomName));
+        _weapons.Sort((gun1, gun2) => gun1.Weapon.CustomName.CompareTo(gun2.Weapon.CustomName));
 
         if (!_manualOverride)
         {
@@ -519,71 +575,112 @@ public class WeaponSalvoGroup
             return;
         }
 
-        //Checks if guns are being fired
-        if (!_isShooting)
+        if (!_readyToFire && _ticksSinceLastShot >= TicksBetweenShots)
         {
-            foreach (IMyUserControllableGun thisWeapon in _weapons) //need to track if bool has been reset
-            {
-                if (thisWeapon.IsShooting && thisWeapon.Enabled)
-                {
-                    _isShooting = true;
-                    break;
-                }
-            }
+            _weaponCount = ++_weaponCount % _weapons.Count;
+            _readyToFire = true;
         }
+        _ticksSinceLastShot++;
 
-        if (_ticksSinceLastShot >= TicksBetweenShots)
+        var weaponToFire = _weapons[_weaponCount % _weapons.Count];
+        weaponToFire.Weapon.Enabled = true;
+
+        if (_readyToFire)
         {
-            IMyUserControllableGun weaponToFire = _weapons[_weaponCount];
+            //Checks if guns are being fired
+            _isShooting = false;
 
-            if (!_hasEnabledNextWeapon)
+            if (weaponToFire.Weapon.IsShooting)
             {
-                // Turn all weapons off  
-                for (int i = 0; i < _weapons.Count; ++i)
-                {
-                    var thisWeapon = _weapons[i];
-                    thisWeapon.Enabled = i == _weaponCount;
-                }
-                _hasEnabledNextWeapon = true;
-            }
-            else if (weaponToFire.Enabled == false)
-            {
-                // Ensure weapon stays on
-                weaponToFire.Enabled = true;
-            }
-
-            if (_isShooting)
-            {
-                _isShooting = false;
-                _hasEnabledNextWeapon = false;
-                //weaponToFire.Enabled = false;
-                _weaponCount = ++_weaponCount % _weapons.Count;
+                _isShooting = true;
                 _ticksSinceLastShot = 0;
+                _readyToFire = false;
+                weaponToFire.OnShoot();
+            }
+            else if (Shoot)
+            {
+                _isShooting = true;
+                _ticksSinceLastShot = 0;
+                _readyToFire = false;
+                weaponToFire.OnShoot();
+                weaponToFire.Weapon.ShootOnce();
+            }
 
-                if (_shouldBurst)
+            if (_shouldBurst)
+            {
+                _burstCount--;
+                if (_burstCount <= 0)
                 {
-                    _burstCount--;
-                    if (_burstCount <= 0)
-                    {
-                        _shouldBurst = false;
-                        Shoot = false;
-                        _burstCount = 0;
-                    }
+                    _shouldBurst = false;
+                    Shoot = false;
+                    _burstCount = 0;
                 }
             }
+        }
 
-            if (Shoot)
+        // Turn other weapons off
+        foreach (var weapon in _weapons)
+        {
+            if (weapon.Weapon != weaponToFire.Weapon && weapon.CanDisable())
             {
-                weaponToFire.ShootOnce();
+                weapon.Weapon.Enabled = false;
             }
         }
-        else
-        {
-            _ticksSinceLastShot++; // continues to count until _delay is hit	          
-        }
 
-        string output = $"  - No. Weapons: {_weapons.Count}\n  - Weapon Index: {_weaponCount}\n  - Rate of Fire: {DesiredRPM} -> {3600f / TicksBetweenShots:N1} RPM\n  - Delay Between Shots: {TicksBetweenShots} tick(s)\n  - Current Tick: {_ticksSinceLastShot} tick(s)\n  - Burst Count: {_burstCount}\n  - Shooting: {_isShooting}\n  - Toggle Fire: {Shoot}\n  - Using Defaults: {!_manualOverride}\n";
+        string output = $"  - No. Weapons: {_weapons.Count}\n  - Weapon Index: {_weaponCount}\n  - Rate of Fire: {DesiredRPM} -> {3600f / TicksBetweenShots:N1} RPM\n  - Delay Between Shots: {TicksBetweenShots} tick(s)\n  - Current Tick: {Math.Min(TicksBetweenShots, _ticksSinceLastShot)} tick(s)\n  - Burst Count: {_burstCount}\n  - Shooting: {_isShooting}\n  - Toggle Fire: {Shoot}\n  - Using Defaults: {!_manualOverride}\n";
         Echo(output);
+    }
+}
+
+class SequencedWeapon
+{
+    public readonly IMyUserControllableGun Weapon;
+    public readonly bool IsRailgun;
+
+    static readonly MyDefinitionId ElectricityId = new MyDefinitionId(typeof(MyObjectBuilder_GasProperties), "Electricity");
+    readonly MyResourceSinkComponent _sink;
+    const float IdlePowerDraw = 0.0002f;
+    const float Epsilon = 1e-6f;
+    bool _waitingForRecharge = false;
+
+    public static List<string> RailgunSubtypes { get; private set; } = new List<string>()
+{
+"SmallRailgun",
+"LargeRailgun",
+};
+
+    public SequencedWeapon(IMyUserControllableGun gun)
+    {
+        Weapon = gun;
+        _sink = Weapon.Components.Get<MyResourceSinkComponent>();
+        IsRailgun = RailgunSubtypes.Contains(gun.BlockDefinition.SubtypeId);
+    }
+
+    public void OnShoot()
+    {
+        _waitingForRecharge = IsRailgun;
+    }
+
+    public bool CanDisable()
+    {
+        if (!IsRailgun)
+        {
+            return true;
+        }
+        if (IsRecharging(Weapon))
+        {
+            _waitingForRecharge = false;
+        }
+        return !IsRecharging(Weapon) && !_waitingForRecharge;
+    }
+
+    bool IsRecharging(IMyUserControllableGun gun)
+    {
+        if (_sink == null)
+        {
+            return false;
+        }
+        return _sink.MaxRequiredInputByType(ElectricityId) > (IdlePowerDraw + Epsilon);
     }
 }
 
@@ -991,7 +1088,7 @@ class ArgumentParser
 
                 if (isSwitch)
                 {
-                    if (!char.IsLetter(c))
+                    if (!char.IsLetter(c) && c != '_')
                     {
                         return ReturnCode.NonAlphaSwitch;
                     }
@@ -1111,8 +1208,7 @@ class WeaponSalvoScreenManager
 
     const TextAlignment Center = TextAlignment.CENTER;
     const SpriteType Texture = SpriteType.TEXTURE;
-    const float RocketSpriteScale = .25f;
-    const float LauncherSpriteScale = .5f;
+    const float ArtillerySpriteScale = 0.8f;
     const float TitleBarHeightPx = 64f;
     const float TextSize = 1.3f;
     const float BaseTextHeightPx = 37f;
@@ -1120,17 +1216,12 @@ class WeaponSalvoScreenManager
     const string TitleFormat = "Whip's Weapon Salvo - v{0}";
     readonly string _titleText;
 
-    readonly Vector2 _doorSpritePos = new Vector2(0, 20);
-
     Program _program;
 
     int _idx = 0;
-    const float RocketY = -110f;
-    const float RocketX = 150f;
-    const float LauncherY = 120f;
-    Vector2[] _rocketLocations = new Vector2[] { new Vector2(-RocketX, RocketY), new Vector2(0, RocketY), new Vector2(RocketX, RocketY) };
-    Vector2[] _launcherLocations = new Vector2[] { new Vector2(-RocketX, LauncherY), new Vector2(0, LauncherY), new Vector2(RocketX, LauncherY) };
-
+    Vector2 _topArtillery = new Vector2(220, -80);
+    Vector2 _midArtillery = new Vector2(220, 20);
+    Vector2 _bottomArtillery = new Vector2(220, 120);
 
     bool _clearSpriteCache = false;
     IMyTextSurface _surface = null;
@@ -1151,9 +1242,8 @@ class WeaponSalvoScreenManager
     {
         if (_surface == null)
             return;
-        
-        Vector2 rocketPos = _rocketLocations[_idx]; ;
-        _idx = ++_idx % _rocketLocations.Length;
+
+        _idx = ++_idx % 3;
 
         SetupDrawSurface(_surface);
 
@@ -1168,11 +1258,9 @@ class WeaponSalvoScreenManager
                 frame.Add(new MySprite());
             }
 
-            DrawRocket(frame, screenCenter + rocketPos * minScale, minScale * RocketSpriteScale);
-            foreach (var launcherPos in _launcherLocations)
-            {
-                DrawRocketLauncher(frame, screenCenter + launcherPos * minScale, minScale * LauncherSpriteScale);
-            }
+            DrawArtilleryCannon(frame, screenCenter + _topArtillery * minScale, minScale * ArtillerySpriteScale, _idx == 0);
+            DrawArtilleryCannon(frame, screenCenter + _midArtillery * minScale, minScale * ArtillerySpriteScale, _idx == 1);
+            DrawArtilleryCannon(frame, screenCenter + _bottomArtillery * minScale, minScale * ArtillerySpriteScale, _idx == 2);
 
             DrawTitleBar(_surface, frame, minScale);
         }
@@ -1221,23 +1309,100 @@ class WeaponSalvoScreenManager
         _surface.Script = "";
     }
 
-    void DrawRocketLauncher(MySpriteDrawFrame frame, Vector2 centerPos, float scale = 1f)
+    public void DrawArtilleryCannon(MySpriteDrawFrame frame, Vector2 centerPos, float scale, bool drawMuzzleFlash)
     {
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(200f, 400f) * scale, new Color(200, 200, 200, 255), null, TextAlignment.CENTER, 0f)); // body
-        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(81f, -181f) * scale + centerPos, new Vector2(40f, 40f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 3.1416f)); // taper right
-        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(-81f, -181f) * scale + centerPos, new Vector2(40f, 40f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 1.5708f)); // taper left
-    }
-
-    void DrawRocket(MySpriteDrawFrame frame, Vector2 centerPos, float scale = 1f)
-    {
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(8f, 349f) * scale + centerPos, new Vector2(70f, 200f) * scale, new Color(128, 128, 128, 255), null, TextAlignment.CENTER, 0f)); // smoke4
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-10f, 381f) * scale + centerPos, new Vector2(70f, 200f) * scale, new Color(128, 128, 128, 255), null, TextAlignment.CENTER, 0f)); // smoke3
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(19f, 260f) * scale + centerPos, new Vector2(70f, 200f) * scale, new Color(128, 128, 128, 255), null, TextAlignment.CENTER, 0f)); // smoke2
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-21f, 243f) * scale + centerPos, new Vector2(70f, 200f) * scale, new Color(128, 128, 128, 255), null, TextAlignment.CENTER, 0f)); // smoke1
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 169f) * scale + centerPos, new Vector2(70f, 200f) * scale, new Color(255, 128, 64, 255), null, TextAlignment.CENTER, 0f)); // flame
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, -96f) * scale + centerPos, new Vector2(48f, 96f) * scale, new Color(200, 200, 200, 255), null, TextAlignment.CENTER, 0f)); // noseCone
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(48f, 192f) * scale, new Color(200, 200, 200, 255), null, TextAlignment.CENTER, 0f)); // tube
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-90f, 0f) * scale + centerPos, new Vector2(90f, 80f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // gun body
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(-175f, -25f) * scale + centerPos, new Vector2(30f, 80f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, -1.5708f)); // gun front slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-150f, 12f) * scale + centerPos, new Vector2(50f, 45f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // gun bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-195f, 2f) * scale + centerPos, new Vector2(40f, 25f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // gun mid
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(-185f, 24f) * scale + centerPos, new Vector2(20f, 20f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 3.1416f)); // gun bottom slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-345f, 2f) * scale + centerPos, new Vector2(200f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // barrel
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-230f, 2f) * scale + centerPos, new Vector2(20f, 16f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // barrel base
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-88f, 2f) * scale + centerPos, new Vector2(60f, 60f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f)); // conveyor outline
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-88f, 2f) * scale + centerPos, new Vector2(50f, 50f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // conveyor center
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-88f, -3f) * scale + centerPos, new Vector2(50f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f)); // conveyor crossCopy
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-88f, 7f) * scale + centerPos, new Vector2(50f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f)); // conveyor cross
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(-134f, 50f) * scale + centerPos, new Vector2(10f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, -1.5708f)); // gun bottom slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-90f, 50f) * scale + centerPos, new Vector2(80f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f)); // gun bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-174f, 10f) * scale + centerPos, new Vector2(60f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, -0.3491f)); // stripe diag
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-141f, 0f) * scale + centerPos, new Vector2(12f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f)); // stripe horizontal
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-134f, 0f) * scale + centerPos, new Vector2(5f, 82f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f)); // stripe vertical
+        if (drawMuzzleFlash)
+        {
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-480f, 7f) * scale + centerPos, new Vector2(60f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, -0.1745f)); // muzzle flash bottom
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-482f, -3f) * scale + centerPos, new Vector2(60f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, 0.1745f)); // muzzle flash top
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-501f, 2f) * scale + centerPos, new Vector2(100f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, 0f)); // muzzle flash main
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-470f, 2f) * scale + centerPos, new Vector2(40f, 20f) * scale, new Color(255, 255, 0, 255), null, TextAlignment.CENTER, 0f)); // muzzle flash center            
+        }
     }
 
     #endregion
+}
+
+public static class MyIniHelper
+{
+    #region List<string>
+    /// <summary>
+    /// Deserializes a List<string> from MyIni
+    /// </summary>
+    public static void GetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string raw = ini.Get(section, name).ToString(null);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            // Preserve contents
+            return;
+        }
+
+        list.Clear();
+        string[] split = raw.Split('\n');
+        foreach (var s in split)
+        {
+            list.Add(s);
+        }
+    }
+
+    /// <summary>
+    /// Serializes a List<string> to MyIni
+    /// </summary>
+    public static void SetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string output = string.Join($"\n", list);
+        ini.Set(section, name, output);
+    }
+    #endregion
+}
+
+class SwapList<T>
+{
+    public List<T> Active
+    {
+        get
+        {
+            return _swap ? _list1 : _list2;
+        }
+    }
+
+    public List<T> Inactive
+    {
+        get
+        {
+            return _swap ? _list2 : _list1;
+        }
+    }
+
+    bool _swap = false;
+    readonly List<T> _list1;
+    readonly List<T> _list2;
+
+    public SwapList(int capacity = 16)
+    {
+        _list1 = new List<T>(capacity);
+        _list2 = new List<T>(capacity);
+    }
+
+    public void Swap()
+    {
+        _swap = !_swap;
+    }
 }
