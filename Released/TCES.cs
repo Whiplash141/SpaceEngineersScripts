@@ -11,7 +11,7 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.1",
+public const string Version = "1.2.2",
                     Date = "2022/02/14",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
@@ -454,11 +454,17 @@ class CustomTurretController
         done = TryMoveRotorToRestAngle(_azimuthRotor);
         if (done)
         {
-            _controller.AzimuthRotor = _azimuthRotor;
+            if (_azimuthRotor != null)
+            {
+                _controller.AzimuthRotor = _azimuthRotor;                
+            }
             done = TryMoveRotorToRestAngle(_elevationRotor);
             if (done)
             {
-                _controller.ElevationRotor = _elevationRotor;
+                if (_elevationRotor != null)
+                {
+                    _controller.ElevationRotor = _elevationRotor;                    
+                }
             }
             else
             {
@@ -468,7 +474,10 @@ class CustomTurretController
         else
         {
             _azimuthProperty.SetValue(_controller, 0);
-            _controller.ElevationRotor = _elevationRotor;
+            if (_elevationRotor != null)
+            {
+                _controller.ElevationRotor = _elevationRotor;                
+            }
         }
         return done;
     }
