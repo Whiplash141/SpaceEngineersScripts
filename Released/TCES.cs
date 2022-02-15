@@ -11,7 +11,7 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.2",
+public const string Version = "1.2.3",
                     Date = "2022/02/14",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
@@ -19,6 +19,7 @@ public const string Version = "1.2.2",
                     IniKeyElevationName = "Elevation rotor name tag",
                     IniKeyAutoRestAngle = "Should auto return to rest angle",
                     IniKeyAutoRestDelay = "Auto return to rest angle delay (s)",
+                    IniKeyDrawTitleScreen = "Draw title screen",
                     IniSectionRotor = "TCES - Rotor",
                     IniKeyRestAngle = "Rest angle (deg)";
 
@@ -29,6 +30,7 @@ public string AzimuthName { get; private set; } = "Azimuth";
 public string ElevationName { get; private set; } = "Elevation";
 public bool AutomaticRest { get; private set; } = true;
 public float AutomaticRestDelay { get; private set; } = 2f;
+public bool DrawTitleScreen = true;
 TCESTitleScreen _titleScreen;
 
 List<CustomTurretController> _turretControllers = new List<CustomTurretController>();
@@ -667,6 +669,7 @@ void ProcessIni()
         ElevationName = _ini.Get(IniSectionGeneral, IniKeyElevationName).ToString(ElevationName);
         AutomaticRest = _ini.Get(IniSectionGeneral, IniKeyAutoRestAngle).ToBoolean(AutomaticRest);
         AutomaticRestDelay = _ini.Get(IniSectionGeneral, IniKeyAutoRestDelay).ToSingle(AutomaticRestDelay);
+        DrawTitleScreen = _ini.Get(IniSectionGeneral, IniKeyDrawTitleScreen).ToBoolean(DrawTitleScreen);
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
@@ -678,6 +681,7 @@ void ProcessIni()
     _ini.Set(IniSectionGeneral, IniKeyElevationName, ElevationName);
     _ini.Set(IniSectionGeneral, IniKeyAutoRestAngle, AutomaticRest);
     _ini.Set(IniSectionGeneral, IniKeyAutoRestDelay, AutomaticRestDelay);
+    _ini.Set(IniSectionGeneral, IniKeyDrawTitleScreen, DrawTitleScreen);
 
     string output = _ini.ToString();
     if (output != Me.CustomData)
@@ -735,7 +739,11 @@ void OnUpdate10()
     {
         c.Update();
     }
-    _titleScreen.Draw();
+
+    if (DrawTitleScreen)
+    {
+        _titleScreen.Draw();
+    }
 }
 
 StringBuilder _echo = new StringBuilder(1024);
