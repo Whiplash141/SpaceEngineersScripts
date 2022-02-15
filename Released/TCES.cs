@@ -11,12 +11,14 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.1.5",
-                    Date = "2022/02/13",
+public const string Version = "1.2.1",
+                    Date = "2022/02/14",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
                     IniKeyElevationName = "Elevation rotor name tag",
+                    IniKeyAutoRestAngle = "Should auto return to rest angle",
+                    IniKeyAutoRestDelay = "Auto return to rest angle delay (s)",
                     IniSectionRotor = "TCES - Rotor",
                     IniKeyRestAngle = "Rest angle (deg)";
 
@@ -25,6 +27,8 @@ long _runCount = 0;
 public string GroupName { get; private set; } = "TCES";
 public string AzimuthName { get; private set; } = "Azimuth";
 public string ElevationName { get; private set; } = "Elevation";
+public bool AutomaticRest { get; private set; } = true;
+public float AutomaticRestDelay { get; private set; } = 2f;
 TCESTitleScreen _titleScreen;
 
 List<CustomTurretController> _turretControllers = new List<CustomTurretController>();
@@ -38,6 +42,10 @@ class CustomTurretController
     List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _mainTools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _otherTools = new List<IMyFunctionalBlock>();
+
+    ITerminalProperty<long>
+        _azimuthProperty = null,
+        _elevationProperty = null;
 
     List<IMyMotorStator> _extraRotors = new List<IMyMotorStator>();
     IMyMotorStator _azimuthRotor;
@@ -56,6 +64,7 @@ class CustomTurretController
     bool _shouldRest = false;
     MyIni _ini = new MyIni();
     const float RestSpeed = 10f;
+    float _idleTime = 0f;
 
     enum ReturnCode
     {
@@ -93,6 +102,7 @@ class CustomTurretController
     public void Update()
     {
         _updateCount++;
+
         if (_updateCount % 30 == 0)
         {
             SetBlocks();
@@ -103,25 +113,39 @@ class CustomTurretController
             return;
         }
 
-        _controller.Enabled = !_shouldRest;
+        if (_controller.IsUnderControl || _controller.HasTarget)
+        {
+            if (_shouldRest)
+            {
+                if (_azimuthRotor != null)
+                {
+                    _controller.AzimuthRotor = _azimuthRotor;
+                    _azimuthRotor.TargetVelocityRad = 0;
+                }
+                if (_elevationRotor != null)
+                {
+                    _controller.ElevationRotor = _elevationRotor;
+                    _elevationRotor.TargetVelocityRad = 0;
+                }
+                _shouldRest = false;
+            }
+            _idleTime = 0f;
+        }
+        else
+        {
+            _idleTime += (1f / 6f);
+            if (_p.AutomaticRest && _idleTime >= _p.AutomaticRestDelay)
+            {
+                _shouldRest = true;
+            }
+        }
+
         if (_shouldRest)
         {
-            float? restAngle;
-            bool done = true;
-            if (_elevationRotor != null && _restAngles.TryGetValue(_elevationRotor, out restAngle) && restAngle.HasValue)
-            {
-                done &= MoveRotorToEquilibrium(_elevationRotor, restAngle.Value);
-            }
-            if (_azimuthRotor != null && _restAngles.TryGetValue(_azimuthRotor, out restAngle) && restAngle.HasValue)
-            {
-                done &= MoveRotorToEquilibrium(_azimuthRotor, restAngle.Value);
-            }
+            bool done = HandleAzimuthAndElevationRestAngles();
             foreach (var r in _extraRotors)
             {
-                if (_restAngles.TryGetValue(r, out restAngle) && restAngle.HasValue)
-                {
-                    done &= MoveRotorToEquilibrium(r, restAngle.Value);
-                }
+                done &= TryMoveRotorToRestAngle(r);
             }
             _shouldRest = !done;
         }
@@ -134,6 +158,7 @@ class CustomTurretController
         }
     }
 
+    #region Setup
     void Setup()
     {
         _setupReturnCode = ReturnCode.None;
@@ -146,6 +171,10 @@ class CustomTurretController
         _tools.Clear();
         _gridToToolDict.Clear();
         _restAngles.Clear();
+        
+        // TODO: Remove both of these once the setters work properly for unassigning
+        _azimuthProperty = null;
+        _elevationProperty = null;
 
         _group.GetBlocks(null, CollectBlocks);
 
@@ -180,6 +209,7 @@ class CustomTurretController
         _ini.Clear();
         float? restAngle = null;
         const string defaultValue = "none";
+
         if (_ini.TryParse(r.CustomData))
         {
             string angleStr = _ini.Get(IniSectionRotor, IniKeyRestAngle).ToString(defaultValue);
@@ -291,17 +321,22 @@ class CustomTurretController
         {
             return;
         }
+        _azimuthProperty = TerminalPropertiesHelper.GetProperty<long>(_controller, "RotorAzimuth");
+        _elevationProperty = TerminalPropertiesHelper.GetProperty<long>(_controller, "RotorElevation");
         if (_camera != null)
         {
             _controller.Camera = _camera;
         }
-        if (_azimuthRotor != null)
+        if (!_shouldRest)
         {
-            _controller.AzimuthRotor = _azimuthRotor;
-        }
-        if (_elevationRotor != null)
-        {
-            _controller.ElevationRotor = _elevationRotor;
+            if (_azimuthRotor != null)
+            {
+                _controller.AzimuthRotor = _azimuthRotor;
+            }
+            if (_elevationRotor != null)
+            {
+                _controller.ElevationRotor = _elevationRotor;
+            }
         }
         _controller.ClearTools();
         _otherTools.Clear();
@@ -329,7 +364,9 @@ class CustomTurretController
         }
 
     }
+    #endregion
 
+    #region Utilities
     void Echo(string msg)
     {
         _p.Echo(msg);
@@ -398,6 +435,54 @@ class CustomTurretController
             }
         }
         Echo("");
+    }
+    #endregion
+
+    #region Rotor Control
+    /*
+     * In order to properly set the rest angle, we need to unassign the azinuth
+     * and elevation rotors temporarily from the CTC. However, we can't do this
+     * at the same time, or the CTC will be marked as invalid and will lose
+     * its AI and ability to be manually controlled until the rest angle has been
+     * reached. This is undesireable, so what we will do instead is get thhe
+     * azimuth rotor to its rest angle, then try and get the elevation rotor to
+     * its rest angle
+     */
+    bool HandleAzimuthAndElevationRestAngles()
+    {
+        bool done = true;
+        done = TryMoveRotorToRestAngle(_azimuthRotor);
+        if (done)
+        {
+            _controller.AzimuthRotor = _azimuthRotor;
+            done = TryMoveRotorToRestAngle(_elevationRotor);
+            if (done)
+            {
+                _controller.ElevationRotor = _elevationRotor;
+            }
+            else
+            {
+                _elevationProperty.SetValue(_controller, 0);
+            }
+        }
+        else
+        {
+            _azimuthProperty.SetValue(_controller, 0);
+            _controller.ElevationRotor = _elevationRotor;
+        }
+        return done;
+    }
+
+    bool TryMoveRotorToRestAngle(IMyMotorStator r)
+    {
+        float? restAngle;
+        if (r == null
+            || !_restAngles.TryGetValue(r, out restAngle)
+            || !restAngle.HasValue)
+        {
+            return true;
+        }
+        return MoveRotorToEquilibrium(r, restAngle.Value);
     }
 
     void HandleExtraRotors()
@@ -542,12 +627,13 @@ class CustomTurretController
         angle = GetAllowedRotationAngle(angle, rotor);
         rotor.TargetVelocityRad = rotationScale * (float)angle / (10f / 60f);
     }
+    #endregion
 }
 
 Program()
 {
     Runtime.UpdateFrequency = UpdateFrequency.Update10;
-    
+
     Setup();
     _titleScreen = new TCESTitleScreen(Version, this);
 
@@ -570,16 +656,20 @@ void ProcessIni()
         GroupName = _ini.Get(IniSectionGeneral, IniKeyGroupName).ToString(GroupName);
         AzimuthName = _ini.Get(IniSectionGeneral, IniKeyAzimuthName).ToString(AzimuthName);
         ElevationName = _ini.Get(IniSectionGeneral, IniKeyElevationName).ToString(ElevationName);
+        AutomaticRest = _ini.Get(IniSectionGeneral, IniKeyAutoRestAngle).ToBoolean(AutomaticRest);
+        AutomaticRestDelay = _ini.Get(IniSectionGeneral, IniKeyAutoRestDelay).ToSingle(AutomaticRestDelay);
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
         _ini.EndContent = Me.CustomData;
     }
-    
+
     _ini.Set(IniSectionGeneral, IniKeyGroupName, GroupName);
     _ini.Set(IniSectionGeneral, IniKeyAzimuthName, AzimuthName);
     _ini.Set(IniSectionGeneral, IniKeyElevationName, ElevationName);
-    
+    _ini.Set(IniSectionGeneral, IniKeyAutoRestAngle, AutomaticRest);
+    _ini.Set(IniSectionGeneral, IniKeyAutoRestDelay, AutomaticRestDelay);
+
     string output = _ini.ToString();
     if (output != Me.CustomData)
     {
@@ -600,11 +690,11 @@ bool CollectGroups(IMyBlockGroup g)
 void Main(string arg, UpdateType updateSource)
 {
     _runtimeTracker.AddRuntime();
-    
+
     switch (arg)
     {
         case "setup":
-            Setup();        
+            Setup();
             break;
         case "rest":
             foreach (var c in _turretControllers)
@@ -665,7 +755,7 @@ void OnUpdate60()
     Echo(_runtimeTracker.Write());
 
     WriteEcho();
-    
+
     _titleScreen.RestartDraw();
 }
 
@@ -929,29 +1019,29 @@ class TCESTitleScreen
         float sin = (float)Math.Sin(rotation);
         float cos = (float)Math.Cos(rotation);
 
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-90f-sin*0f,sin*-90f+cos*0f)*scale+centerPos, new Vector2(90f,80f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // gun body
-        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos*-175f-sin*-25f,sin*-175f+cos*-25f)*scale+centerPos, new Vector2(30f,80f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, -1.5708f+rotation)); // gun front slope
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-150f-sin*12f,sin*-150f+cos*12f)*scale+centerPos, new Vector2(50f,45f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // gun bottom
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-195f-sin*2f,sin*-195f+cos*2f)*scale+centerPos, new Vector2(40f,25f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // gun mid
-        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos*-185f-sin*24f,sin*-185f+cos*24f)*scale+centerPos, new Vector2(20f,20f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 3.1416f+rotation)); // gun bottom slope
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-345f-sin*2f,sin*-345f+cos*2f)*scale+centerPos, new Vector2(200f,10f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // barrel
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-230f-sin*2f,sin*-230f+cos*2f)*scale+centerPos, new Vector2(20f,16f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // barrel base
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-88f-sin*2f,sin*-88f+cos*2f)*scale+centerPos, new Vector2(60f,60f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, 0f+rotation)); // conveyor outline
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-88f-sin*2f,sin*-88f+cos*2f)*scale+centerPos, new Vector2(50f,50f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // conveyor center
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-88f-sin*-3f,sin*-88f+cos*-3f)*scale+centerPos, new Vector2(50f,5f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, 0f+rotation)); // conveyor crossCopy
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-88f-sin*7f,sin*-88f+cos*7f)*scale+centerPos, new Vector2(50f,5f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, 0f+rotation)); // conveyor cross
-        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos*-134f-sin*50f,sin*-134f+cos*50f)*scale+centerPos, new Vector2(10f,10f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, -1.5708f+rotation)); // gun bottom slope
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-90f-sin*50f,sin*-90f+cos*50f)*scale+centerPos, new Vector2(80f,10f)*scale, new Color(255,255,255,255), null, TextAlignment.CENTER, 0f+rotation)); // gun bottom
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-174f-sin*10f,sin*-174f+cos*10f)*scale+centerPos, new Vector2(60f,5f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, -0.3491f+rotation)); // stripe diag
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-141f-sin*0f,sin*-141f+cos*0f)*scale+centerPos, new Vector2(12f,5f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, 0f+rotation)); // stripe horizontal
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-134f-sin*0f,sin*-134f+cos*0f)*scale+centerPos, new Vector2(5f,82f)*scale, new Color(0,0,0,255), null, TextAlignment.CENTER, 0f+rotation)); // stripe vertical
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -90f - sin * 0f, sin * -90f + cos * 0f) * scale + centerPos, new Vector2(90f, 80f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // gun body
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos * -175f - sin * -25f, sin * -175f + cos * -25f) * scale + centerPos, new Vector2(30f, 80f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, -1.5708f + rotation)); // gun front slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -150f - sin * 12f, sin * -150f + cos * 12f) * scale + centerPos, new Vector2(50f, 45f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // gun bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -195f - sin * 2f, sin * -195f + cos * 2f) * scale + centerPos, new Vector2(40f, 25f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // gun mid
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos * -185f - sin * 24f, sin * -185f + cos * 24f) * scale + centerPos, new Vector2(20f, 20f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 3.1416f + rotation)); // gun bottom slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -345f - sin * 2f, sin * -345f + cos * 2f) * scale + centerPos, new Vector2(200f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // barrel
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -230f - sin * 2f, sin * -230f + cos * 2f) * scale + centerPos, new Vector2(20f, 16f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // barrel base
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -88f - sin * 2f, sin * -88f + cos * 2f) * scale + centerPos, new Vector2(60f, 60f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // conveyor outline
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -88f - sin * 2f, sin * -88f + cos * 2f) * scale + centerPos, new Vector2(50f, 50f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // conveyor center
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -88f - sin * -3f, sin * -88f + cos * -3f) * scale + centerPos, new Vector2(50f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // conveyor crossCopy
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -88f - sin * 7f, sin * -88f + cos * 7f) * scale + centerPos, new Vector2(50f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // conveyor cross
+        frame.Add(new MySprite(SpriteType.TEXTURE, "RightTriangle", new Vector2(cos * -134f - sin * 50f, sin * -134f + cos * 50f) * scale + centerPos, new Vector2(10f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, -1.5708f + rotation)); // gun bottom slope
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -90f - sin * 50f, sin * -90f + cos * 50f) * scale + centerPos, new Vector2(80f, 10f) * scale, new Color(255, 255, 255, 255), null, TextAlignment.CENTER, 0f + rotation)); // gun bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -174f - sin * 10f, sin * -174f + cos * 10f) * scale + centerPos, new Vector2(60f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, -0.3491f + rotation)); // stripe diag
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -141f - sin * 0f, sin * -141f + cos * 0f) * scale + centerPos, new Vector2(12f, 5f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // stripe horizontal
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * -134f - sin * 0f, sin * -134f + cos * 0f) * scale + centerPos, new Vector2(5f, 82f) * scale, new Color(0, 0, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // stripe vertical
 
         if (drawMuzzleFlash)
         {
-            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*-480f-sin*7f,sin*-480f+cos*7f)*scale+centerPos, new Vector2(60f,20f)*scale, new Color(255,128,0,255), null, TextAlignment.CENTER, -0.1745f+rotation)); // muzzle flash bottom
-            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*-482f-sin*-3f,sin*-482f+cos*-3f)*scale+centerPos, new Vector2(60f,20f)*scale, new Color(255,128,0,255), null, TextAlignment.CENTER, 0.1745f+rotation)); // muzzle flash top
-            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*-501f-sin*2f,sin*-501f+cos*2f)*scale+centerPos, new Vector2(100f,20f)*scale, new Color(255,128,0,255), null, TextAlignment.CENTER, 0f+rotation)); // muzzle flash main
-            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*-470f-sin*2f,sin*-470f+cos*2f)*scale+centerPos, new Vector2(40f,20f)*scale, new Color(255,255,0,255), null, TextAlignment.CENTER, 0f+rotation)); // muzzle flash center
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos * -480f - sin * 7f, sin * -480f + cos * 7f) * scale + centerPos, new Vector2(60f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, -0.1745f + rotation)); // muzzle flash bottom
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos * -482f - sin * -3f, sin * -482f + cos * -3f) * scale + centerPos, new Vector2(60f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, 0.1745f + rotation)); // muzzle flash top
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos * -501f - sin * 2f, sin * -501f + cos * 2f) * scale + centerPos, new Vector2(100f, 20f) * scale, new Color(255, 128, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // muzzle flash main
+            frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos * -470f - sin * 2f, sin * -470f + cos * 2f) * scale + centerPos, new Vector2(40f, 20f) * scale, new Color(255, 255, 0, 255), null, TextAlignment.CENTER, 0f + rotation)); // muzzle flash center
         }
 
         frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(25f, -4f) * scale + centerPos, new Vector2(150f, 105f) * scale, _black, null, TextAlignment.CENTER, 0f)); // turret top right shadow
@@ -968,3 +1058,78 @@ class TCESTitleScreen
     #endregion
 }
 
+static class TerminalPropertiesHelper
+{
+    static Dictionary<Type, Dictionary<string, ITerminalAction>> _terminalActionDict = new Dictionary<Type, Dictionary<string, ITerminalAction>>();
+    static Dictionary<Type, Dictionary<string, ITerminalProperty>> _terminalPropertyDict = new Dictionary<Type, Dictionary<string, ITerminalProperty>>();
+
+    public static ITerminalAction GetAction(IMyTerminalBlock block, string actionName)
+    {
+        Type type = block.GetType();
+        Dictionary<string, ITerminalAction> dict;
+        ITerminalAction act;
+
+        if (!_terminalActionDict.TryGetValue(type, out dict))
+        {
+            dict = new Dictionary<string, ITerminalAction>();
+        }
+
+        if (dict.TryGetValue(actionName, out act))
+        {
+            return act;
+        }
+
+        act = block.GetActionWithName(actionName);
+        dict[actionName] = act;
+        _terminalActionDict[type] = dict;
+        return act;
+    }
+
+    public static void ApplyAction(IMyTerminalBlock block, string actionName)
+    {
+        ITerminalAction act = GetAction(block, actionName);
+        if (act != null)
+            act.Apply(block);
+    }
+
+    public static ITerminalProperty<T> GetProperty<T>(IMyTerminalBlock block, string propertyName)
+    {
+        Type type = block.GetType();
+        Dictionary<string, ITerminalProperty> dict;
+        ITerminalProperty prop;
+
+        if (!_terminalPropertyDict.TryGetValue(type, out dict))
+        {
+            dict = new Dictionary<string, ITerminalProperty>();
+        }
+
+        if (dict.TryGetValue(propertyName, out prop))
+        {
+            return prop.Cast<T>();
+        }
+
+        prop = block.GetProperty(propertyName);
+        dict[propertyName] = prop;
+        _terminalPropertyDict[type] = dict;
+        if (prop == null)
+            return null;
+        return prop.Cast<T>();
+    }
+
+    public static void SetValue<T>(IMyTerminalBlock block, string propertyName, T value)
+    {
+        ITerminalProperty<T> prop = GetProperty<T>(block, propertyName);
+
+        if (prop != null)
+            prop.SetValue(block, value);
+    }
+
+    public static T GetValue<T>(IMyTerminalBlock block, string propertyName)
+    {
+        ITerminalProperty<T> prop = GetProperty<T>(block, propertyName);
+
+        if (prop != null)
+            return prop.GetValue(block);
+        return default(T);
+    }
+}
