@@ -1,7 +1,7 @@
 
 /*
  * / //// / TCES | Turret Controller Enhancement Script (by Whiplash141) / //// /
- * 
+ *
  * Description
  *
  * This is a simple script that enhances the functionality of the
@@ -11,8 +11,8 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.3",
-                    Date = "2022/02/14",
+public const string Version = "1.2.4",
+                    Date = "2022/02/16",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -63,10 +63,12 @@ class CustomTurretController
     Dictionary<IMyMotorStator, float?> _restAngles = new Dictionary<IMyMotorStator, float?>();
     long _updateCount = 0;
 
+    bool _wasShooting = false;
     bool _shouldRest = false;
     MyIni _ini = new MyIni();
-    const float RestSpeed = 10f;
     float _idleTime = 0f;
+
+    const float RestSpeed = 10f;
 
     enum ReturnCode
     {
@@ -83,6 +85,13 @@ class CustomTurretController
     }
     ReturnCode _setupReturnCode = ReturnCode.None;
 
+    bool IsActive
+    {
+        get
+        {
+            return _controller != null && (_controller.HasTarget || _controller.IsUnderControl);
+        }
+    }
 
     public CustomTurretController(Program p, IMyBlockGroup group)
     {
@@ -95,7 +104,7 @@ class CustomTurretController
 
     public void GoToRest()
     {
-        if (_controller != null && (!_controller.HasTarget && !_controller.IsUnderControl))
+        if (_controller != null && !IsActive)
         {
             _shouldRest = true;
         }
@@ -115,7 +124,7 @@ class CustomTurretController
             return;
         }
 
-        if (_controller.IsUnderControl || _controller.HasTarget)
+        if (IsActive)
         {
             if (_shouldRest)
             {
@@ -142,6 +151,7 @@ class CustomTurretController
             }
         }
 
+        bool shouldShoot = false;
         if (_shouldRest)
         {
             bool done = HandleAzimuthAndElevationRestAngles();
@@ -151,13 +161,30 @@ class CustomTurretController
             }
             _shouldRest = !done;
         }
-        else
+        else if (_extraRotors.Count > 0)
         {
-            if (_extraRotors.Count > 0)
+            shouldShoot = HandleExtraRotors();
+        }
+
+        if (shouldShoot != _wasShooting)
+        {
+            foreach (var t in _otherTools)
             {
-                HandleExtraRotors();
+                var tool = t as IMyShipToolBase;
+                if (tool != null)
+                {
+                    tool.Enabled = shouldShoot;
+                }
+
+                var gun = t as IMyUserControllableGun;
+                if (gun != null)
+                {
+                    gun.Shoot = shouldShoot;
+                }
             }
         }
+
+        _wasShooting = shouldShoot;
     }
 
     #region Setup
@@ -173,7 +200,7 @@ class CustomTurretController
         _tools.Clear();
         _gridToToolDict.Clear();
         _restAngles.Clear();
-        
+
         // TODO: Remove both of these once the setters work properly for unassigning
         _azimuthProperty = null;
         _elevationProperty = null;
@@ -458,14 +485,14 @@ class CustomTurretController
         {
             if (_azimuthRotor != null)
             {
-                _controller.AzimuthRotor = _azimuthRotor;                
+                _controller.AzimuthRotor = _azimuthRotor;
             }
             done = TryMoveRotorToRestAngle(_elevationRotor);
             if (done)
             {
                 if (_elevationRotor != null)
                 {
-                    _controller.ElevationRotor = _elevationRotor;                    
+                    _controller.ElevationRotor = _elevationRotor;
                 }
             }
             else
@@ -478,7 +505,7 @@ class CustomTurretController
             _azimuthProperty.SetValue(_controller, 0);
             if (_elevationRotor != null)
             {
-                _controller.ElevationRotor = _elevationRotor;                
+                _controller.ElevationRotor = _elevationRotor;
             }
         }
         return done;
@@ -496,12 +523,12 @@ class CustomTurretController
         return MoveRotorToEquilibrium(r, restAngle.Value);
     }
 
-    void HandleExtraRotors()
+    bool HandleExtraRotors()
     {
         var directionSource = _controller.GetDirectionSource();
-        if (_controller == null || directionSource == null)
+        if (directionSource == null)
         {
-            return;
+            return false;
         }
 
         bool isShooting = false;
@@ -522,21 +549,6 @@ class CustomTurretController
             }
         }
 
-        foreach (var t in _otherTools)
-        {
-            var tool = t as IMyShipToolBase;
-            if (tool != null)
-            {
-                tool.Enabled = true;
-            }
-
-            var gun = t as IMyUserControllableGun;
-            if (gun != null)
-            {
-                gun.Shoot = isShooting;
-            }
-        }
-
         foreach (var r in _extraRotors)
         {
             if (!r.IsAttached)
@@ -553,6 +565,8 @@ class CustomTurretController
 
             AimRotorAtPosition(r, _controller.GetShootDirection(), reference.WorldMatrix.Forward);
         }
+
+        return isShooting;
     }
 
     bool MoveRotorToEquilibrium(IMyMotorStator rotor, float restAngle)
