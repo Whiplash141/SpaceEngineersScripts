@@ -11,7 +11,7 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.4",
+public const string Version = "1.2.5",
                     Date = "2022/02/16",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
@@ -63,6 +63,7 @@ class CustomTurretController
     Dictionary<IMyMotorStator, float?> _restAngles = new Dictionary<IMyMotorStator, float?>();
     long _updateCount = 0;
 
+    bool _wasActive = false;
     bool _wasShooting = false;
     bool _shouldRest = false;
     MyIni _ini = new MyIni();
@@ -145,6 +146,13 @@ class CustomTurretController
         else
         {
             _idleTime += (1f / 6f);
+            if (_wasActive)
+            {
+                foreach (var r in _extraRotors)
+                {
+                    r.TargetVelocityRad = 0f;
+                }
+            }
             if (_p.AutomaticRest && _idleTime >= _p.AutomaticRestDelay)
             {
                 _shouldRest = true;
@@ -185,6 +193,7 @@ class CustomTurretController
         }
 
         _wasShooting = shouldShoot;
+        _wasActive = IsActive;
     }
 
     #region Setup
