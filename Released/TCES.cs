@@ -11,8 +11,8 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.5",
-                    Date = "2022/02/16",
+public const string Version = "1.2.6",
+                    Date = "2022/02/19",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -340,10 +340,11 @@ class CustomTurretController
         var func = b as IMyFunctionalBlock;
         if (func != null)
         {
-            if (func is IMyUserControllableGun
-                || func is IMyLightingBlock
-                || func is IMyShipToolBase
-                || func is IMyShipConnector)
+            if (!(func is IMyLargeTurretBase)
+                && (func is IMyUserControllableGun
+                    || func is IMyLightingBlock
+                    || func is IMyShipToolBase
+                    || func is IMyShipConnector))
             {
                 _tools.Add(func);
                 _gridToToolDict[func.CubeGrid] = func;
