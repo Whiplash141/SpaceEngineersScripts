@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "169.9.3";
-const string DATE = "2021/10/05";
+const string VERSION = "169.9.8";
+const string DATE = "2022/02/28";
 const string COMPAT_VERSION = "94.0.0";
 
 /*
@@ -166,8 +166,18 @@ string[] _antennaMemeMessages = new string[]
 "It's a Sith legend.",
 "Darth Plagueis was a Dark Lord of the Sith...",
 "...so powerful and so wise he could use the Force...",
-"...to influence the midichlorians to create life",
+"...to influence the midichlorians to create life...",
 "*Evil head turn*",
+"He had such a knowledge of the dark side...",
+"...that he could even keep the ones he cared about from dying.",
+"The dark side of the Force is a pathway to many abilities...",
+"...some consider to be unnatural.",
+"He became so powerful, the only thing he was afraid of...",
+"...was losing his power, which eventually, of course, he did.",
+"Unfortunately, he taught his apprentice everything he knew...",
+"...then his apprentice killed him in his sleep.",
+"Ironic.",
+"He could save others from death, but not himself.",
 "Another happy landing!",
 "*Internalized Oppression*",
 "Area is not secure!",
@@ -197,6 +207,7 @@ string[] _antennaMemeMessages = new string[]
 "You were the chosen one!",
 "It was said you would destroy the sith not join them...",
 "...Bring balance to the force, not leave it in darkness!",
+"We've been trying to reach you about your car's extended warranty",
 };
 #endregion
 Random RNGesus = new Random();
@@ -531,24 +542,9 @@ void Main(string arg, UpdateType updateSource)
     if (!_shouldFire)
         return;
 
-    if (igcMsg)
+    if (igcMsg && (arg.Equals(IGC_TAG_PARAMS) || arg.Equals(IGC_TAG_HOMING) || arg.Equals(IGC_TAG_BEAM_RIDING)))
     {
-        if (arg.Equals(IGC_TAG_HOMING))
-        {
-            ParseMissileHomingData();
-            if (_retask)
-                _retask = false;
-        }
-        else if (arg.Equals(IGC_TAG_BEAM_RIDING))
-        {
-            ParseMissileBeamRidingData();
-            if (_retask)
-                _retask = false;
-        }
-        else if (arg.Equals(IGC_TAG_PARAMS))
-        {
-            ParseMissileParameterData();
-        }
+        HandleBroadcastListeners();
     }
 
     _scheduler.Update();
@@ -828,7 +824,7 @@ void SendRemoteFireResponse()
     }
 }
 
-void ParseMissileParameterData()
+void HandleBroadcastListeners()
 {
     while (_broadcastListenerParameters.HasPendingMessage)
     {
@@ -858,10 +854,7 @@ void ParseMissileParameterData()
 
         _raycastHoming.OffsetTargeting = _precisionMode;
     }
-}
 
-void ParseMissileBeamRidingData()
-{
     while (_broadcastListenerBeamRiding.HasPendingMessage)
     {
         object messageData = _broadcastListenerBeamRiding.AcceptMessage().Data;
@@ -877,6 +870,7 @@ void ParseMissileBeamRidingData()
         if (!_savedKeycodes.Contains(keycode))
             continue;
 
+        _retask = false;
         _shooterForwardVec = payload.Item1;
         _shooterLeftVec = payload.Item2;
         _shooterUpVec = payload.Item3;
@@ -884,10 +878,7 @@ void ParseMissileBeamRidingData()
 
         _guidanceMode = GuidanceMode.BeamRiding;
     }
-}
 
-void ParseMissileHomingData()
-{
     /* Item1.Col0: Hit position */
     /* Item1.Col1: Target position */
     /* Item1.Col2: Target velocity */
@@ -914,13 +905,14 @@ void ParseMissileHomingData()
         if (_guidanceMode == GuidanceMode.Active && !_retask)
             continue;
 
+        _retask = false;
         Vector3D hitPos = payload.Item1.Col0;
         Vector3D offset = payload.Item2.Col0;
         _targetPos = payload.Item1.Col1;
         _targetVel = payload.Item1.Col2;
         _timeSinceLastLock = payload.Item3;
         long targetId = payload.Item4;
-        _timeSinceLastIngest = 0;
+        _timeSinceLastIngest = 1.0 / 60.0; // IGC messages are always a tick delayed
 
         _guidanceMode = GuidanceMode.SemiActive;
 
@@ -1367,34 +1359,10 @@ bool CollectBlocks(IMyTerminalBlock block)
         antenna.EnableBroadcasting = false;
         antenna.Enabled = _allowRemoteFire;
     }
-    else if (AddToListIfType(block, _artMasses))
-    { }
-    else if (AddToListIfType(block, _batteries))
-    { }
-    else if (AddToListIfType(block, _gyros))
-    { }
-    else if (AddToListIfType(block, _mergeBlocks))
-    { }
-    else if (AddToListIfType(block, _shipControllers))
-    { }
-    else if (AddToListIfType(block, _connectors))
-    { }
-    else if (AddToListIfType(block, _rotors))
-    { }
-    else if (AddToListIfType(block, _reactors))
-    { }
-    else if (AddToListIfType(block, _beacons))
-    { }
-    else if (AddToListIfType(block, _sensors))
-    { }
     else if (AddToListIfType(block, _warheads, out warhead))
     {
         warhead.IsArmed = false;
     }
-    else if (AddToListIfType(block, _timers))
-    { }
-    else if (AddToListIfType(block, _gasTanks))
-    { }
     else if (AddToListIfType(block, _cameras, out camera))
     {
         camera.Enabled = true;
@@ -1403,6 +1371,22 @@ bool CollectBlocks(IMyTerminalBlock block)
             _homingCameras.Add(camera);
         GetCameraOrientation(camera);
     }
+    else if (AddToListIfType(block, _artMasses)
+          || AddToListIfType(block, _batteries)
+          || AddToListIfType(block, _gyros)
+          || AddToListIfType(block, _mergeBlocks)
+          || AddToListIfType(block, _shipControllers)
+          || AddToListIfType(block, _connectors)
+          || AddToListIfType(block, _rotors)
+          || AddToListIfType(block, _reactors)
+          || AddToListIfType(block, _beacons)
+          || AddToListIfType(block, _sensors)
+          || AddToListIfType(block, _timers)
+          || AddToListIfType(block, _gasTanks))
+    {
+        /* Nothing to do here */
+    }
+    
 
     return false;
 }
@@ -1429,9 +1413,7 @@ bool EchoIfTrue(bool state, string toEcho)
     if (state)
     {
         _setupBuilder.Append(toEcho).Append("\n");
-
     }
-
     return state;
 }
 
@@ -1880,8 +1862,8 @@ void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec)
     GetRotationAnglesSimultaneous(headingVec, -gravityVec, missileMatrix, out pitch, out yaw, out roll);
 
     // Angle controller
-    double yawSpeed = _yawPID.Control(yaw, SECONDS_PER_UPDATE);
-    double pitchSpeed = _pitchPID.Control(pitch, SECONDS_PER_UPDATE);
+    double yawSpeed = _yawPID.Control(yaw);
+    double pitchSpeed = _pitchPID.Control(pitch);
 
     // Handle roll more simply
     double rollSpeed = 0;
@@ -2949,6 +2931,14 @@ class RaycastHoming
     double _timeSinceLastScan = 0;
     bool _manualLockOverride = false;
     bool _fudgeVectorSwitch = false;
+    
+    double AutoScanScaleFactor
+    {
+        get
+        {
+            return MissedLastScan ? 0.8 : 1.1;
+        }
+    }
 
     public RaycastHoming(double maxRange, double maxTimeForLockBreak, double minRange = 0, long gridIDToIgnore = 0)
     {
@@ -3151,7 +3141,7 @@ class RaycastHoming
         }
 
         // This operates under the assumption that raycast charges at 2km/s
-        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * 1.1; // Give a fudge factor for safety
+        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
         var availableScanRange = thisCamera.AvailableScanRange;
 
         //Attempt to scan adjusted target position
@@ -3289,7 +3279,7 @@ class RaycastHoming
             {
                 _currentAimMode = AimMode.Center;
             }
-            _timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
+            //_timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
         }
     }
 
