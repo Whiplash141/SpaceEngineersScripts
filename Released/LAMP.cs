@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "94.11.0";
-const string DATE = "2022/02/03";
+const string VERSION = "94.11.1";
+const string DATE = "2022/02/28";
 const string COMPAT_VERSION = "169.0.0";
 #endregion
 
@@ -1854,6 +1854,14 @@ class RaycastHoming
     double _timeSinceLastScan = 0;
     bool _manualLockOverride = false;
     bool _fudgeVectorSwitch = false;
+    
+    double AutoScanScaleFactor
+    {
+        get
+        {
+            return MissedLastScan ? 0.8 : 1.1;
+        }
+    }
 
     public RaycastHoming(double maxRange, double maxTimeForLockBreak, double minRange = 0, long gridIDToIgnore = 0)
     {
@@ -2056,7 +2064,7 @@ class RaycastHoming
         }
 
         // This operates under the assumption that raycast charges at 2km/s
-        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * 1.1; // Give a fudge factor for safety
+        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
         var availableScanRange = thisCamera.AvailableScanRange;
 
         //Attempt to scan adjusted target position
@@ -2194,7 +2202,7 @@ class RaycastHoming
             {
                 _currentAimMode = AimMode.Center;
             }
-            _timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
+            //_timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
         }
     }
 
