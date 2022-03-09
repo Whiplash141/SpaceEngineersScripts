@@ -217,18 +217,18 @@ class RotorController
         var rotorRightVector = Rotor.Top.WorldMatrix.Left; //bc keen...
         var targetVector = GetVectorFromRotorAngle(_targetAngle, Rotor);
 
-    var err = VectorAngleBetween(rotorVector, targetVector) * Math.Sign(targetVector.Dot(rotorRightVector));
+        var err = VectorAngleBetween(rotorVector, targetVector) * Math.Sign(targetVector.Dot(rotorRightVector));
 
-    Rotor.TargetVelocityRPM = (float)err * _rotationSpeedGain;
+        Rotor.TargetVelocityRPM = (float)err * _rotationSpeedGain;
 
-    if (Math.Abs(err) < _epsilon)
-    {
-        Rotor.TargetVelocityRPM = 0;
-        Rotor.SetValue("LowerLimit", MathHelper.ToDegrees(_targetAngle));
-        Rotor.SetValue("UpperLimit", MathHelper.ToDegrees(_targetAngle));
-        Rotor.SetValue("RotorLock", true);
-        this.DoneMoving = true;
-    }
+        if (Math.Abs(err) < _epsilon)
+        {
+            Rotor.TargetVelocityRPM = 0;
+            Rotor.SetValue("LowerLimit", MathHelper.ToDegrees(_targetAngle));
+            Rotor.SetValue("UpperLimit", MathHelper.ToDegrees(_targetAngle));
+            Rotor.SetValue("RotorLock", true);
+            this.DoneMoving = true;
+        }
     }
 
     Vector3D GetVectorFromRotorAngle(float angle, IMyMotorStator rotor)
