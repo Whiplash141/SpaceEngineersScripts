@@ -106,8 +106,8 @@ If you have any questions feel free to post them on the workshop page!
 //=================================================
 
 #region DONT FREAKING TOUCH THESE
-const string VERSION = "45.1.1";
-const string DATE = "2022/02/12";
+const string VERSION = "45.1.2";
+const string DATE = "2022/03/12";
 #endregion
 
 string _salvoGroupNameTag = "Salvo Group";
@@ -118,12 +118,14 @@ readonly MyIni _ini = new MyIni();
 const string IniSectionTag = "Weapon Salvo Config";
 const string IniNameTag = "Salvo group nametag";
 const string IniRailgunSubtypes = "Railgun subtype names";
+const string IniDrawTitleScreen = "Draw title screen";
 
 RuntimeTracker _runtimeTracker;
 Scheduler _scheduler;
 ScheduledAction _scheduledSetup;
 WeaponSalvoScreenManager _screenManager;
 ArgumentParser _args = new ArgumentParser();
+bool _drawTitleScreen = true;
 
 Dictionary<string, WeaponSalvoGroup> _salvoGroupNameDict = new Dictionary<string, WeaponSalvoGroup>();
 List<WeaponSalvoGroup> _salvoGroups = new List<WeaponSalvoGroup>();
@@ -137,8 +139,8 @@ Program()
     _scheduledSetup = new ScheduledAction(Setup, 0.1);
     _scheduler.AddScheduledAction(SalvoLogic, 60);
     _scheduler.AddScheduledAction(PrintEcho, 1);
-    _scheduler.AddScheduledAction(_screenManager.Draw, 3);
-    _scheduler.AddScheduledAction(_screenManager.ForceDraw, 1);
+    _scheduler.AddScheduledAction(DrawTitleScreen, 3);
+    _scheduler.AddScheduledAction(_screenManager.ForceDraw, 0.5);
     _scheduler.AddScheduledAction(_scheduledSetup);
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
@@ -157,6 +159,14 @@ void Main(string arg, UpdateType updateSource)
 
     _scheduler.Update();
     _runtimeTracker.AddInstructions();
+}
+
+void DrawTitleScreen()
+{
+    if (_drawTitleScreen)
+    {
+        _screenManager.Draw();
+    }
 }
 
 void PrintEcho()
@@ -252,6 +262,7 @@ void ProcessIni()
     if (_ini.TryParse(Me.CustomData))
     {
         _salvoGroupNameTag = _ini.Get(IniSectionTag, IniNameTag).ToString(_salvoGroupNameTag);
+        _drawTitleScreen = _ini.Get(IniSectionTag, IniDrawTitleScreen).ToBoolean(_drawTitleScreen);
         MyIniHelper.GetStringList(IniSectionTag, IniRailgunSubtypes, _ini, SequencedWeapon.RailgunSubtypes);
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
@@ -260,6 +271,7 @@ void ProcessIni()
     }
 
     _ini.Set(IniSectionTag, IniNameTag, _salvoGroupNameTag);
+    _ini.Set(IniSectionTag, IniDrawTitleScreen, _drawTitleScreen);
     MyIniHelper.SetStringList(IniSectionTag, IniRailgunSubtypes, _ini, SequencedWeapon.RailgunSubtypes);
 }
 
