@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "169.9.8";
-const string DATE = "2022/02/28";
+const string VERSION = "169.9.9";
+const string DATE = "2022/03/12";
 const string COMPAT_VERSION = "94.0.0";
 
 /*
@@ -126,6 +126,8 @@ double _maxRandomAccelRatio = 0.25;
 double _maxAimDispersion = 0;
 bool _evadeWithRandomizedHeading = true;
 bool _evadeWithSpiral = false;
+
+double _topDownAttackHeight = 1500;
 #endregion
 
 bool _remotelyFired = false;
@@ -385,7 +387,8 @@ const string
     INI_SECTION_HOMING = "Homing Parameters",
     INI_HOMING_RELNAV = "Navigation constant",
     INI_HOMING_RELNAV_ACCEL = "Acceleration constant",
-    INI_HOMING_AIM_DISPERSION = "Max aim dispersion (m)";
+    INI_HOMING_AIM_DISPERSION = "Max aim dispersion (m)",
+    INI_TOPDOWN_ATTACK_HEIGHT = "Topdown attack height (m)";
 
 const string
     INI_SECTION_BEAMRIDE = "Beam Riding Parameters",
@@ -626,6 +629,8 @@ void LoadIniConfig()
     _navConstant = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_RELNAV).ToDouble(_navConstant);
     _accelNavConstant = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_RELNAV_ACCEL).ToDouble(_accelNavConstant);
     _maxAimDispersion = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_AIM_DISPERSION).ToDouble(_maxAimDispersion);
+    _topDownAttackHeight = _myIni.Get(INI_SECTION_HOMING, INI_TOPDOWN_ATTACK_HEIGHT).ToDouble(_topDownAttackHeight);
+    _topDownAttackHeight = Math.Max(0, _topDownAttackHeight);
 
     _offsetUp = _myIni.Get(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_UP).ToDouble(_offsetUp);
     _offsetLeft = _myIni.Get(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_LEFT).ToDouble(_offsetLeft);
@@ -680,6 +685,7 @@ void SaveIniConfig()
     _myIni.Set(INI_SECTION_HOMING, INI_HOMING_RELNAV, _navConstant);
     _myIni.Set(INI_SECTION_HOMING, INI_HOMING_RELNAV_ACCEL, _accelNavConstant);
     _myIni.Set(INI_SECTION_HOMING, INI_HOMING_AIM_DISPERSION, _maxAimDispersion);
+    _myIni.Set(INI_SECTION_HOMING, INI_TOPDOWN_ATTACK_HEIGHT, _topDownAttackHeight);
 
     _myIni.Set(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_UP, _offsetUp);
     _myIni.Set(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_LEFT, _offsetLeft);
@@ -1832,7 +1838,7 @@ Vector3D HomingGuidance(
         }
         else
         {
-            adjustedTargetPos += Vector3D.Normalize(gravityVec) * -1500;
+            adjustedTargetPos += Vector3D.Normalize(gravityVec) * -_topDownAttackHeight;
         }
     }
     
