@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "169.9.9";
-const string DATE = "2022/03/12";
+const string VERSION = "169.9.10";
+const string DATE = "2022/03/21";
 const string COMPAT_VERSION = "94.0.0";
 
 /*
@@ -1480,7 +1480,7 @@ void MissileStage1()
             continue;
 
         block.Enabled = true;
-        block.ChargeMode = ChargeMode.Auto;
+        block.ChargeMode = ChargeMode.Discharge;
     }
 
     foreach (IMyReactor block in _reactors)
