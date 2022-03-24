@@ -11,8 +11,8 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.2.6",
-                    Date = "2022/02/19",
+public const string Version = "1.3.0",
+                    Date = "2022/03/24",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -540,6 +540,16 @@ class CustomTurretController
         {
             return false;
         }
+        
+        Vector3D totalVelocityCommand = Vector3D.Zero;
+        if (_azimuthRotor != null)
+        {
+            totalVelocityCommand += _azimuthRotor.WorldMatrix.Up * _azimuthRotor.TargetVelocityRad;
+        }
+        if (_elevationRotor != null)
+        {
+            totalVelocityCommand += _elevationRotor.WorldMatrix.Up * _elevationRotor.TargetVelocityRad;
+        }
 
         bool isShooting = false;
         foreach (var t in _mainTools)
@@ -565,6 +575,7 @@ class CustomTurretController
             {
                 continue;
             }
+            
 
             IMyFunctionalBlock reference;
             if (!_gridToToolDict.TryGetValue(r.TopGrid, out reference))
@@ -574,6 +585,8 @@ class CustomTurretController
             }
 
             AimRotorAtPosition(r, _controller.GetShootDirection(), reference.WorldMatrix.Forward);
+            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.WorldMatrix.Up);
+            r.TargetVelocityRad += commandedVelocity;
         }
 
         return isShooting;
