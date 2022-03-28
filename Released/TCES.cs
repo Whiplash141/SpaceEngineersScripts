@@ -11,8 +11,8 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.3.0",
-                    Date = "2022/03/24",
+public const string Version = "1.3.1",
+                    Date = "2022/03/28",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -365,6 +365,7 @@ class CustomTurretController
         if (_camera != null)
         {
             _controller.Camera = _camera;
+            _camera.Enabled = true;
         }
         if (!_shouldRest)
         {
