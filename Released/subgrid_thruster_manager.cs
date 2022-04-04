@@ -43,8 +43,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.1.1";
-const string DATE = "2021/09/19";
+const string VERSION = "42.1.2";
+const string DATE = "2022/04/03";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -300,7 +300,7 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
     onGridList.Clear();
     foreach (var t in sourceList)
     {
-        if (grid != t.CubeGrid)
+        if (grid != t.CubeGrid && !t.CustomName.Contains(ignoredThrustNameTag))
         {
             offGridList.Add(t);
         }
