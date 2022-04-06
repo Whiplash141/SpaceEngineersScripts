@@ -43,8 +43,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.1.2";
-const string DATE = "2022/04/03";
+const string VERSION = "42.2.0";
+const string DATE = "2022/04/06";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -462,7 +462,8 @@ void CancelGravity(List<IMyThrust> offGridThrusters, List<IMyThrust> onGridThrus
     var gravityVecNorm = Vector3D.Normalize(gravityVec);
     var mass = controller.CalculateShipMass().PhysicalMass;
     var velocityDot = gravityVecNorm.Dot(controller.GetShipVelocities().LinearVelocity);
-    var num = velocityDot < 0 ? 0 : 1;
+    double num = MathHelper.Clamp(velocityDot / 5.0 + 1.0, 0.0, 1.0);
+
     var requiredHoverForce = mass * gravityVec.Length() * num;
     //Echo($"requiredHoverForce: {requiredHoverForce/num:n1}");
     //Echo($"velocityDot: {velocityDot}\nnum: {num}");
