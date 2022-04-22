@@ -106,8 +106,8 @@ If you have any questions feel free to post them on the workshop page!
 //=================================================
 
 #region DONT FREAKING TOUCH THESE
-const string VERSION = "45.1.2";
-const string DATE = "2022/03/12";
+const string VERSION = "45.1.3";
+const string DATE = "2022/04/22";
 #endregion
 
 string _salvoGroupNameTag = "Salvo Group";
@@ -201,7 +201,7 @@ void ProcessArguments(string args)
             salvoGroup.SetRoundsPerSecond(rps);
         }
     }
-    else if ((idx = _args.GetSwitchIndex("rpm")) >= 0 && idx + 1 < _args.ArgumentCount)
+    if ((idx = _args.GetSwitchIndex("rpm")) >= 0 && idx + 1 < _args.ArgumentCount)
     {
         float rpm;
         if (float.TryParse(_args.Argument(idx + 1), out rpm))
@@ -209,7 +209,7 @@ void ProcessArguments(string args)
             salvoGroup.SetRoundsPerMinute(rpm);
         }
     }
-    else if ((idx = _args.GetSwitchIndex("ticks")) >= 0 && idx + 1 < _args.ArgumentCount)
+    if ((idx = _args.GetSwitchIndex("ticks")) >= 0 && idx + 1 < _args.ArgumentCount)
     {
         int ticks;
         if (int.TryParse(_args.Argument(idx + 1), out ticks))
@@ -217,7 +217,7 @@ void ProcessArguments(string args)
             salvoGroup.SetTickDelay(ticks);
         }
     }
-    else if ((idx = _args.GetSwitchIndex("burst")) >= 0 && idx + 1 < _args.ArgumentCount)
+    if ((idx = _args.GetSwitchIndex("burst")) >= 0 && idx + 1 < _args.ArgumentCount)
     {
         int burstLength;
         if (int.TryParse(_args.Argument(idx + 1), out burstLength))
@@ -225,19 +225,19 @@ void ProcessArguments(string args)
             salvoGroup.SetBurstLength(burstLength);
         }
     }
-    else if (_args.HasSwitch("fire_on"))
+    if (_args.HasSwitch("fire_on"))
     {
         salvoGroup.Shoot = true;
     }
-    else if (_args.HasSwitch("fire_off"))
+    if (_args.HasSwitch("fire_off"))
     {
         salvoGroup.Shoot = false;
     }
-    else if (_args.HasSwitch("fire_toggle"))
+    if (_args.HasSwitch("fire_toggle"))
     {
         salvoGroup.Shoot = !salvoGroup.Shoot;
     }
-    else if (_args.HasSwitch("default"))
+    if (_args.HasSwitch("default"))
     {
         salvoGroup.SetDefaults();
     }
