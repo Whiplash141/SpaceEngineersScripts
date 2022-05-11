@@ -11,8 +11,8 @@
  * - Support of more than 2 rotors
  */
 
-public const string Version = "1.3.2",
-                    Date = "2022/04/22",
+public const string Version = "1.3.3",
+                    Date = "2022/05/01",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -44,10 +44,6 @@ class CustomTurretController
     List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _mainTools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _otherTools = new List<IMyFunctionalBlock>();
-
-    ITerminalProperty<long>
-        _azimuthProperty = null,
-        _elevationProperty = null;
 
     List<IMyMotorStator> _extraRotors = new List<IMyMotorStator>();
     IMyMotorStator _azimuthRotor;
@@ -210,10 +206,6 @@ class CustomTurretController
         _gridToToolDict.Clear();
         _restAngles.Clear();
 
-        // TODO: Remove both of these once the setters work properly for unassigning
-        _azimuthProperty = null;
-        _elevationProperty = null;
-
         _group.GetBlocks(null, CollectBlocks);
 
         if (_controller == null)
@@ -361,8 +353,6 @@ class CustomTurretController
         {
             return;
         }
-        _azimuthProperty = TerminalPropertiesHelper.GetProperty<long>(_controller, "RotorAzimuth");
-        _elevationProperty = TerminalPropertiesHelper.GetProperty<long>(_controller, "RotorElevation");
         if (_camera != null)
         {
             _controller.Camera = _camera;
@@ -509,12 +499,12 @@ class CustomTurretController
             }
             else
             {
-                _elevationProperty.SetValue(_controller, 0);
+                _controller.ElevationRotor = null;
             }
         }
         else
         {
-            _azimuthProperty.SetValue(_controller, 0);
+            _controller.AzimuthRotor = null;
             if (_elevationRotor != null)
             {
                 _controller.ElevationRotor = _elevationRotor;
@@ -542,7 +532,7 @@ class CustomTurretController
         {
             return false;
         }
-        
+
         Vector3D totalVelocityCommand = Vector3D.Zero;
         if (_azimuthRotor != null)
         {
@@ -577,7 +567,7 @@ class CustomTurretController
             {
                 continue;
             }
-            
+
 
             IMyFunctionalBlock reference;
             if (!_gridToToolDict.TryGetValue(r.TopGrid, out reference))
@@ -913,7 +903,6 @@ public static class StringExtensions
     }
 }
 
-
 class TCESTitleScreen
 {
     readonly Color _topBarColor = new Color(25, 25, 25);
@@ -1112,80 +1101,4 @@ class TCESTitleScreen
         frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(53f, 0f) * scale + centerPos, new Vector2(5f, 100f) * scale, _black, null, TextAlignment.CENTER, 0f)); // turret detail line back top
     }
     #endregion
-}
-
-static class TerminalPropertiesHelper
-{
-    static Dictionary<Type, Dictionary<string, ITerminalAction>> _terminalActionDict = new Dictionary<Type, Dictionary<string, ITerminalAction>>();
-    static Dictionary<Type, Dictionary<string, ITerminalProperty>> _terminalPropertyDict = new Dictionary<Type, Dictionary<string, ITerminalProperty>>();
-
-    public static ITerminalAction GetAction(IMyTerminalBlock block, string actionName)
-    {
-        Type type = block.GetType();
-        Dictionary<string, ITerminalAction> dict;
-        ITerminalAction act;
-
-        if (!_terminalActionDict.TryGetValue(type, out dict))
-        {
-            dict = new Dictionary<string, ITerminalAction>();
-        }
-
-        if (dict.TryGetValue(actionName, out act))
-        {
-            return act;
-        }
-
-        act = block.GetActionWithName(actionName);
-        dict[actionName] = act;
-        _terminalActionDict[type] = dict;
-        return act;
-    }
-
-    public static void ApplyAction(IMyTerminalBlock block, string actionName)
-    {
-        ITerminalAction act = GetAction(block, actionName);
-        if (act != null)
-            act.Apply(block);
-    }
-
-    public static ITerminalProperty<T> GetProperty<T>(IMyTerminalBlock block, string propertyName)
-    {
-        Type type = block.GetType();
-        Dictionary<string, ITerminalProperty> dict;
-        ITerminalProperty prop;
-
-        if (!_terminalPropertyDict.TryGetValue(type, out dict))
-        {
-            dict = new Dictionary<string, ITerminalProperty>();
-        }
-
-        if (dict.TryGetValue(propertyName, out prop))
-        {
-            return prop.Cast<T>();
-        }
-
-        prop = block.GetProperty(propertyName);
-        dict[propertyName] = prop;
-        _terminalPropertyDict[type] = dict;
-        if (prop == null)
-            return null;
-        return prop.Cast<T>();
-    }
-
-    public static void SetValue<T>(IMyTerminalBlock block, string propertyName, T value)
-    {
-        ITerminalProperty<T> prop = GetProperty<T>(block, propertyName);
-
-        if (prop != null)
-            prop.SetValue(block, value);
-    }
-
-    public static T GetValue<T>(IMyTerminalBlock block, string propertyName)
-    {
-        ITerminalProperty<T> prop = GetProperty<T>(block, propertyName);
-
-        if (prop != null)
-            return prop.GetValue(block);
-        return default(T);
-    }
 }
