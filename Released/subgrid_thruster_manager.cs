@@ -43,8 +43,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.2.0";
-const string DATE = "2022/04/06";
+const string VERSION = "42.2.1";
+const string DATE = "2022/05/13";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -77,6 +77,7 @@ bool detectBlocksOverConnectors = false;
 string controlSeatNameTag = "Reference";
 string ignoredThrustNameTag = "Ignore";
 bool useRotorThrustAsInertialDampeners = true;
+bool manualDampenerOverride = true;
 double dampenerScalingFactor = 50;
 double fullBurnToleranceAngle = 30;
 double maxThrustAngle = 90;
@@ -274,10 +275,10 @@ void HandleSubgridThrust()
         desiredDirection = Vector3D.Normalize(desiredDirection);
     }
 
-    dampenersOn = thisReferenceBlock.DampenersOverride;
+    dampenersOn = useRotorThrustAsInertialDampeners && thisReferenceBlock.DampenersOverride;
     if (onGridThrust.Count == 0)
     {
-        dampenersOn = useRotorThrustAsInertialDampeners;
+        dampenersOn = useRotorThrustAsInertialDampeners && manualDampenerOverride;
     }
 
     if (dampenersOn)
@@ -327,14 +328,14 @@ void ProcessArgument(string arg)
             turnOn = !turnOn;
             break;
         case "dampeners_on":
-            useRotorThrustAsInertialDampeners = true;
+            manualDampenerOverride = true;
             break;
         case "dampeners_off":
-            useRotorThrustAsInertialDampeners = false;
+            manualDampenerOverride = false;
             break;
         case "dampeners_toggle":
         case "dampeners_switch":
-            useRotorThrustAsInertialDampeners = !useRotorThrustAsInertialDampeners;
+            manualDampenerOverride = !manualDampenerOverride;
             break;
     }
 }
@@ -379,6 +380,7 @@ void GrabBlocks()
 {
     ProcessIni();
     
+    lastCubeGridId = -1;
     unnamedReferences.Clear();
     namedReferences.Clear();
     allThrust.Clear();
