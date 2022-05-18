@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "169.10.0";
-const string DATE = "2022/05/11";
+const string VERSION = "169.10.1";
+const string DATE = "2022/05/18";
 const string COMPAT_VERSION = "94.0.0";
 
 /*
@@ -1517,6 +1517,13 @@ void MissileStage1()
             continue;
         block.Stockpile = false;
     }
+    
+    foreach (IMyTimerBlock block in _timers)
+    {
+        if (block.Closed)
+            continue;
+        block.Trigger();
+    }
 }
 
 // Detaches missile from the firing ship.
@@ -1570,13 +1577,6 @@ void MissileStage2()
         block.Radius = 1f;
         block.Enabled = true;
         block.CustomName = "";
-    }
-
-    foreach (IMyTimerBlock block in _timers)
-    {
-        if (block.Closed)
-            continue;
-        block.Trigger();
     }
 
     ApplyThrustOverride(_sideThrusters, 0.00001f, false);
