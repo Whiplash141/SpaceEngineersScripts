@@ -106,8 +106,8 @@ If you have any questions feel free to post them on the workshop page!
 //=================================================
 
 #region DONT FREAKING TOUCH THESE
-const string VERSION = "45.1.3";
-const string DATE = "2022/04/22";
+const string VERSION = "45.1.4";
+const string DATE = "2022/05/21";
 #endregion
 
 string _salvoGroupNameTag = "Salvo Group";
@@ -534,7 +534,7 @@ class WeaponSalvoGroup
     bool CollectBlocks(IMyTerminalBlock x)
     {
         var gun = (IMyUserControllableGun)x;
-        if (!(x is IMyLargeTurretBase) && x.IsFunctional && _program.Me.IsSameConstructAs(x))
+        if (!(x is IMyLargeTurretBase) && _program.Me.IsSameConstructAs(x))
         {
             _gunsToProcess.Active.Add(gun);
         }
@@ -625,15 +625,24 @@ class WeaponSalvoGroup
                 {
                     _shouldBurst = false;
                     Shoot = false;
-                    _burstCount = 0;
+                    _burstCount = 0; 
                 }
             }
+        }
+        
+        if (weaponToFire.Weapon.Closed)
+        {
+            _weapons.RemoveAt(_weaponCount);
+        }
+        else if (!weaponToFire.Weapon.IsFunctional)
+        {
+            _weaponCount = ++_weaponCount % _weapons.Count;
         }
 
         // Turn other weapons off
         foreach (var weapon in _weapons)
         {
-            if (weapon.Weapon != weaponToFire.Weapon && weapon.CanDisable())
+            if (weapon.Weapon != weaponToFire.Weapon && weapon.CanDisable)
             {
                 weapon.Weapon.Enabled = false;
             }
@@ -673,17 +682,21 @@ class SequencedWeapon
         _waitingForRecharge = IsRailgun;
     }
 
-    public bool CanDisable()
+    public bool CanDisable
     {
-        if (!IsRailgun)
+        get 
         {
-            return true;
+            if (!IsRailgun)
+            {
+                return true;
+            }
+            if (IsRecharging(Weapon))
+            {
+                _waitingForRecharge = false;
+            }
+            return !IsRecharging(Weapon) && !_waitingForRecharge;   
         }
-        if (IsRecharging(Weapon))
-        {
-            _waitingForRecharge = false;
-        }
-        return !IsRecharging(Weapon) && !_waitingForRecharge;
+        
     }
 
     bool IsRecharging(IMyUserControllableGun gun)
