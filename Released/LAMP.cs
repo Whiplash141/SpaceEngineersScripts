@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "94.11.1";
-const string DATE = "2022/02/28";
+const string VERSION = "94.12.0";
+const string DATE = "2022/05/30";
 const string COMPAT_VERSION = "169.0.0";
 #endregion
 
@@ -185,13 +185,11 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_FIRE_TIMER_NUMBER = "Missile number",
     INI_FIRE_TIMER_ANY_COMMENT = "If this timer should be triggered ANY time a missile is fired",
     INI_FIRE_TIMER_ANY = "Trigger on any fire",
-// For storage
-    INI_PARAMETER_SECTION_NAME = "params",
-    INI_SEMIACTIVE_TARGET_POS_NAME = "sa_tp",
-    INI_SEMIACTIVE_HIT_POS_NAME = "sa_hp",
-    INI_SEMIACTIVE_TARGET_VEL_NAME = "sa_tv",
-    INI_SEMIACTIVE_SHOOTER_POS_NAME = "sa_sp",
-    INI_SEMIACTIVE_TIME_SINCE_LOCK_NAME = "sa_t",
+    INI_FIRE_TIMER_TRIGGER_ON_STATE = "Trigger on targeting state",
+    INI_FIRE_TIMER_TRIGGER_ON_STATE_COMMENT = " This timer will be triggered when the script enters one of the following\n targeting states:\n"+
+                                              "   None, Idle, Searching, Targeting\n"+
+                                              " The \"Targeting\" state is triggered when a homing lock is established\n OR when beam ride mode is activated.",
+// Display screen constants
     TARGET_LOCKED_TEXT = "Target Locked",
     TARGET_NOT_LOCKED_TEXT = "No Target",
     TARGET_TOO_CLOSE_TEXT = "Target Too Close",
@@ -215,6 +213,10 @@ float _lockStrength = 0f;
 ArgumentParser _args = new ArgumentParser();
 
 public enum GuidanceMode : int { None = 0, BeamRiding = 1, Camera = 1 << 1, Turret = 1 << 2 };
+enum TargetingStatus { Idle, Searching, Targeting };
+TargetingStatus _targetingStatus = TargetingStatus.Idle;
+TargetingStatus _lastTargetingStatus = TargetingStatus.Idle;
+
 bool _retask = false;
 bool _stealth = true;
 bool _spiral = false;
@@ -241,7 +243,11 @@ List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 List<IMyShipController> _shipControllers = new List<IMyShipController>();
 List<IMyLargeTurretBase> _turrets = new List<IMyLargeTurretBase>();
 List<IMyTurretControlBlock> _turretControlBlocks = new List<IMyTurretControlBlock>();
-List<IMyTimerBlock> _timersTriggerOnAnyFire = new List<IMyTimerBlock>();
+List<IMyTimerBlock> _timersTriggerOnAnyFire = new List<IMyTimerBlock>(),
+                    _idleTimers = new List<IMyTimerBlock>(),
+                    _searchTimers = new List<IMyTimerBlock>(),
+                    _lockTimers = new List<IMyTimerBlock>();
+Dictionary<string, List<IMyTimerBlock>> _statusTimers;
 Dictionary<int, IMyDoor> _siloDoorDict = new Dictionary<int, IMyDoor>();
 Dictionary<int, IMyTimerBlock> _fireTimerDict = new Dictionary<int, IMyTimerBlock>();
 StringBuilder _setupStringbuilder = new StringBuilder();
@@ -344,6 +350,13 @@ StatusScreenColors _statusScreenColors = new StatusScreenColors()
 #region Main Methods
 Program()
 {   
+    _statusTimers = new Dictionary<string, List<IMyTimerBlock>>()
+    {
+        {"IDLE", _idleTimers},
+        {"SEARCHING", _searchTimers},
+        {"TARGETING", _lockTimers},
+    };
+    
     _unicastListener = IGC.UnicastListener;
     _unicastListener.SetMessageCallback(UNICAST_TAG);
 
@@ -381,6 +394,8 @@ Program()
     _scheduler.AddScheduledAction(NetworkTargets, 6);
     _scheduler.AddScheduledAction(GetLargestGridRadius, 1.0 / 30.0);
     _scheduler.AddScheduledAction(() => AgeFiredPrograms(1), 1);
+    
+    OnNewTargetingStatus();
 }
 
 void Main(string arg, UpdateType updateType)
@@ -454,6 +469,29 @@ void HandleDisplays()
     _screenUpdateBuffer.MoveNext().Invoke();
 }
 
+void OnNewTargetingStatus()
+{
+    List<IMyTimerBlock> timers;
+    switch (_targetingStatus)
+    {
+        case TargetingStatus.Idle:
+            timers = _idleTimers;
+            break;
+        case TargetingStatus.Searching:
+            timers = _searchTimers;
+            break;
+        case TargetingStatus.Targeting:
+            timers = _lockTimers;
+            break;
+        default:
+            return;
+    }
+    foreach (var t in timers)
+    {
+        t.Trigger();
+    }
+}
+
 void GuidanceProcess()
 {
     if (!_isSetup)
@@ -462,6 +500,7 @@ void GuidanceProcess()
     bool shouldBroadcast = false;
     _statusColor = DefaultTextColor;
     _lockStrength = 0f;
+    _targetingStatus = TargetingStatus.Idle;
 
     if (_shipControllers.Count > 0)
     {
@@ -480,6 +519,12 @@ void GuidanceProcess()
             HandleTurretHoming(ref shouldBroadcast);
             break;
     }
+    
+    if (_targetingStatus != _lastTargetingStatus)
+    {
+        OnNewTargetingStatus();
+    }
+    _lastTargetingStatus = _targetingStatus;
 
     if (shouldBroadcast) //or if kill command
     {
@@ -535,6 +580,7 @@ void HandleOptical(ref bool shouldBroadcast)
 
     // Status
     _statusText = BEAM_RIDE_ACTIVE;
+    _targetingStatus = TargetingStatus.Targeting;
 }
 
 void HandleCameraHoming(ref bool shouldBroadcast)
@@ -576,6 +622,7 @@ void HandleCameraHoming(ref bool shouldBroadcast)
 
         _statusText = TARGET_LOCKED_TEXT;
         _statusColor = TargetLockedColor;
+        _targetingStatus = TargetingStatus.Targeting;
 
         // Autofire
         if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
@@ -612,6 +659,7 @@ void HandleCameraHoming(ref bool shouldBroadcast)
             {
                 _statusText = TARGET_SEARCHING_TEXT;
                 _statusColor = TargetSearchingColor;
+                _targetingStatus = TargetingStatus.Searching;
             }
         }
         else if (_raycastHoming.Status == RaycastHoming.TargetingStatus.TooClose)
@@ -661,6 +709,7 @@ void HandleTurretHoming(ref bool shouldBroadcast)
         _lockStrength = 1f;
         _statusText = TARGET_LOCKED_TEXT;
         _statusColor = TargetLockedColor;
+        _targetingStatus = TargetingStatus.Targeting;
 
         // Handle autofire
         if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
@@ -1231,6 +1280,9 @@ bool GrabBlocks()
     _turrets.Clear();
     _turretControlBlocks.Clear();
     _timersTriggerOnAnyFire.Clear();
+    _idleTimers.Clear();
+    _searchTimers.Clear();
+    _lockTimers.Clear();
     _siloDoorDict.Clear();
     _fireTimerDict.Clear();
     _reference = null;
@@ -1450,15 +1502,30 @@ bool CollectionFunction(IMyTerminalBlock block)
         bool parsed = _setupIni.TryParse(timer.CustomData);
         int siloNumber = 0; // Default value
         bool fireAny = false;
+        string triggerState = "None";
+        
         if (parsed)
         {
             siloNumber = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER).ToInt32(siloNumber);
             fireAny = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY).ToBoolean(fireAny);
+            triggerState = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE).ToString(triggerState);
+
+            List<IMyTimerBlock> timers;
+            if (_statusTimers.TryGetValue(triggerState.ToUpperInvariant(), out timers))
+            {
+                timers.Add(timer);
+            }
+            else
+            {
+                triggerState = "None";
+            }
         }
         _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER, siloNumber);
         _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER, INI_FIRE_TIMER_NUMBER_COMMENT);
         _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY, fireAny);
         _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY, INI_FIRE_TIMER_ANY_COMMENT);
+        _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE, triggerState);
+        _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE, INI_FIRE_TIMER_TRIGGER_ON_STATE_COMMENT);
 
         if (fireAny)
         {
