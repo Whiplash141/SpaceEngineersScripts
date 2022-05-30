@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "169.10.1";
-const string DATE = "2022/05/18";
+const string VERSION = "169.11.5";
+const string DATE = "2022/05/27";
 const string COMPAT_VERSION = "94.0.0";
 
 /*
@@ -278,7 +278,8 @@ bool _shouldFire = false,
     _shouldStealth = true,
     _shouldProximityScan = false,
     _enableGuidance = false,
-    _broadcastListenersRegistered = false;
+    _broadcastListenersRegistered = false,
+    _markedForDetonation = false;
 
 enum PostSetupAction { None = 0, Fire = 1, FireRequestResponse = 2 };
 PostSetupAction _postSetupAction = PostSetupAction.None;
@@ -460,7 +461,7 @@ Program()
     // Setting up scheduled tasks
     _scheduler.AddScheduledAction(_guidanceActivateAction);
     _scheduler.AddScheduledAction(GuidanceNavAndControl, UPDATES_PER_SECOND);
-    _scheduler.AddScheduledAction(CheckProximity, 60);
+    _scheduler.AddScheduledAction(CheckProximity, UPDATES_PER_SECOND);
     _scheduler.AddScheduledAction(PrintEcho, 1);
     _scheduler.AddScheduledAction(NetworkTargets, 6);
     _scheduler.AddScheduledAction(_randomHeadingVectorAction);
@@ -1998,10 +1999,18 @@ void ApplyThrustOverride(List<IMyThrust> thrusters, float overrideValue, bool tu
 
 void CheckProximity()
 {
-    if (!_shouldProximityScan)
+    if (!_shouldProximityScan || _markedForDetonation)
         return;
 
-    Vector3D adjustedTargetPos = _raycastHoming.TargetPosition + _raycastHoming.TargetVelocity * (_timeSinceLastLock + _timeSinceLastIngest);
+    Vector3D adjustedTargetPos = _targetPos + _targetVel * (_timeSinceLastLock + _timeSinceLastIngest);
+    Vector3D missileVelocity = _missileReference.GetShipVelocities().LinearVelocity;
+    Vector3D closingVelocity = _guidanceMode == GuidanceMode.BeamRiding ? missileVelocity : missileVelocity - _targetVel;
+
+    Vector3D missileToTarget = adjustedTargetPos - _missileReference.GetPosition();
+    double distanceToTarget = missileToTarget.Length();
+    Vector3D missileToTargetNorm = missileToTarget / distanceToTarget;
+
+    double closingSpeed;
 
     // If we have no cameras or sensors for detonation, use some approximations
     if (_cameras.Count == 0 && _sensors.Count == 0)
@@ -2017,43 +2026,51 @@ void CheckProximity()
                     thisWarhead.IsArmed = true;
             }
         }
-        else // Use bounding box estimation for detonation if we have no cameras or sensors
+        else
         {
-            // TODO: Need a better estimate for ship depth
-            double distanceToTargetSq = Vector3D.DistanceSquared(_missileReference.GetPosition(), adjustedTargetPos);
-            double estimatedRadius = Me.CubeGrid.WorldVolume.Radius;
-            double adjustedDetonationRange = estimatedRadius + _raycastRange;
-
-            if (distanceToTargetSq < adjustedDetonationRange * adjustedDetonationRange)
+            // Use bounding box estimation for detonation
+            double adjustedDetonationRange = _missileReference.CubeGrid.WorldVolume.Radius + _raycastRange;
+            closingSpeed = Vector3D.Dot(closingVelocity, missileToTargetNorm);
+            if (distanceToTarget < adjustedDetonationRange + closingSpeed * SECONDS_PER_UPDATE)
             {
-                Detonate();
+                Detonate((distanceToTarget - adjustedDetonationRange) / closingSpeed);
+                return;
             }
         }
 
         return;
     }
 
-    // Do one scan in the direction of the relative velocity vector
-    if (RaycastTripwireInDirection(_missileReference.GetShipVelocities().LinearVelocity - _raycastHoming.TargetVelocity))
-    {
-        Detonate();
-        return;
-    }
-
+    // Try raycast detonation methods
+    double raycastHitDistance = 0;
+    
     // Do one scan in the direction of the target (if applicable)
-    if ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0 && RaycastTripwireInDirection(adjustedTargetPos - _missileReference.GetPosition()))
+    if ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0 && RaycastTripwireInDirection(missileToTargetNorm, closingVelocity, out raycastHitDistance, out closingSpeed))
     {
-        Detonate();
+        Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
         return;
     }
 
-    // Do a randomized raycast for each side
-    if (RaycastTripwireRandomized())
+    /*
+    Do one scan in the direction of the relative velocity vector
+    If that fails, we will scan a cross pattern that traces the radius of the missile to try and catch
+    complex geometry and avoid missed detonations
+    */
+    double apparentRadius = CalculateGridRadiusFromAxis(_missileReference.CubeGrid, closingVelocity) + _raycastRange;
+
+    var baseDirection = VectorMath.SafeNormalize(closingVelocity) * _raycastRange;
+    var perp1 = Vector3D.CalculatePerpendicularVector(closingVelocity) * apparentRadius;
+    var perp2 = VectorMath.SafeNormalize(Vector3D.Cross(perp1, closingVelocity)) * apparentRadius;
+    if (RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed) ||
+        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, perp1) ||
+        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, -perp1) ||
+        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, perp2) ||
+        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, -perp2))
     {
-        Detonate();
+        Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
         return;
     }
-
+    
     foreach (IMySensorBlock sensor in _sensors)
     {
         if (sensor.Closed)
@@ -2071,7 +2088,7 @@ void CheckProximity()
             {
                 if (IsValidTarget(targetInfo))
                 {
-                    Detonate();
+                    Detonate(0);
                     return;
                 }
             }
@@ -2079,11 +2096,15 @@ void CheckProximity()
     }
 }
 
-bool RaycastTripwireInDirection(Vector3D directionToTarget)
+bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelocity, out double raycastHitDistance, out double closingSpeed, Vector3D? offsetVector = null)
 {
+    raycastHitDistance = 0;
+    closingSpeed = 0;
+    
+    var directionToTargetNorm = VectorMath.SafeNormalize(directionToTarget);
     foreach (var cameraBuffer in _cameraBufferList)
     {
-        if (cameraBuffer.Count != 0 && Vector3D.Dot(directionToTarget, cameraBuffer.Peek().WorldMatrix.Forward) > .7071)
+        if (cameraBuffer.Count != 0 && Vector3D.Dot(directionToTargetNorm, cameraBuffer.Peek().WorldMatrix.Forward) > .7071)
         {
             IMyCameraBlock cam = cameraBuffer.MoveNext();
             if (!cam.EnableRaycast)
@@ -2095,45 +2116,25 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget)
             {
                 cam.Enabled = true;
             }
-
-            Vector3D camLocalDirection = Vector3D.Rotate(directionToTarget, MatrixD.Transpose(cam.WorldMatrix));
-
-            MyDetectedEntityInfo targetInfo = cam.Raycast(_raycastRange, camLocalDirection);
-            return IsValidTarget(targetInfo);
+            
+            closingSpeed = Math.Max(0, Vector3D.Dot(closingVelocity, directionToTargetNorm));
+            var closingDisplacement = closingSpeed * SECONDS_PER_UPDATE;
+            var scanRange = _raycastRange + closingDisplacement;
+            var scanPosition = cam.GetPosition() + directionToTargetNorm * scanRange;
+            if (offsetVector.HasValue)
+            {
+                scanPosition += offsetVector.Value;
+            }
+            MyDetectedEntityInfo targetInfo = cam.Raycast(scanPosition);
+            bool valid = IsValidTarget(targetInfo);
+            if (valid)
+            {
+                raycastHitDistance = Vector3D.Distance(targetInfo.HitPosition.Value, cam.GetPosition());
+            }
+            return valid;
         }
     }
 
-    return false;
-}
-
-bool RaycastTripwireRandomized()
-{
-    foreach (var cameraBuffer in _cameraBufferList)
-    {
-        if (cameraBuffer.Count != 0)
-        {
-            IMyCameraBlock cam = cameraBuffer.MoveNext();
-            if (!cam.EnableRaycast)
-            {
-                cam.EnableRaycast = true;
-            }
-
-            if (!cam.Enabled)
-            {
-                cam.Enabled = true;
-            }
-
-            MyDetectedEntityInfo targetInfo;
-            double azimuth = (RNGesus.NextDouble() - 0.5) * 90.0;
-            double elevation = (RNGesus.NextDouble() - 0.5) * 90.0;
-            targetInfo = cam.Raycast(_raycastRange, (float)azimuth, (float)elevation);
-
-            if (IsValidTarget(targetInfo))
-            {
-                return true;
-            }
-        }
-    }
     return false;
 }
 
@@ -2160,14 +2161,15 @@ bool IsValidTarget(MyDetectedEntityInfo targetInfo)
     return true;
 }
 
-void Detonate()
+void Detonate(double fuzeTime)
 {
+    _markedForDetonation = true;
     foreach (var thisWarhead in _warheads)
     {
         if (thisWarhead.Closed)
             continue;
-
-        thisWarhead.Detonate();
+        thisWarhead.DetonationTime = Math.Max(0f, (float)fuzeTime - 1f/60f);
+        thisWarhead.StartCountdown();
     }
 }
 
@@ -2178,13 +2180,7 @@ void KillPower()
         if (!b.Closed)
             b.Enabled = false;
     }
-
-    foreach (var w in _warheads)
-    {
-        if (!w.Closed)
-            w.Detonate();
-    }
-
+    Detonate(0);
     Runtime.UpdateFrequency = UpdateFrequency.None;
 }
 
@@ -2404,6 +2400,32 @@ Vector3D SpiralTrajectory(Vector3D desiredForwardVector, Vector3D desiredUpVecto
     double forwardProportion = Math.Sqrt(1 - lateralProportion * lateralProportion);
 
     return forward * forwardProportion + lateralProportion * (Math.Sin(angle) * up + Math.Cos(angle) * right);
+}
+
+
+Vector3D[] _corners = new Vector3D[8];
+double CalculateGridRadiusFromAxis(IMyCubeGrid grid, Vector3D axis)
+{
+    var axisLocal = VectorMath.SafeNormalize(Vector3D.Rotate(axis, MatrixD.Transpose(grid.WorldMatrix)));
+    var min = ((Vector3D)grid.Min - 0.5) * grid.GridSize;
+    var max = ((Vector3D)grid.Max + 0.5) * grid.GridSize;
+    var bb = new BoundingBoxD(min, max);
+    bb.GetCorners(_corners);
+
+    double maxLenSq = 0;
+    var point = _corners[0];
+    foreach (var corner in _corners)
+    {
+        var dirn = corner - bb.Center;
+        var rej = dirn - dirn.Dot(axisLocal) * axisLocal;
+        var lenSq = rej.LengthSquared();
+        if (lenSq > maxLenSq)
+        {
+            point = corner;
+            maxLenSq = lenSq;
+        }
+    }
+    return Math.Sqrt(maxLenSq);
 }
 #endregion
 
