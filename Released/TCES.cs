@@ -1,18 +1,56 @@
 
 /*
- * / //// / TCES | Turret Controller Enhancement Script (by Whiplash141) / //// /
- *
- * Description
- *
- * This is a simple script that enhances the functionality of the
- * Custom Turret Controller (CTC) block with the following features:
- * - Automatic CTC block configuration
- * - Turret rotor rest angles
- * - Support of more than 2 rotors
- */
+/ //// / TCES | Turret Controller Enhancement Script (by Whiplash141) / //// /
 
-public const string Version = "1.3.3",
-                    Date = "2022/05/01",
+Description
+
+This is a simple script that enhances the functionality of the
+Custom Turret Controller (CTC) block with the following features:
+- Automatic CTC block configuration
+- Turret rotor rest angles
+- Support of more than 2 rotors
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+=================================================
+DO NOT MODIFY VARIABLES IN THE SCRIPT!
+
+USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
+=================================================
+
+
+*/
+
+public const string Version = "1.4.0",
+                    Date = "2022/06/03",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -42,6 +80,7 @@ class CustomTurretController
     const float RotorStopThresholdRad = 1f * (MathHelper.Pi / 180f);
 
     List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
+    List<IMyCameraBlock> _cameras = new List<IMyCameraBlock>();
     List<IMyFunctionalBlock> _mainTools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _otherTools = new List<IMyFunctionalBlock>();
 
@@ -49,7 +88,6 @@ class CustomTurretController
     IMyMotorStator _azimuthRotor;
     IMyMotorStator _elevationRotor;
     IMyTurretControlBlock _controller;
-    IMyCameraBlock _camera;
 
     Program _p;
     IMyBlockGroup _group;
@@ -200,9 +238,9 @@ class CustomTurretController
         _controller = null;
         _azimuthRotor = null;
         _elevationRotor = null;
-        _camera = null;
         _extraRotors.Clear();
         _tools.Clear();
+        _cameras.Clear();
         _gridToToolDict.Clear();
         _restAngles.Clear();
 
@@ -224,7 +262,7 @@ class CustomTurretController
         {
             _setupReturnCode |= ReturnCode.NoExtraRotors;
         }
-        if (_camera == null)
+        if (_cameras.Count == 0)
         {
             _setupReturnCode |= ReturnCode.MissingCamera;
         }
@@ -306,14 +344,7 @@ class CustomTurretController
         var cam = b as IMyCameraBlock;
         if (cam != null)
         {
-            if (_camera != null)
-            {
-                _tools.Add(cam);
-            }
-            else
-            {
-                _camera = cam;
-            }
+            _cameras.Add(cam);
             _gridToToolDict[cam.CubeGrid] = cam;
         }
 
@@ -346,6 +377,11 @@ class CustomTurretController
 
         return false;
     }
+    
+    bool BlockValid(IMyTerminalBlock b)
+    {
+        return (b != null) && !b.Closed;
+    }
 
     void SetBlocks()
     {
@@ -353,18 +389,25 @@ class CustomTurretController
         {
             return;
         }
-        if (_camera != null)
+        if (_cameras.Count > 0)
         {
-            _controller.Camera = _camera;
-            _camera.Enabled = true;
+            foreach (var c in _cameras)
+            {
+                if (!c.Closed)
+                {
+                    _controller.Camera = c;
+                    c.Enabled = true;
+                    break;
+                }
+            }
         }
         if (!_shouldRest)
         {
-            if (_azimuthRotor != null)
+            if (BlockValid(_azimuthRotor))
             {
                 _controller.AzimuthRotor = _azimuthRotor;
             }
-            if (_elevationRotor != null)
+            if (BlockValid(_elevationRotor))
             {
                 _controller.ElevationRotor = _elevationRotor;
             }
@@ -372,28 +415,30 @@ class CustomTurretController
         _controller.ClearTools();
         _otherTools.Clear();
         _mainTools.Clear();
-
-        if (_extraRotors.Count > 0) // Special behavior
+        foreach (var t in _tools)
         {
-            foreach (var tool in _tools)
+            if (BlockValid(t))
             {
-                if ((_azimuthRotor != null && _azimuthRotor.IsAttached && tool.CubeGrid == _azimuthRotor.TopGrid)
-                    || (_elevationRotor != null && _elevationRotor.IsAttached && tool.CubeGrid == _elevationRotor.TopGrid))
+                if (_extraRotors.Count > 0) // Special behavior
                 {
-                    _mainTools.Add(tool);
-                    _controller.AddTool(tool);
+                    
+                    if ((_azimuthRotor != null && _azimuthRotor.IsAttached && t.CubeGrid == _azimuthRotor.TopGrid) ||
+                        (_elevationRotor != null && _elevationRotor.IsAttached && t.CubeGrid == _elevationRotor.TopGrid))
+                    {
+                        _mainTools.Add(t);
+                        _controller.AddTool(t);
+                    }
+                    else
+                    {
+                        _otherTools.Add(t);
+                    }
                 }
-                else
+                else // Default behavior
                 {
-                    _otherTools.Add(tool);
+                    _controller.AddTool(t);
                 }
             }
         }
-        else // Default behavior
-        {
-            _controller.AddTools(_tools);
-        }
-
     }
     #endregion
 
@@ -455,6 +500,10 @@ class CustomTurretController
             if ((_setupReturnCode & ReturnCode.MissingCamera) != 0)
             {
                 Echo("> INFO: No camera.");
+            }
+            else
+            {
+                Echo($"> INFO: {_cameras.Count} cameras.");
             }
             if ((_setupReturnCode & ReturnCode.MissingTools) != 0)
             {
