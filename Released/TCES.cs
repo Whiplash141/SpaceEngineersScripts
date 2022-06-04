@@ -49,7 +49,7 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.4.0",
+public const string Version = "1.4.2",
                     Date = "2022/06/03",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupName = "Group name tag",
@@ -163,12 +163,12 @@ class CustomTurretController
         {
             if (_shouldRest)
             {
-                if (_azimuthRotor != null)
+                if (BlockValid(_azimuthRotor))
                 {
                     _controller.AzimuthRotor = _azimuthRotor;
                     _azimuthRotor.TargetVelocityRad = 0;
                 }
-                if (_elevationRotor != null)
+                if (BlockValid(_elevationRotor))
                 {
                     _controller.ElevationRotor = _elevationRotor;
                     _elevationRotor.TargetVelocityRad = 0;
@@ -534,14 +534,14 @@ class CustomTurretController
         done = TryMoveRotorToRestAngle(_azimuthRotor);
         if (done)
         {
-            if (_azimuthRotor != null)
+            if (BlockValid(_azimuthRotor))
             {
                 _controller.AzimuthRotor = _azimuthRotor;
             }
             done = TryMoveRotorToRestAngle(_elevationRotor);
             if (done)
             {
-                if (_elevationRotor != null)
+                if (BlockValid(_elevationRotor))
                 {
                     _controller.ElevationRotor = _elevationRotor;
                 }
@@ -554,7 +554,7 @@ class CustomTurretController
         else
         {
             _controller.AzimuthRotor = null;
-            if (_elevationRotor != null)
+            if (BlockValid(_elevationRotor))
             {
                 _controller.ElevationRotor = _elevationRotor;
             }
@@ -565,7 +565,7 @@ class CustomTurretController
     bool TryMoveRotorToRestAngle(IMyMotorStator r)
     {
         float? restAngle;
-        if (r == null
+        if (!BlockValid(r)
             || !_restAngles.TryGetValue(r, out restAngle)
             || !restAngle.HasValue)
         {
@@ -780,35 +780,43 @@ bool CollectGroups(IMyBlockGroup g)
 
 void Main(string arg, UpdateType updateSource)
 {
-    _runtimeTracker.AddRuntime();
-
-    switch (arg)
+    try 
     {
-        case "setup":
-            Setup();
-            break;
-        case "rest":
-            foreach (var c in _turretControllers)
-            {
-                c.GoToRest();
-            }
-            break;
-        default:
-            break;
-    }
+        _runtimeTracker.AddRuntime();
 
-    if ((updateSource & UpdateType.Update10) != 0)
-    {
-        OnUpdate10();
-
-        ++_runCount;
-        if (_runCount % 6 == 0)
+        switch (arg)
         {
-            OnUpdate60();
+            case "setup":
+                Setup();
+                break;
+            case "rest":
+                foreach (var c in _turretControllers)
+                {
+                    c.GoToRest();
+                }
+                break;
+            default:
+                break;
         }
-    }
 
-    _runtimeTracker.AddInstructions();
+        if ((updateSource & UpdateType.Update10) != 0)
+        {
+            OnUpdate10();
+
+            ++_runCount;
+            if (_runCount % 6 == 0)
+            {
+                OnUpdate60();
+            }
+        }
+
+        _runtimeTracker.AddInstructions();
+    }
+    catch (Exception e)
+    {
+        BlueScreenOfDeath.Show(Me, "TCES", Version, e);
+        throw e;
+    }
 }
 
 void OnUpdate10()
@@ -1150,4 +1158,72 @@ class TCESTitleScreen
         frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(53f, 0f) * scale + centerPos, new Vector2(5f, 100f) * scale, _black, null, TextAlignment.CENTER, 0f)); // turret detail line back top
     }
     #endregion
+}
+
+static class BlueScreenOfDeath 
+{
+    const int MAX_BSOD_WIDTH = 35;
+    const string BSOD_TEMPLATE =
+    "{0} - v{1}\n\n"+ 
+    "A fatal exception has occured at\n"+
+    "{2}. The current\n"+
+    "program will be terminated.\n"+
+    "\n"+ 
+    "EXCEPTION:\n"+
+    "{3}\n"+
+    "\n"+
+    "* Please REPORT this crash message to\n"+ 
+    "  the Bug Reports discussion of this script\n"+ 
+    "\n"+
+    "* Press RECOMPILE to restart the program";
+
+    static StringBuilder bsodBuilder = new StringBuilder(256);
+    
+    public static void Show(IMyProgrammableBlock pb, string scriptName, string version, Exception e)
+    {
+        var surface = pb.GetSurface(0);
+        if (surface == null) 
+        { 
+            return;
+        }
+        surface.ContentType = ContentType.TEXT_AND_IMAGE;
+        surface.Alignment = TextAlignment.LEFT;
+        float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (26f * MAX_BSOD_WIDTH);
+        surface.FontColor = Color.White;
+        surface.BackgroundColor = Color.Blue;
+        surface.Font = "Monospace";
+        string exceptionStr = e.ToString();
+        string[] exceptionLines = exceptionStr.Split('\n');
+        bsodBuilder.Clear();
+        foreach (string line in exceptionLines)
+        {
+            if (line.Length <= MAX_BSOD_WIDTH)
+            {
+                bsodBuilder.Append(line).Append("\n");
+            }
+            else
+            {
+                string[] words = line.Split(' ');
+                int lineLength = 0;
+                foreach (string word in words)
+                {
+                    lineLength += word.Length;
+                    if (lineLength >= MAX_BSOD_WIDTH)
+                    {
+                        lineLength = 0;
+                        bsodBuilder.Append("\n");
+                    }
+                    bsodBuilder.Append(word).Append(" ");
+                }
+                bsodBuilder.Append("\n");
+            }
+        }
+
+        surface.WriteText(string.Format(BSOD_TEMPLATE, 
+                                        scriptName.ToUpperInvariant(),
+                                        version,
+                                        DateTime.Now, 
+                                        bsodBuilder));
+    }
 }
