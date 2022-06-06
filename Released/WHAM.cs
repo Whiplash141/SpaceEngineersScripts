@@ -1,8 +1,8 @@
 
 #region Script
-const string VERSION = "169.11.5";
-const string DATE = "2022/05/27";
-const string COMPAT_VERSION = "94.0.0";
+const string VERSION = "170.0.0";
+const string DATE = "2022/06/06";
+const string COMPAT_VERSION = "95.0.0";
 
 /*
 / //// / (WHAM) Whip's Homing Advanced Missile Script / //// /
@@ -335,6 +335,7 @@ const string
     IGC_TAG_FIRE = "IGC_MSL_FIRE_MSG",
     IGC_TAG_REMOTE_FIRE_REQUEST = "IGC_MSL_REM_REQ",
     IGC_TAG_REMOTE_FIRE_RESPONSE = "IGC_MSL_REM_RSP",
+    IGC_TAG_REMOTE_FIRE_NOTIFICATION = "IGC_MSL_REM_NTF",
     IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
     UNICAST_TAG = "UNICAST";
 
@@ -755,6 +756,10 @@ void ParseUnicastMessages()
     {
         _postSetupAction = PostSetupAction.Fire;
         InitiateSetup(_remotelyFired);
+        if (_remotelyFired)
+        {
+            IGC.SendBroadcastMessage(IGC_TAG_REMOTE_FIRE_NOTIFICATION, _missileNumber, TransmissionDistance.CurrentConstruct);
+        }
     }
 }
 
