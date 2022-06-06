@@ -1,9 +1,9 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "94.12.0";
-const string DATE = "2022/05/30";
-const string COMPAT_VERSION = "169.0.0";
+const string VERSION = "95.0.0";
+const string DATE = "2022/06/06";
+const string COMPAT_VERSION = "170.0.0";
 #endregion
 
 /*
@@ -104,6 +104,13 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 */
 
+/*
+___________________________________________________________________
+
+============= Don't touch anything below this :) ==================
+___________________________________________________________________
+*/
+
 #region Fields
 GuidanceMode _preferredGuidanceMode = GuidanceMode.Camera;
 GuidanceMode _designationMode = GuidanceMode.None;
@@ -121,17 +128,11 @@ double _activeAntennaRange = 5000;
 double _minRaycastRange = 50; //meters
 double _maxRaycastRange = 5000; //meters
 double _maxTimeForLockBreak = 3;
+double _timeSinceTurretLock = 0;
 
 bool _stealthySemiActiveAntenna = false;
 bool _usePreciseAiming = false;
 bool _fireEnabled = true;
-
-/*
-___________________________________________________________________
-
-============= Don't touch anything below this :) ==================
-___________________________________________________________________
-*/
 
 const string IGC_TAG_IFF = "IGC_IFF_MSG",
     IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
@@ -140,7 +141,9 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     IGC_TAG_FIRE = "IGC_MSL_FIRE_MSG",
     IGC_TAG_REMOTE_FIRE_REQUEST = "IGC_MSL_REM_REQ",
     IGC_TAG_REMOTE_FIRE_RESPONSE = "IGC_MSL_REM_RSP",
+    IGC_TAG_REMOTE_FIRE_NOTIFICATION = "IGC_MSL_REM_NTF",
     IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
+    UNICAST_TAG = "UNICAST",
 // General config
     INI_SECTION_GENERAL = "LAMP - General Config",
     INI_FIRE_GROUP_NAME = "Fire control group name",
@@ -265,7 +268,7 @@ CircularBuffer<Action> _screenUpdateBuffer;
 IMyTerminalBlock _reference = null;
 
 IMyUnicastListener _unicastListener;
-const string UNICAST_TAG = "UNICAST";
+IMyBroadcastListener _remoteFireNotificationListener;
 
 bool _clearSpriteCache = false;
 
@@ -317,33 +320,16 @@ public struct SoundConfig
     }
 }
 
-public struct StatusScreenColors
-{
-    public Color TopBarColor;
-    public Color TitleTextColor;
-    public Color BackgroundColor;
-    public Color TextColor;
-    public Color SecondaryTextColor;
-    public Color StatusTextColor;
-    public Color StatusBarBackgroundColor;
-    public Color GuidanceSelectedColor;
-    public Color GuidanceAllowedColor;
-    public Color GuidanceDisallowedColor;
-}
-
-StatusScreenColors _statusScreenColors = new StatusScreenColors()
-{
-    TopBarColor = new Color(25, 25, 25),
-    TitleTextColor = new Color(150, 150, 150),
-    BackgroundColor = new Color(0, 0, 0),
-    TextColor = new Color(150, 150, 150),
-    SecondaryTextColor = new Color(75, 75, 75),
-    StatusTextColor = new Color(150, 150, 150),
-    StatusBarBackgroundColor = new Color(25, 25, 25),
-    GuidanceSelectedColor = new Color(0, 50, 0),
-    GuidanceAllowedColor = new Color(150, 150, 150),
-    GuidanceDisallowedColor = new Color(25, 25, 25)
-};
+public Color TopBarColor = new Color(25, 25, 25);
+public Color TitleTextColor = new Color(150, 150, 150);
+public Color BackgroundColor = new Color(0, 0, 0);
+public Color TextColor = new Color(150, 150, 150);
+public Color SecondaryTextColor = new Color(75, 75, 75);
+public Color StatusTextColor = new Color(150, 150, 150);
+public Color StatusBarBackgroundColor = new Color(25, 25, 25);
+public Color GuidanceSelectedColor = new Color(0, 50, 0);
+public Color GuidanceAllowedColor = new Color(150, 150, 150);
+public Color GuidanceDisallowedColor = new Color(25, 25, 25);
 
 #endregion
 
@@ -359,11 +345,14 @@ Program()
     
     _unicastListener = IGC.UnicastListener;
     _unicastListener.SetMessageCallback(UNICAST_TAG);
+    
+    _remoteFireNotificationListener = IGC.RegisterBroadcastListener(IGC_TAG_REMOTE_FIRE_NOTIFICATION);
+    _remoteFireNotificationListener.SetMessageCallback(IGC_TAG_REMOTE_FIRE_NOTIFICATION);
 
     _raycastHoming = new RaycastHoming(_maxRaycastRange, _maxTimeForLockBreak, _minRaycastRange, Me.CubeGrid.EntityId);
     _raycastHoming.AddEntityTypeToFilter(MyDetectedEntityType.FloatingObject, MyDetectedEntityType.Planet, MyDetectedEntityType.Asteroid);
 
-    _screenHandler = new MissileStatusScreenHandler(this, ref _statusScreenColors);
+    _screenHandler = new MissileStatusScreenHandler(this);
 
     _isSetup = GrabBlocks();
     GetLargestGridRadius();
@@ -413,8 +402,6 @@ void Main(string arg, UpdateType updateType)
     }
 
     _runtimeTracker.AddRuntime();
-    if ((updateType & (UpdateType.Terminal | UpdateType.Trigger | UpdateType.Script)) != 0)
-        ParseArguments(arg);
 
     if ((updateType & UpdateType.IGC) != 0)
     {
@@ -422,9 +409,18 @@ void Main(string arg, UpdateType updateType)
         {
             ParseUnicastMessages();
         }
+        if (arg.Equals(IGC_TAG_REMOTE_FIRE_NOTIFICATION))
+        {
+            ParseRemoteFireNotification();
+        }
     }
-
+    else if (!string.IsNullOrWhiteSpace(arg))
+    {
+        ParseArguments(arg);
+    }
+    
     var lastRuntime = RuntimeToRealTime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0);
+    _timeSinceTurretLock += lastRuntime;
     if (_autoFire)
         _timeSinceAutoFire += lastRuntime;
 
@@ -528,12 +524,51 @@ void GuidanceProcess()
 
     if (shouldBroadcast) //or if kill command
     {
+        BroadcastTargetingData();
         BroadcastParameterMessage();
     }
     else if (_broadcastRangeOverride)
     {
         _scheduler.AddQueuedAction(() => ScaleAntennaRange(_activeAntennaRange), 0);
         _scheduler.AddQueuedAction(BroadcastParameterMessage, 1.0 / 6.0);
+    }
+}
+
+void BroadcastTargetingData()
+{
+    long broadcastKey = GetBroadcastKey();
+    switch (_designationMode)
+    {
+        case GuidanceMode.BeamRiding:
+            SendMissileBeamRideMessage(
+                frontVec,
+                leftVec,
+                upVec,
+                originPos,
+                broadcastKey);
+            break;
+        case GuidanceMode.Camera:
+            SendMissileHomingMessage(
+                _raycastHoming.HitPosition,
+                _raycastHoming.TargetPosition,
+                _raycastHoming.TargetVelocity,
+                _raycastHoming.PreciseModeOffset,
+                Me.CubeGrid.WorldAABB.Center,
+                _raycastHoming.TimeSinceLastLock,
+                _raycastHoming.TargetId,
+                broadcastKey);
+            break;
+        case GuidanceMode.Turret:
+            SendMissileHomingMessage(
+                _targetInfo.Position,
+                _targetInfo.Position,
+                _targetInfo.Velocity,
+                Vector3D.Zero,
+                Me.CubeGrid.WorldAABB.Center,
+                _timeSinceTurretLock,
+                0, // TODO: Test if ID works now
+                broadcastKey);
+            break;
     }
 }
 
@@ -569,15 +604,6 @@ void HandleOptical(ref bool shouldBroadcast)
     ScaleAntennaRange(_activeAntennaRange);
     StopAllSounds();
 
-    long broadcastKey = GetBroadcastKey();
-    SendMissileBeamRideMessage(
-        frontVec,    /* Front direction */
-        leftVec,     /* Left direction */
-        upVec,       /* Up direction */
-        originPos,   /* Shooter position */
-        broadcastKey /* Key code */
-        );
-
     // Status
     _statusText = BEAM_RIDE_ACTIVE;
     _targetingStatus = TargetingStatus.Targeting;
@@ -590,25 +616,13 @@ void HandleCameraHoming(ref bool shouldBroadcast)
     double antennaRange = _idleAntennaRange;
     if (_raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
     {
-        // Antenna range
         shouldBroadcast = true;
+
+        // Antenna range
         if (_stealthySemiActiveAntenna)
             antennaRange = Vector3D.Distance(base.Me.CubeGrid.WorldAABB.Center, _raycastHoming.TargetPosition) - _raycastHoming.TargetSize;
         else
             antennaRange = _activeAntennaRange;
-
-        // Broadcast
-        long broadcastKey = GetBroadcastKey();
-        SendMissileHomingMessage(
-            _raycastHoming.HitPosition,        /* Hit position */
-            _raycastHoming.TargetPosition,     /* Target position */
-            _raycastHoming.TargetVelocity,     /* Target velocity */
-            _raycastHoming.PreciseModeOffset,  /* Precision offset */
-            Me.CubeGrid.WorldAABB.Center,      /* Shooter position */
-            _raycastHoming.TimeSinceLastLock,  /* Time since last lock */
-            _raycastHoming.TargetId,           /* Target ID */
-            broadcastKey                       /* Key code */
-            );
 
         // Play sound
         if (!_raycastHoming.MissedLastScan)
@@ -682,28 +696,16 @@ void HandleTurretHoming(ref bool shouldBroadcast)
     double antennaRange = _stealthySemiActiveAntenna ? 1 : _idleAntennaRange;
     if (_turretLocked)
     {
+        shouldBroadcast = true;
+        
         // Sound
         PlayLockOnSound(_soundBlocks);
 
         // Antenna range
-        shouldBroadcast = true;
         if (_stealthySemiActiveAntenna)
             antennaRange = Vector3D.Distance(Me.CubeGrid.WorldAABB.Center, _targetInfo.Position) - 10.0;
         else
             antennaRange = _activeAntennaRange;
-
-        // Broadcast
-        long broadcastKey = GetBroadcastKey();
-        SendMissileHomingMessage(
-            _targetInfo.Position,          /* Hit position */
-            _targetInfo.Position,          /* Target position */
-            _targetInfo.Velocity,          /* Target velocity */
-            Vector3D.Zero,                 /* Precision offset */
-            Me.CubeGrid.WorldAABB.Center,  /* Shooter position */
-            1 / 60.0,                      /* Time since last lock */
-            0,                             /* Target ID */
-            broadcastKey                   /* Key code */
-            );
 
         // Status
         _lockStrength = 1f;
@@ -852,6 +854,20 @@ void ParseRemoteFireResponses()
     _remoteFireResponses.Clear();
     _awaitingResponse = false;
     _remoteFireRequests = 0;
+}
+
+void ParseRemoteFireNotification()
+{
+    while (_remoteFireNotificationListener.HasPendingMessage)
+    {
+        var msg = _remoteFireNotificationListener.AcceptMessage();
+        if (msg.Data is int)
+        {
+            var missileNumber = (int)(msg.Data);
+            OpenSiloDoor(missileNumber);
+            TriggerFireTimer(missileNumber);
+        }
+    }
 }
 #endregion
 
@@ -1397,16 +1413,16 @@ void HandleIni()
         _stealthySemiActiveAntenna = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC).ToBoolean(_stealthySemiActiveAntenna);
         _minRaycastRange = _setupIni.Get(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE).ToDouble(_minRaycastRange);
 
-        _statusScreenColors.TopBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, _statusScreenColors.TopBarColor);
-        _statusScreenColors.TitleTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, _statusScreenColors.TitleTextColor);
-        _statusScreenColors.BackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, _statusScreenColors.BackgroundColor);
-        _statusScreenColors.TextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, _statusScreenColors.TextColor);
-        _statusScreenColors.SecondaryTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, _statusScreenColors.SecondaryTextColor);
-        _statusScreenColors.StatusTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, _statusScreenColors.StatusTextColor);
-        _statusScreenColors.StatusBarBackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, _statusScreenColors.StatusBarBackgroundColor);
-        _statusScreenColors.GuidanceSelectedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, _statusScreenColors.GuidanceSelectedColor);
-        _statusScreenColors.GuidanceAllowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, _statusScreenColors.GuidanceAllowedColor);
-        _statusScreenColors.GuidanceDisallowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, _statusScreenColors.GuidanceDisallowedColor);
+        TopBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
+        TitleTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
+        BackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, BackgroundColor);
+        TextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, TextColor);
+        SecondaryTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, SecondaryTextColor);
+        StatusTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, StatusTextColor);
+        StatusBarBackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, StatusBarBackgroundColor);
+        GuidanceSelectedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, GuidanceSelectedColor);
+        GuidanceAllowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
+        GuidanceDisallowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
 
         // Get preferred guidance mode
         preferredStr = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
@@ -1436,17 +1452,16 @@ void HandleIni()
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC, _stealthySemiActiveAntenna);
     _setupIni.Set(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE, _minRaycastRange);
 
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, _statusScreenColors.TopBarColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, _statusScreenColors.TitleTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, _statusScreenColors.BackgroundColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, _statusScreenColors.TextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, _statusScreenColors.SecondaryTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, _statusScreenColors.StatusTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, _statusScreenColors.StatusBarBackgroundColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, _statusScreenColors.GuidanceSelectedColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, _statusScreenColors.GuidanceAllowedColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, _statusScreenColors.GuidanceDisallowedColor);
-    _screenHandler.UpdateColors(ref _statusScreenColors);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, BackgroundColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, TextColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, SecondaryTextColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, StatusTextColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, StatusBarBackgroundColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, GuidanceSelectedColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
+    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
 
     _lockSearchSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_SEARCH, _setupIni);
     _lockGoodSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_GOOD, _setupIni);
@@ -1744,6 +1759,9 @@ bool FireMissilePrograms(int missileNumber)
 
     OpenSiloDoor(missileNumber);
     TriggerFireTimer(missileNumber);
+    
+    BroadcastTargetingData();
+    BroadcastParameterMessage();
 
     return true;
 }
@@ -1795,9 +1813,8 @@ void FireNextMissile(int numberToFire)
 
 void OpenSiloDoor(int missileNumber)
 {
-    IMyDoor siloDoor = null;
-    bool exists = _siloDoorDict.TryGetValue(missileNumber, out siloDoor);
-    if (exists)
+    IMyDoor siloDoor;
+    if (_siloDoorDict.TryGetValue(missileNumber, out siloDoor))
     {
         siloDoor.Enabled = true;
         siloDoor.OpenDoor();
@@ -1806,9 +1823,8 @@ void OpenSiloDoor(int missileNumber)
 
 void TriggerFireTimer(int missileNumber)
 {
-    IMyTimerBlock timer = null;
-    bool exists = _fireTimerDict.TryGetValue(missileNumber, out timer);
-    if (exists)
+    IMyTimerBlock timer;
+    if (_fireTimerDict.TryGetValue(missileNumber, out timer))
     {
         timer.Trigger();
     }
@@ -1830,17 +1846,18 @@ void OpticalGuidance()
 {
     /*
      * The following prioritizes references in the following hierchy:
-     * 1. Reference block (if any is specified)
-     * 2. Currently used camera
+     * 1. Currently used camera
+     * 2. Reference block (if any is specified)
      * 3. Currently used control seat
      * 4. Last active control seat
      * 5. First control seat that is found
      * 6. First camera that is found
      */
 
-    IMyTerminalBlock reference = _reference;
+    IMyTerminalBlock reference = GetControlledCamera(_cameraList);
+
     if (reference == null)
-        reference = GetControlledCamera(_cameraList);
+        reference = _reference;
 
     if (reference == null)
         reference = GetControlledShipController(_shipControllers);
@@ -2424,6 +2441,7 @@ void TurretGuidance(List<IMyLargeTurretBase> turrets, List<IMyTurretControlBlock
     }
 
     _turretLocked = true;
+    _timeSinceTurretLock = 0;
 
     //prioritize targets
     _targetInfoList.Sort((x, y) =>
@@ -2705,24 +2723,12 @@ public class MissileStatusScreenHandler
     readonly Color _warningColor = Color.Red;
     readonly Color _warningBackgroundColor = new Color(10, 10, 10, 200);
 
-    // Configurable colors
-    Color _topBarColor;
-    Color _titleTextColor;
-    Color _backgroundColor;
-    Color _textColor;
-    Color _secondaryTextColor;
-    Color _statusTextColor;
-    Color _statusBarBackgroundColor;
-    Color _guidanceSelectedColor;
-    Color _guidanceAllowedColor;
-    Color _guidanceDisallowedColor;
-
-    Program _program;
+    Program _p;
     #endregion
 
-    public MissileStatusScreenHandler(Program program, ref StatusScreenColors colors)
+    public MissileStatusScreenHandler(Program program)
     {
-        _program = program;
+        _p = program;
 
         SECONDARY_TEXT_POS_OFFSET = new Vector2(0, -1.5f * PRIMARY_TEXT_OFFSET);
         DROP_SHADOW_OFFSET = new Vector2(2, 2);
@@ -2766,29 +2772,12 @@ public class MissileStatusScreenHandler
         // Fire disabled
         FIRE_DISABLED_POS = new Vector2(0, 50);
         FIRE_DISABLED_TEXT_BOX_SIZE = new Vector2(360, -PRIMARY_TEXT_OFFSET * PRIMARY_TEXT_SIZE + 24);
-
-        UpdateColors(ref colors);
-    }
-
-    public void UpdateColors(ref StatusScreenColors colors)
-    {
-        _topBarColor = colors.TopBarColor;
-        _titleTextColor = colors.TitleTextColor;
-        _backgroundColor = colors.BackgroundColor;
-        _textColor = colors.TextColor;
-        _secondaryTextColor = colors.SecondaryTextColor;
-        _statusTextColor = colors.StatusTextColor;
-        _statusBarBackgroundColor = colors.StatusBarBackgroundColor;
-        _guidanceSelectedColor = colors.GuidanceSelectedColor;
-        _guidanceAllowedColor = colors.GuidanceAllowedColor;
-        _guidanceDisallowedColor = colors.GuidanceDisallowedColor;
-
     }
 
     //For debugging
     public void Echo(string content)
     {
-        _program.Echo(content);
+        _p.Echo(content);
     }
 
     public Color CustomInterpolation(Color color1, Color color2, float ratio)
@@ -2860,14 +2849,14 @@ public class MissileStatusScreenHandler
         MySpriteContainer container;
 
         // Title bar
-        container = new MySpriteContainer("SquareSimple", TOP_BAR_SIZE, TOP_BAR_POS, 0, _topBarColor, true);
+        container = new MySpriteContainer("SquareSimple", TOP_BAR_SIZE, TOP_BAR_POS, 0, _p.TopBarColor, true);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(TOP_TEXT, FONT, PRIMARY_TEXT_SIZE, TOP_BAR_TEXT_POS, _titleTextColor);
+        container = new MySpriteContainer(TOP_TEXT, FONT, PRIMARY_TEXT_SIZE, TOP_BAR_TEXT_POS, _p.TitleTextColor);
         _spriteContainers.Add(container);
 
         // Status bar
-        container = new MySpriteContainer("SquareSimple", STATUS_BAR_SIZE, STATUS_BAR_POS, 0, _statusBarBackgroundColor);
+        container = new MySpriteContainer("SquareSimple", STATUS_BAR_SIZE, STATUS_BAR_POS, 0, _p.StatusBarBackgroundColor);
         _spriteContainers.Add(container);
 
         Color lerpedStatusColor = CustomInterpolation(STATUS_GOOD_COLOR, STATUS_BAD_COLOR, lockStrength);
@@ -2883,57 +2872,57 @@ public class MissileStatusScreenHandler
         _spriteContainers.Add(container);
 
         // Modes
-        DrawBoxCorners(modeSelectSize, modeSelectPos, MODE_SELECT_LINE_LENGTH, MODE_SELECT_LINE_WIDTH, _guidanceSelectedColor, _spriteContainers);
+        DrawBoxCorners(modeSelectSize, modeSelectPos, MODE_SELECT_LINE_LENGTH, MODE_SELECT_LINE_WIDTH, _p.GuidanceSelectedColor, _spriteContainers);
 
-        container = new MySpriteContainer(MODE_CAMERA_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_CAMERA_POS, (allowedModesEnum & GuidanceMode.Camera) != 0 ? _guidanceAllowedColor : _guidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(MODE_CAMERA_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_CAMERA_POS, (allowedModesEnum & GuidanceMode.Camera) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(MODE_TURRET_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_TURRET_POS, (allowedModesEnum & GuidanceMode.Turret) != 0 ? _guidanceAllowedColor : _guidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(MODE_TURRET_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_TURRET_POS, (allowedModesEnum & GuidanceMode.Turret) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(MODE_BEAMRIDE_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_BEAMRIDE_POS, (allowedModesEnum & GuidanceMode.BeamRiding) != 0 ? _guidanceAllowedColor : _guidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(MODE_BEAMRIDE_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_BEAMRIDE_POS, (allowedModesEnum & GuidanceMode.BeamRiding) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
         // Range
-        container = new MySpriteContainer(RANGE_TEXT, FONT, PRIMARY_TEXT_SIZE, RANGE_TEXT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(RANGE_TEXT, FONT, PRIMARY_TEXT_SIZE, RANGE_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer($"{range * 0.001:n1} km", FONT, SECONDARY_TEXT_SIZE, RANGE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer($"{range * 0.001:n1} km", FONT, SECONDARY_TEXT_SIZE, RANGE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Stealth
-        container = new MySpriteContainer(STEALTH_TEXT, FONT, PRIMARY_TEXT_SIZE, STEALTH_TEXT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(STEALTH_TEXT, FONT, PRIMARY_TEXT_SIZE, STEALTH_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(stealth ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, STEALTH_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(stealth ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, STEALTH_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Spiral
-        container = new MySpriteContainer(SPIRAL_TEXT, FONT, PRIMARY_TEXT_SIZE, SPIRAL_TEXT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(SPIRAL_TEXT, FONT, PRIMARY_TEXT_SIZE, SPIRAL_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(spiral ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, SPIRAL_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(spiral ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, SPIRAL_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Topdown
-        container = new MySpriteContainer(TOPDOWN_TEXT, FONT, PRIMARY_TEXT_SIZE, TOPDOWN_TEXT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(TOPDOWN_TEXT, FONT, PRIMARY_TEXT_SIZE, TOPDOWN_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer((!inGravity || !showTopdownAndAimMode) ? NOT_APPLICABLE_TEXT : (topdown ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, TOPDOWN_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer((!inGravity || !showTopdownAndAimMode) ? NOT_APPLICABLE_TEXT : (topdown ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, TOPDOWN_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Aimpoint
-        container = new MySpriteContainer(AIM_POINT_TEXT, FONT, PRIMARY_TEXT_SIZE, AIM_POINT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(AIM_POINT_TEXT, FONT, PRIMARY_TEXT_SIZE, AIM_POINT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (precise ? AIM_OFFSET_TEXT : AIM_CENTER_TEXT), FONT, SECONDARY_TEXT_SIZE, AIM_POINT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (precise ? AIM_OFFSET_TEXT : AIM_CENTER_TEXT), FONT, SECONDARY_TEXT_SIZE, AIM_POINT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Autofire
-        container = new MySpriteContainer(AUTOFIRE_TEXT, FONT, PRIMARY_TEXT_SIZE, AUTOFIRE_TEXT_POS, _textColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(AUTOFIRE_TEXT, FONT, PRIMARY_TEXT_SIZE, AUTOFIRE_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (autofire ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, AUTOFIRE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _secondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (autofire ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, AUTOFIRE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
         
         // Fire Disabled Warning
@@ -2961,7 +2950,7 @@ public class MissileStatusScreenHandler
 
             surface.ContentType = ContentType.SCRIPT;
             surface.Script = "";
-            surface.ScriptBackgroundColor = _backgroundColor;
+            surface.ScriptBackgroundColor = _p.BackgroundColor;
 
 
             Vector2 textureSize = surface.TextureSize;
