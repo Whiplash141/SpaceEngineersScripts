@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "170.0.0";
-const string DATE = "2022/06/06";
+const string VERSION = "170.1.1";
+const string DATE = "2022/06/09";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -95,7 +95,7 @@ double _detachDuration = 0;
 double _mainIgnitionDelay = 0;
 
 bool _useCamerasForHoming = true;
-double _raycastRange = 3.33;
+double _raycastRange = 2.5;
 double _raycastMinimumTargetSize = 10;
 bool _raycastIgnoreFriends = false;
 bool _raycastIgnorePlanetSurface = true;
@@ -279,6 +279,7 @@ bool _shouldFire = false,
     _shouldProximityScan = false,
     _enableGuidance = false,
     _broadcastListenersRegistered = false,
+    _foundLampAntennas = false,
     _markedForDetonation = false;
 
 enum PostSetupAction { None = 0, Fire = 1, FireRequestResponse = 2 };
@@ -1036,7 +1037,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         _autoConfigureMissileNumber = -1;
         _missileGroup = null;
 
-        _setupBuilder.Append("\nRunning Autosetup...").Append("\n");
+        _setupBuilder.Append("\nRunning Autosetup...\n");
         GridTerminalSystem.GetBlockGroups(_allGroups);
 
         foreach (var group in _allGroups)
@@ -1083,21 +1084,21 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
 
         if (_missileGroup == null)
         {
-            _setupBuilder.Append("> WARN: No groups containing this\n  program found.").Append("\n");
+            _setupBuilder.Append("> WARN: No groups containing this\n  program found.\n");
             _missileGroup = GridTerminalSystem.GetBlockGroupWithName(_missileGroupNameTag); // Default
         }
         else if (_foundGroups.Count > 1) // Too many
         {
-            _setupBuilder.Append("> WARN: MULTIPLE groups\n  containing this program\n  found:").Append("\n");
+            _setupBuilder.Append("> WARN: MULTIPLE groups\n  containing this program\n  found:\n");
             for (int i = 0; i < _foundGroups.Count; ++i)
             {
                 var thisGroup = _foundGroups[i];
-                _setupBuilder.Append($"    {i + 1}: {thisGroup.Name}").Append("\n");
+                _setupBuilder.Append($"    {i + 1}: {thisGroup.Name}\n");
             }
         }
         else
         {
-            _setupBuilder.Append($"> Missile group found:\n  '{_missileTag} {_autoConfigureMissileNumber}'").Append("\n");
+            _setupBuilder.Append($"> Missile group found:\n  '{_missileTag} {_autoConfigureMissileNumber}'\n");
             _missileNumber = _autoConfigureMissileNumber;
         }
     }
@@ -1123,18 +1124,15 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     #endregion
 
     #region Guidance and PID config
-    _proNavGuid.NavConstant = _navConstant;
-    _proNavGuid.NavAccelConstant = _accelNavConstant;
-
-    _whipNavGuid.NavConstant = _navConstant;
-    _whipNavGuid.NavAccelConstant = _accelNavConstant;
-
-    _hybridNavGuid.NavConstant = _navConstant;
-    _hybridNavGuid.NavAccelConstant = _accelNavConstant;
-
-    _zeroEffortMissGuid.NavConstant = _navConstant;
-    _zeroEffortMissGuid.NavAccelConstant = _accelNavConstant;
-
+    foreach (var guid in _guidanceAlgorithms)
+    {
+        var relNav = guid as RelNavGuidance;
+        if (relNav != null)
+        {
+            relNav.NavConstant = _navConstant;
+            relNav.NavAccelConstant = _accelNavConstant;
+        }
+    }
     _selectedGuidance = _guidanceAlgorithms[_guidanceAlgoIndex];
 
     _yawPID = new PID(_gyroProportionalGain, _gyroIntegralGain, _gyroDerivativeGain, 0.1, SECONDS_PER_UPDATE);
@@ -1145,18 +1143,23 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     ClearLists();
 
     #region Grab Key Codes
-    _setupBuilder.Append($"\nChecking for firing ship...").Append("\n");
+    _setupBuilder.Append($"\nChecking for firing ship...\n");
     _broadcasters.Clear();
+    _foundLampAntennas = false;
     var fcsGroup = GridTerminalSystem.GetBlockGroupWithName(_fireControlGroupNameTag);
     if (fcsGroup != null)
     {
         fcsGroup.GetBlocksOfType(_broadcasters);
         if (_broadcasters.Count == 0)
         {
-            if (!reload)
+            if (_allowRemoteFire)
+            {
+                _setupBuilder.Append($"> WARN: No antennas in group named '{_fireControlGroupNameTag}', but remote fire is active.\n");
+            }
+            else if (!reload)
             {
                 _preSetupFailed = true;
-                _setupBuilder.Append($">> ERR: No antennas in group\n  named '{_fireControlGroupNameTag}'! This\n  missile MUST be attached to\n  a configured firing ship to fire!").Append("\n");
+                _setupBuilder.Append($">> ERR: No antennas in group named '{_fireControlGroupNameTag}'! This missile MUST be attached to a configured firing ship to fire!\n");
             }
         }
         else
@@ -1167,18 +1170,23 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
                 _savedKeycodes.Add(thisAntenna.EntityId);
                 if (AtInstructionLimit()) { yield return SetupStatus.Running; }
             }
-            _setupBuilder.Append($"> Info: Found antenna(s) on firing ship").Append("\n");
+            _setupBuilder.Append($"> Info: Found antenna(s) on firing ship\n");
+            _foundLampAntennas = true;
         }
+    }
+    else if (_allowRemoteFire)
+    {
+        _setupBuilder.Append($"> WARN: No group named '{_fireControlGroupNameTag}' found, but remote fire is active.\n");
     }
     else if (!reload)
     {
         _preSetupFailed = true;
-        _setupBuilder.Append($">> ERR: No group named\n  '{_fireControlGroupNameTag}' found!\n  This missile MUST be attached to\n  a configured firing ship to fire!").Append("\n");
+        _setupBuilder.Append($">> ERR: No group named '{_fireControlGroupNameTag}' found! This missile MUST be attached to a configured firing ship to fire!\n");
     }
     #endregion
 
     #region Get Missile Blocks
-    _setupBuilder.Append($"\nSetup for group named \"{_missileGroupNameTag}\"...").Append("\n");
+    _setupBuilder.Append($"\nSetup for group named \"{_missileGroupNameTag}\"...\n");
 
     if (_missileGroup != null)
     {
@@ -1186,7 +1194,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     }
     else
     {
-        _setupBuilder.Append($">> ERR: No block group named '{_missileGroupNameTag}' found!").Append("\n");
+        _setupBuilder.Append($">> ERR: No block group named '{_missileGroupNameTag}' found!\n");
         _preSetupFailed = true;
     }
 
@@ -1231,18 +1239,18 @@ public void RunSetupStateMachine()
             _setupStateMachine.Dispose();
             _setupStateMachine = null;
 
-            _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)").Append("\n");
+            _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)\n");
 
             // Post-block fetch
             bool setupPassed = SetupErrorChecking();
             if (!setupPassed || _preSetupFailed)
             {
-                _setupBuilder.Append($"\n>>> Setup Failed! <<<").Append("\n");
+                _setupBuilder.Append($"\n>>> Setup Failed! <<<\n");
                 Echo(_setupBuilder.ToString());
                 return;
             }
             // Implied else
-            _setupBuilder.Append("\n>>> Setup Successful! <<<").Append("\n");
+            _setupBuilder.Append("\n>>> Setup Successful! <<<\n");
             _missileReference = _shipControllers[0];
 
             if ((_postSetupAction & PostSetupAction.Fire) != 0)
@@ -1261,8 +1269,8 @@ public void RunSetupStateMachine()
     }
     else // Setup failed
     {
-        _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)").Append("\n");
-        _setupBuilder.Append($"\n>>> Setup Failed! <<<").Append("\n");
+        _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)\n");
+        _setupBuilder.Append($"\n>>> Setup Failed! <<<\n");
         _canSetup = true;
         Echo(_setupBuilder.ToString());
     }
@@ -1296,22 +1304,15 @@ bool SetupErrorChecking()
 {
     bool setupFailed = false;
     // ERRORS
-    if (EchoIfTrue(_antennas.Count == 0, ">> ERR: No antennas found"))
-        setupFailed = true;
-
-    if (EchoIfTrue(_gyros.Count == 0, ">> ERR: No gyros found"))
-        setupFailed = true;
-
-    if (EchoIfTrue(_shipControllers.Count == 0, ">> ERR: No remotes found"))
-        setupFailed = true;
-    else
+    setupFailed |= EchoIfTrue(_antennas.Count == 0, ">> ERR: No antennas found");
+    setupFailed |= EchoIfTrue(_gyros.Count == 0, ">> ERR: No gyros found");
+    setupFailed |= EchoIfTrue(_shipControllers.Count == 0, ">> ERR: No remotes found");
+    if (!setupFailed)
+    {
         GetThrusterOrientation(_shipControllers[0]);
-
-    if (EchoIfTrue(_mainThrusters.Count == 0, ">> ERR: No main thrusters found"))
-        setupFailed = true;
-
-    if (EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found"))
-        setupFailed = true;
+    }
+    setupFailed |= EchoIfTrue(_mainThrusters.Count == 0, ">> ERR: No main thrusters found");
+    setupFailed |= EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found");
 
     // WARNINGS
     EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching");
@@ -1369,7 +1370,7 @@ bool CollectBlocks(IMyTerminalBlock block)
     {
         antenna.Radius = 1f;
         antenna.EnableBroadcasting = false;
-        antenna.Enabled = _allowRemoteFire;
+        antenna.Enabled = _allowRemoteFire && !_foundLampAntennas;
     }
     else if (AddToListIfType(block, _warheads, out warhead))
     {
