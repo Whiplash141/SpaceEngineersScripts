@@ -50,7 +50,7 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "34.1.0";
+const string VERSION = "34.1.1";
 const string DATE = "2022/06/10";
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
@@ -67,7 +67,7 @@ const string INI_RANGE_OVERRIDE = "Radar range override (m)";
 const string INI_PROJ_ANGLE = "Radar projection angle in degrees (0 is flat)";
 const string INI_DRAW_QUADRANTS = "Draw quadrants";
 const string INI_DRAW_RUNNING_SCREEN = "Draw animated title screen";
-const string INI_FADE_OUT_INTERVAL = "Target fadeout interval";
+const string INI_FADE_OUT_INTERVAL = "Target fadeout interval (s)";
 
 const string INI_SECTION_COLORS = "Radar - Colors";
 const string INI_TITLE_BAR = "Title bar";
