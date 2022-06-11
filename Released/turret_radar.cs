@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "34.0.1";
-const string DATE = "2022/02/03";
+const string VERSION = "34.1.0";
+const string DATE = "2022/06/10";
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
 
@@ -67,6 +67,7 @@ const string INI_RANGE_OVERRIDE = "Radar range override (m)";
 const string INI_PROJ_ANGLE = "Radar projection angle in degrees (0 is flat)";
 const string INI_DRAW_QUADRANTS = "Draw quadrants";
 const string INI_DRAW_RUNNING_SCREEN = "Draw animated title screen";
+const string INI_FADE_OUT_INTERVAL = "Target fadeout interval";
 
 const string INI_SECTION_COLORS = "Radar - Colors";
 const string INI_TITLE_BAR = "Title bar";
@@ -88,6 +89,7 @@ const string INI_TEXT_SURFACE_TEMPLATE = "Show on screen {0}";
 IMyBroadcastListener broadcastListener;
 
 string referenceName = "Reference";
+float defaultFadeoutInterval = 0;
 float rangeOverride = 1000;
 bool useRangeOverride = false;
 bool networkTargets = true;
@@ -161,11 +163,14 @@ Program()
 {
     _runningScreenManager = new RadarRunningScreenManager(VERSION, this);
     _compositeBoundingSphere = new CompositeBoundingSphere(this);
+    radarSurface = new RadarSurface(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
 
     ParseCustomDataIni();
+    radarSurface.UpdateFields(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
+    // TODO: This is dumb, make fields public and in radar itself
+
     GrabBlocks();
 
-    radarSurface = new RadarSurface(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
     runtimeTracker = new RuntimeTracker(this);
@@ -314,7 +319,7 @@ void ProcessNetworkMessage()
         long entityId = 0;
         Vector3D position = default(Vector3D);
         bool targetLock = false;
-        
+
         MyTuple<byte, long, Vector3D, double> myTuple;
         if (messageData is MyTuple<byte, long, Vector3D, byte>) // For backwards compat.
         {
@@ -331,7 +336,7 @@ void ProcessNetworkMessage()
         {
             continue;
         }
-        
+
         relationship = (byte)(myTuple.Item1 & (byte)TargetRelation.RelationMask);
         type = (byte)(myTuple.Item1 & (byte)TargetRelation.TypeMask);
         targetLock = (myTuple.Item1 & (byte)TargetRelation.Locked) != 0;
@@ -346,7 +351,7 @@ void ProcessNetworkMessage()
             }
             continue;
         }
-        
+
         bool myLock = false;
         if (targetLock && GridTerminalSystem.GetBlockWithId(message.Source) != null)
         {
@@ -374,7 +379,7 @@ void ProcessNetworkMessage()
         }
 
         targetDataDict[entityId] = targetData;
-        
+
     }
 }
 
@@ -520,7 +525,7 @@ void GetTurretTargets()
                 targetIconColor = allyIconColor;
                 targetElevationColor = allyElevationColor;
                 break;
-            
+
             case TargetRelation.Neutral:
                 targetIconColor = neutralIconColor;
                 targetElevationColor = neutralElevationColor;
@@ -533,9 +538,10 @@ void GetTurretTargets()
             targetIconColor,
             targetElevationColor,
             targetData.Relation,
-            targetData.Type, 
+            targetData.Type,
             targetData.TargetLock,
-            targetData.MyLock);
+            targetData.MyLock,
+            kvp.Key);
     }
     NetworkTargets();
 
@@ -570,10 +576,25 @@ class RadarSurface
             if (value == _range)
                 return;
             _range = value;
-            PrefixRangeWithMetricUnits(_range, "m", 1, out _outerRange, out _innerRange);
+            _outerRange = PrefixRangeWithMetricUnits(_range, "m", 2);
         }
     }
     public bool RadarLockWarning { get; set; }
+
+    bool _immediateFadeOut = true;
+    float _fadeOutInterval = 0;
+    public float FadeOutInterval
+    {
+        get
+        {
+            return _fadeOutInterval;
+        }
+        set
+        {
+            _fadeOutInterval = value;
+            _immediateFadeOut = _fadeOutInterval <= 1f / 6f;
+        }
+    }
 
     public readonly StringBuilder Debug = new StringBuilder();
 
@@ -603,7 +624,7 @@ class RadarSurface
     float _radarProjectionSin;
     bool _drawQuadrants;
     bool _showRadarWarning = true;
-    string _outerRange = "", _innerRange = "";
+    string _outerRange = "";
     Vector2 _quadrantLineDirection;
 
     Color _radarLockWarningColor = Color.Red;
@@ -613,11 +634,14 @@ class RadarSurface
     readonly Vector2 DROP_SHADOW_OFFSET = new Vector2(2, 2);
     readonly Vector2 TGT_ICON_SIZE = new Vector2(20f, 20f);
     readonly Vector2 SHIP_ICON_SIZE = new Vector2(32, 16);
-    readonly Vector2 TRIANGLE_OFFSET = new Vector2(0, (float)(0.5f - Math.Sqrt(3f)/6f));
+    readonly Vector2 TRIANGLE_OFFSET = new Vector2(0, (float)(0.5f - Math.Sqrt(3f) / 6f));
     readonly Vector2 BORDER_PADDING = new Vector2(16f, 64f);
     readonly List<TargetInfo> _targetList = new List<TargetInfo>();
     readonly List<TargetInfo> _targetsBelowPlane = new List<TargetInfo>();
     readonly List<TargetInfo> _targetsAbovePlane = new List<TargetInfo>();
+
+    List<long> _targetDictKeys = new List<long>();
+    Dictionary<long, TargetInfo> _targetDict = new Dictionary<long, TargetInfo>();
 
     struct TargetInfo
     {
@@ -630,6 +654,7 @@ class RadarSurface
         public bool MyTargetLock;
         public float Rotation;
         public float Scale;
+        public float Age;
     }
 
     public RadarSurface(Color titleBarColor, Color backColor, Color lineColor, Color planeColor, Color textColor, Color targetLockColor, float projectionAngleDeg, float range, bool drawQuadrants)
@@ -651,7 +676,7 @@ class RadarSurface
         _targetLockColor = targetLockColor;
         Range = range;
 
-        PrefixRangeWithMetricUnits(Range, "m", 2, out _outerRange, out _innerRange);
+        _outerRange = PrefixRangeWithMetricUnits(Range, "m", 2);
 
         var rads = MathHelper.ToRadians(_projectionAngleDeg);
         _radarProjectionCos = (float)Math.Cos(rads);
@@ -687,7 +712,7 @@ class RadarSurface
         text.Position = textPos;
         frame.Add(text);
     }
-    
+
     void GetSpriteType(TargetRelation type, out string spriteName, out Vector2 offset, out float scale)
     {
         if ((type & TargetRelation.LargeGrid) != 0)
@@ -698,7 +723,7 @@ class RadarSurface
         }
         else if ((type & TargetRelation.SmallGrid) != 0)
         {
-            spriteName =  "Triangle";
+            spriteName = "Triangle";
             offset = TRIANGLE_OFFSET;
             scale = 1.25f;
         }
@@ -710,7 +735,7 @@ class RadarSurface
         }
     }
 
-    public void AddContact(Vector3D worldPosition, MatrixD worldMatrix, Color iconColor, Color elevationLineColor, TargetRelation relation, TargetRelation type, bool targetLock, bool myTargetLock)
+    public void AddContact(Vector3D worldPosition, MatrixD worldMatrix, Color iconColor, Color elevationLineColor, TargetRelation relation, TargetRelation type, bool targetLock, bool myTargetLock, long id)
     {
         Vector3D transformedDirection = Vector3D.TransformNormal(worldPosition - worldMatrix.Translation, Matrix.Transpose(worldMatrix));
         Vector3 position = new Vector3(transformedDirection.X, transformedDirection.Z, transformedDirection.Y);
@@ -747,15 +772,22 @@ class RadarSurface
             MyTargetLock = myTargetLock,
             Rotation = angle,
             Scale = scale,
+            Age = 0f,
         };
 
-        _targetList.Add(targetInfo);
+        _targetDict[id] = targetInfo;
     }
 
     public void SortContacts()
     {
         _targetsBelowPlane.Clear();
         _targetsAbovePlane.Clear();
+
+        _targetList.Clear();
+        foreach (var value in _targetDict.Values)
+        {
+            _targetList.Add(value);
+        }
 
         _targetList.Sort((a, b) => (a.Position.Y).CompareTo(b.Position.Y));
 
@@ -775,6 +807,32 @@ class RadarSurface
         _targetList.Clear();
         _targetsAbovePlane.Clear();
         _targetsBelowPlane.Clear();
+        if (_immediateFadeOut)
+        {
+            _targetDict.Clear();
+        }
+        else
+        {
+            _targetDictKeys.Clear();
+
+            foreach (var id in _targetDict.Keys)
+            {
+                _targetDictKeys.Add(id);
+            }
+            foreach (var id in _targetDictKeys)
+            {
+                TargetInfo info = _targetDict[id];
+                info.Age += 1f / 6f;
+                if (info.Age > _fadeOutInterval)
+                {
+                    _targetDict.Remove(id);
+                }
+                else
+                {
+                    _targetDict[id] = info; // Update age  
+                }
+            }
+        }
     }
 
     /*
@@ -914,19 +972,19 @@ class RadarSurface
     void DrawRadarPlaneBackground(MySpriteDrawFrame frame, Vector2 screenCenter, Vector2 radarPlaneSize, float scale)
     {
         float lineWidth = RADAR_RANGE_LINE_WIDTH * scale;
-        
+
         MySprite sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize, color: _lineColor);
         sprite.Position = screenCenter;
         frame.Add(sprite);
-        
+
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize - lineWidth * Vector2.One, color: _backColor);
         sprite.Position = screenCenter;
         frame.Add(sprite);
-        
+
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize * 0.5f, color: _lineColor);
         sprite.Position = screenCenter;
         frame.Add(sprite);
-        
+
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize * 0.5f - lineWidth * Vector2.One, color: _backColor);
         sprite.Position = screenCenter;
         frame.Add(sprite);
@@ -970,19 +1028,27 @@ class RadarSurface
         // Draw range text
         float textSize = RANGE_TEXT_SIZE * scale;
         Color rangeColors = new Color(_textColor.R, _textColor.G, _textColor.B, _textColor.A / 2);
-        /*
-        sprite = MySprite.CreateText($"{_innerRange}", "Debug", rangeColors, textSize, TextAlignment.CENTER);
-        sprite.Position = radarScreenCenter + new Vector2(0, radarPlaneSize.Y * -0.25f - textSize * 30f);
-        frame.Add(sprite);
-        */
 
         sprite = MySprite.CreateText($"Range: {_outerRange}", "Debug", rangeColors, textSize, TextAlignment.CENTER);
         sprite.Position = radarScreenCenter + new Vector2(0, radarPlaneSize.Y * 0.5f + scale * 4f /*+ textSize * 37f*/ );
         frame.Add(sprite);
     }
 
+    Color ScaleColorAlpha(Color color, float scale)
+    {
+        if (scale > 0.999f)
+        {
+            return color;
+        }
+        float newAlpha = color.A * scale;
+        color.A = (byte)Math.Round(newAlpha);
+        return color;
+    }
+
     void DrawTargetIcon(MySpriteDrawFrame frame, Vector2 screenCenter, Vector2 radarPlaneSize, TargetInfo targetInfo, float scale)
     {
+        float alphaScale = _immediateFadeOut ? 1f : Math.Max(0f, 1f - (targetInfo.Age / FadeOutInterval));
+
         Vector3 targetPosPixels = targetInfo.Position * new Vector3(1, _radarProjectionCos, _radarProjectionSin) * radarPlaneSize.X * 0.5f;
 
         Vector2 targetPosPlane = new Vector2(targetPosPixels.X, targetPosPixels.Y);
@@ -992,13 +1058,13 @@ class RadarSurface
         RoundVector2(ref targetPosPlane);
 
         float elevationLineWidth = Math.Max(1f, TGT_ELEVATION_LINE_WIDTH * scale);
-        MySprite elevationSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: targetInfo.ElevationColor, size: new Vector2(elevationLineWidth, targetPosPixels.Z));
+        MySprite elevationSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: new Vector2(elevationLineWidth, targetPosPixels.Z));
         elevationSprite.Position = screenCenter + (iconPos + targetPosPlane) * 0.5f;
         RoundVector2(ref elevationSprite.Position);
         RoundVector2(ref elevationSprite.Size);
 
         Vector2 iconSize = TGT_ICON_SIZE * scale * targetInfo.Scale;
-        MySprite iconSprite = new MySprite(SpriteType.TEXTURE, targetInfo.Icon, color: targetInfo.IconColor, size: iconSize, rotation: targetInfo.Rotation);
+        MySprite iconSprite = new MySprite(SpriteType.TEXTURE, targetInfo.Icon, color: ScaleColorAlpha(targetInfo.IconColor, alphaScale), size: iconSize, rotation: targetInfo.Rotation);
         iconSprite.Position = screenCenter + iconPos;
         RoundVector2(ref iconSprite.Position);
         RoundVector2(ref iconSprite.Size);
@@ -1008,13 +1074,13 @@ class RadarSurface
         iconShadow.Size += Vector2.One * 2f * (float)Math.Max(1f, Math.Round(scale * 4f));
 
         iconSize.Y *= _radarProjectionCos;
-        MySprite projectedIconSprite = new MySprite(SpriteType.TEXTURE, "Circle", color: targetInfo.ElevationColor, size: iconSize);
+        MySprite projectedIconSprite = new MySprite(SpriteType.TEXTURE, "Circle", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: iconSize);
         projectedIconSprite.Position = screenCenter + targetPosPlane;
         RoundVector2(ref projectedIconSprite.Position);
         RoundVector2(ref projectedIconSprite.Size);
 
         bool showProjectedElevation = Math.Abs(iconPos.Y - targetPosPlane.Y) > iconSize.Y;
-        
+
         Vector2 iconSpriteOffset = targetInfo.Offset * scale * targetInfo.Scale;
 
         // Changing the order of drawing based on if above or below radar plane
@@ -1022,7 +1088,7 @@ class RadarSurface
         {
             iconSprite.Position -= iconSpriteOffset * iconSprite.Size.Value.X;
             iconShadow.Position -= iconSpriteOffset * iconShadow.Size.Value.X;
-            
+
             if (showProjectedElevation)
             {
                 frame.Add(projectedIconSprite);
@@ -1035,7 +1101,7 @@ class RadarSurface
         {
             iconSprite.RotationOrScale = MathHelper.Pi;
             iconShadow.RotationOrScale = MathHelper.Pi;
-            
+
             iconSprite.Position += iconSpriteOffset * iconSprite.Size.Value.X;
             iconShadow.Position += iconSpriteOffset * iconShadow.Size.Value.X;
 
@@ -1047,11 +1113,11 @@ class RadarSurface
                 frame.Add(projectedIconSprite);
         }
 
-        if (targetInfo.TargetLock)
+        if (targetInfo.TargetLock && alphaScale > 0.999f)
         {
             Vector2 targetBoxSize = (TGT_ICON_SIZE + 20) * scale;
             DrawBoxCorners(frame, targetBoxSize, screenCenter + iconPos, 12 * scale, 4 * scale, targetInfo.IconColor);
-            
+
             if (targetInfo.MyTargetLock)
             {
                 float lockTextSizeScaled = LOCK_TEXT_SIZE * scale;
@@ -1066,11 +1132,11 @@ class RadarSurface
                     RotationOrScale = lockTextSizeScaled,
                     Size = null,
                 };
-                
+
                 MySprite lockTextShadow = lockText;
                 lockTextShadow.Color = _backColor;
                 lockTextShadow.Position += DROP_SHADOW_OFFSET;
-                
+
                 frame.Add(lockTextShadow);
                 frame.Add(lockText);
             }
@@ -1113,7 +1179,7 @@ class RadarSurface
 1e3,
     };
 
-    void PrefixRangeWithMetricUnits(double num, string unit, int digits, out string numStr, out string halfNumStr)
+    string PrefixRangeWithMetricUnits(double num, string unit, int digits)
     {
         string prefix = "";
 
@@ -1129,9 +1195,7 @@ class RadarSurface
             }
         }
 
-        numStr = (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
-        num *= 0.5;
-        halfNumStr = (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
+       return (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
     }
 }
 #endregion
@@ -1187,6 +1251,7 @@ void WriteCustomDataIni()
     generalIni.Set(INI_SECTION_GENERAL, INI_DRAW_QUADRANTS, drawQuadrants);
     generalIni.Set(INI_SECTION_GENERAL, INI_REF_NAME, referenceName);
     generalIni.Set(INI_SECTION_GENERAL, INI_DRAW_RUNNING_SCREEN, drawRunningScreen);
+    generalIni.Set(INI_SECTION_GENERAL, INI_FADE_OUT_INTERVAL, radarSurface.FadeOutInterval);
 
     MyIniHelper.SetColor(INI_SECTION_COLORS, INI_TITLE_BAR, titleBarColor, generalIni);
     MyIniHelper.SetColor(INI_SECTION_COLORS, INI_TEXT, textColor, generalIni);
@@ -1221,6 +1286,7 @@ void ParseCustomDataIni()
         projectionAngle = generalIni.Get(INI_SECTION_GENERAL, INI_PROJ_ANGLE).ToSingle(projectionAngle);
         drawQuadrants = generalIni.Get(INI_SECTION_GENERAL, INI_DRAW_QUADRANTS).ToBoolean(drawQuadrants);
         drawRunningScreen = generalIni.Get(INI_SECTION_GENERAL, INI_DRAW_RUNNING_SCREEN).ToBoolean(drawRunningScreen);
+        radarSurface.FadeOutInterval = generalIni.Get(INI_SECTION_GENERAL, INI_FADE_OUT_INTERVAL).ToSingle(defaultFadeoutInterval);
 
         titleBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_TITLE_BAR, generalIni, titleBarColor);
         textColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_TEXT, generalIni, textColor);
@@ -1374,7 +1440,7 @@ bool PopulateLists(IMyTerminalBlock block)
         turrets.Add(new TurretInterface(turret));
         return false;
     }
-    
+
     var tcb = block as IMyTurretControlBlock;
     if (tcb != null)
     {
@@ -1939,31 +2005,31 @@ class RadarRunningScreenManager
     }
 
     AnimationParams[] _animSequence = new AnimationParams[] {
-        new AnimationParams(  0f,   0,   0, 140),
-        new AnimationParams( 15f,   0,   0, 120),
-        new AnimationParams( 30f,   0,   0, 100),
-        new AnimationParams( 45f, 255,   0,  80), // contact 1
-        new AnimationParams( 60f, 245,   0,  60),
-        new AnimationParams( 75f, 220,   0,  40),
-        new AnimationParams( 90f, 200,   0,  20),
-        new AnimationParams(105f, 180,   0,   0),
-        new AnimationParams(120f, 160,   0,   0),
-        new AnimationParams(135f, 140, 255,   0), // contact 2
-        new AnimationParams(150f, 120, 245,   0),
-        new AnimationParams(165f, 100, 220,   0),
-        new AnimationParams(180f,  80, 200,   0),
-        new AnimationParams(195f,  60, 180,   0),
-        new AnimationParams(210f,  40, 160,   0),
-        new AnimationParams(225f,  20, 140,   0),
-        new AnimationParams(240f,   0, 120,   0),
-        new AnimationParams(255f,   0, 100,   0),
-        new AnimationParams(270f,   0,  80, 255), // contact 3
-        new AnimationParams(285f,   0,  60, 245),
-        new AnimationParams(300f,   0,  40, 220),
-        new AnimationParams(315f,   0,  20, 200),
-        new AnimationParams(330f,   0,   0, 180),
-        new AnimationParams(345f,   0,   0, 160),
-    };
+new AnimationParams(  0f,   0,   0, 140),
+new AnimationParams( 15f,   0,   0, 120),
+new AnimationParams( 30f,   0,   0, 100),
+new AnimationParams( 45f, 255,   0,  80), // contact 1
+new AnimationParams( 60f, 245,   0,  60),
+new AnimationParams( 75f, 220,   0,  40),
+new AnimationParams( 90f, 200,   0,  20),
+new AnimationParams(105f, 180,   0,   0),
+new AnimationParams(120f, 160,   0,   0),
+new AnimationParams(135f, 140, 255,   0), // contact 2
+new AnimationParams(150f, 120, 245,   0),
+new AnimationParams(165f, 100, 220,   0),
+new AnimationParams(180f,  80, 200,   0),
+new AnimationParams(195f,  60, 180,   0),
+new AnimationParams(210f,  40, 160,   0),
+new AnimationParams(225f,  20, 140,   0),
+new AnimationParams(240f,   0, 120,   0),
+new AnimationParams(255f,   0, 100,   0),
+new AnimationParams(270f,   0,  80, 255), // contact 3
+new AnimationParams(285f,   0,  60, 245),
+new AnimationParams(300f,   0,  40, 220),
+new AnimationParams(315f,   0,  20, 200),
+new AnimationParams(330f,   0,   0, 180),
+new AnimationParams(345f,   0,   0, 160),
+};
 
     bool _clearSpriteCache = false;
     IMyTextSurface _surface = null;
@@ -1996,12 +2062,12 @@ class RadarRunningScreenManager
             {
                 frame.Add(new MySprite());
             }
-            
+
             Vector2 pos = _spritePosition * minScale + screenCenter;
             DrawRadarFrame(frame, pos, minScale * SpriteScale);
             DrawContacts(frame, pos, minScale * SpriteScale, anim.Alpha1, anim.Alpha2, anim.Alpha3);
             DrawRadarSweep(frame, pos, minScale * SpriteScale, angle);
-            
+
             DrawTitleBar(_surface, frame, minScale);
         }
     }
@@ -2051,31 +2117,31 @@ class RadarRunningScreenManager
 
     void DrawRadarFrame(MySpriteDrawFrame frame, Vector2 centerPos, float scale = 1f)
     {
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f,0f)*scale+centerPos, new Vector2(200f,200f)*scale, _white, null, TextAlignment.CENTER, 0f)); // circle
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f,0f)*scale+centerPos, new Vector2(190f,190f)*scale, _black, null, TextAlignment.CENTER, 0f)); // circle inner
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(200f, 200f) * scale, _white, null, TextAlignment.CENTER, 0f)); // circle
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(190f, 190f) * scale, _black, null, TextAlignment.CENTER, 0f)); // circle inner
     }
-    
+
     void DrawContacts(MySpriteDrawFrame frame, Vector2 centerPos, float scale, byte contact1Alpha, byte contact2Alpha, byte contact3Alpha)
     {
-        Color contact1Color, contact2Color, contact3Color; 
+        Color contact1Color, contact2Color, contact3Color;
         contact1Color = contact2Color = contact3Color = _white;
         contact1Color.A = contact1Alpha;
         contact2Color.A = contact2Alpha;
         contact3Color.A = contact3Alpha;
-        
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-30f,30f)*scale+centerPos, new Vector2(10f,10f)*scale, contact1Color, null, TextAlignment.CENTER, 0f)); // contact 1
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-50f,-50f)*scale+centerPos, new Vector2(10f,10f)*scale, contact2Color, null, TextAlignment.CENTER, 0f)); // contact 2
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(50f,0f)*scale+centerPos, new Vector2(10f,10f)*scale, contact3Color, null, TextAlignment.CENTER, 0f)); // contact 3
+
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-30f, 30f) * scale + centerPos, new Vector2(10f, 10f) * scale, contact1Color, null, TextAlignment.CENTER, 0f)); // contact 1
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-50f, -50f) * scale + centerPos, new Vector2(10f, 10f) * scale, contact2Color, null, TextAlignment.CENTER, 0f)); // contact 2
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(50f, 0f) * scale + centerPos, new Vector2(10f, 10f) * scale, contact3Color, null, TextAlignment.CENTER, 0f)); // contact 3
     }
-    
+
     void DrawRadarSweep(MySpriteDrawFrame frame, Vector2 centerPos, float scale = 1f, float rotation = 0f)
     {
         float sin = (float)Math.Sin(rotation);
         float cos = (float)Math.Cos(rotation);
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*9f-sin*44f,sin*9f+cos*44f)*scale+centerPos, new Vector2(10f,90f)*scale, _darkGrey, null, TextAlignment.CENTER, -0.2094f+rotation)); // line trailing 2
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*5f-sin*45f,sin*5f+cos*45f)*scale+centerPos, new Vector2(10f,90f)*scale, _grey, null, TextAlignment.CENTER, -0.1047f+rotation)); // line trailing 1
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*0f-sin*45f,sin*0f+cos*45f)*scale+centerPos, new Vector2(10f,90f)*scale, _white, null, TextAlignment.CENTER, 0f+rotation)); // line
-        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*0f-sin*0f,sin*0f+cos*0f)*scale+centerPos, new Vector2(10f,10f)*scale, _white, null, TextAlignment.CENTER, 0f+rotation)); // center dot
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * 9f - sin * 44f, sin * 9f + cos * 44f) * scale + centerPos, new Vector2(10f, 90f) * scale, _darkGrey, null, TextAlignment.CENTER, -0.2094f + rotation)); // line trailing 2
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * 5f - sin * 45f, sin * 5f + cos * 45f) * scale + centerPos, new Vector2(10f, 90f) * scale, _grey, null, TextAlignment.CENTER, -0.1047f + rotation)); // line trailing 1
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * 0f - sin * 45f, sin * 0f + cos * 45f) * scale + centerPos, new Vector2(10f, 90f) * scale, _white, null, TextAlignment.CENTER, 0f + rotation)); // line
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos * 0f - sin * 0f, sin * 0f + cos * 0f) * scale + centerPos, new Vector2(10f, 10f) * scale, _white, null, TextAlignment.CENTER, 0f + rotation)); // center dot
     }
 
     #endregion
@@ -2106,7 +2172,7 @@ public class TurretInterface
     {
         return T != null ? T.GetTargetedEntity() : TCB.GetTargetedEntity();
     }
-    
+
     public float Range
     {
         get
@@ -2154,4 +2220,3 @@ public class TurretInterface
 }
 
 #endregion
-
