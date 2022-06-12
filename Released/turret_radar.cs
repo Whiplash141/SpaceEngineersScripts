@@ -50,7 +50,7 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "34.1.1";
+const string VERSION = "34.1.2";
 const string DATE = "2022/06/10";
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
@@ -89,7 +89,7 @@ const string INI_TEXT_SURFACE_TEMPLATE = "Show on screen {0}";
 IMyBroadcastListener broadcastListener;
 
 string referenceName = "Reference";
-float defaultFadeoutInterval = 0;
+float defaultFadeoutInterval = 1;
 float rangeOverride = 1000;
 bool useRangeOverride = false;
 bool networkTargets = true;
@@ -1070,7 +1070,7 @@ class RadarSurface
         RoundVector2(ref iconSprite.Size);
 
         MySprite iconShadow = iconSprite;
-        iconShadow.Color = Color.Black;
+        iconShadow.Color = ScaleColorAlpha(Color.Black, alphaScale);
         iconShadow.Size += Vector2.One * 2f * (float)Math.Max(1f, Math.Round(scale * 4f));
 
         iconSize.Y *= _radarProjectionCos;
