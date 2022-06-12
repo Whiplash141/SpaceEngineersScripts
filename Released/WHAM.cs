@@ -1,6 +1,6 @@
 
 #region Script
-const string VERSION = "170.1.1";
+const string VERSION = "170.1.2";
 const string DATE = "2022/06/09";
 const string COMPAT_VERSION = "95.0.0";
 
@@ -1315,20 +1315,31 @@ bool SetupErrorChecking()
     setupFailed |= EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found");
 
     // WARNINGS
-    EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching");
+    if(!EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching"))
+    {
+        EchoBlockCount(_mergeBlocks.Count, "merge");
+        EchoBlockCount(_rotors.Count, "rotor");
+        EchoBlockCount(_connectors.Count, "connector");
+    }
 
     // INFO
-    EchoIfTrue(_artMasses.Count == 0, "> Info: No artificial masses found");
-    EchoIfTrue(_sensors.Count == 0, "> Info: No sensors found");
-    EchoIfTrue(_warheads.Count == 0, "> Info: No warheads found");
-    EchoIfTrue(_beacons.Count == 0, "> Info: No beacons found");
-    EchoIfTrue(_cameras.Count == 0, "> Info: No cameras found");
-    EchoIfTrue(_timers.Count == 0, "> Info: No timers found");
-    EchoIfTrue(_sideThrusters.Count == 0, "> Info: No side thrusters found");
-    EchoIfTrue(_detachThrusters.Count == 0, "> Info: No detach thrusters found");
-    EchoIfTrue(_gasTanks.Count == 0, "> Info: No gas tanks found");
+    EchoBlockCount(_artMasses.Count, "art. mass block");
+    EchoBlockCount(_sensors.Count, "sensor");
+    EchoBlockCount(_warheads.Count, "warhead");
+    EchoBlockCount(_beacons.Count, "beacon");
+    EchoBlockCount(_cameras.Count, "camera");
+    EchoBlockCount(_timers.Count, "timer");
+    EchoBlockCount(_mainThrusters.Count, "main thruster");
+    EchoBlockCount(_sideThrusters.Count, "side thruster");
+    EchoBlockCount(_detachThrusters.Count, "detach thruster");
+    EchoBlockCount(_gasTanks.Count, "gas tank");
 
     return !setupFailed;
+}
+
+void EchoBlockCount(int count, string name)
+{
+    _setupBuilder.Append($"> Info: {count} {name}{(count == 1 ? "" : "s")}\n");
 }
 
 bool CollectBlocks(IMyTerminalBlock block)
