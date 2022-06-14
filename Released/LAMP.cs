@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.0.0";
-const string DATE = "2022/06/06";
+const string VERSION = "95.1.0";
+const string DATE = "2022/06/13";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -114,25 +114,41 @@ ___________________________________________________________________
 #region Fields
 GuidanceMode _preferredGuidanceMode = GuidanceMode.Camera;
 GuidanceMode _designationMode = GuidanceMode.None;
-string _missileNameTag = "Missile";
-string _fireControlGroupName = "Fire Control";
-string _referenceNameTag = "Reference";
+string 
+    _missileNameTag = "Missile",
+    _fireControlGroupName = "Fire Control",
+    _referenceNameTag = "Reference";
 
-bool _autoFire = false;
-bool _autoFireRemote = false;
-double _autoFireInterval = 1; // seconds
-double _timeSinceAutoFire = 141;
+double 
+    _autoFireInterval = 1,
+    _timeSinceAutoFire = 141,
+    _idleAntennaRange = 800,
+    _activeAntennaRange = 5000,
+    _minRaycastRange = 50,
+    _maxRaycastRange = 5000,
+    _maxTimeForLockBreak = 3,
+    _timeSinceTurretLock = 0,
+    _searchScanRandomSpread = 0;
 
-double _idleAntennaRange = 800;
-double _activeAntennaRange = 5000;
-double _minRaycastRange = 50; //meters
-double _maxRaycastRange = 5000; //meters
-double _maxTimeForLockBreak = 3;
-double _timeSinceTurretLock = 0;
-
-bool _stealthySemiActiveAntenna = false;
-bool _usePreciseAiming = false;
-bool _fireEnabled = true;
+bool 
+    _autoFire = false,
+    _autoFireRemote = false,
+    _stealthySemiActiveAntenna = false,
+    _usePreciseAiming = false,
+    _fireEnabled = true,
+    _retask = false,
+    _stealth = true,
+    _spiral = false,
+    _topdown = false,
+    _semiActiveAllowed = false,
+    _opticalAllowed = false,
+    _turretAllowed = false,
+    _isSetup = false,
+    _killGuidance = false,
+    _hasKilled = false,
+    _inGravity = false,
+    _showBSOD = false,
+    _broadcastRangeOverride = false;
 
 const string IGC_TAG_IFF = "IGC_IFF_MSG",
     IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
@@ -158,6 +174,7 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_ANTENNA_RANGE_ACTIVE = "Antenna range - Active (m)",
     INI_ANTENNA_RANGE_DYNAMIC = "Use dynamic active antenna range",
     INI_MIN_RAYCAST_RANGE = "Minimum allowed lock on range (m)",
+    INI_SEARCH_SCAN_SPREAD = "Randomized raycast scan spread (m)",
 // Sound config
     INI_SECTION_SOUND_LOCK_SEARCH = "LAMP - Sound Config - Lock Search",
     INI_SECTION_SOUND_LOCK_GOOD = "LAMP - Sound Config - Lock Good",
@@ -199,15 +216,17 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     TARGET_SEARCHING_TEXT = "Searching",
     BEAM_RIDE_ACTIVE = "Active";
 
-const double RuntimeToRealTime = (1.0 / 60.0) / 0.0166666;
-const double UpdatesPerSecond = 10;
-const double UpdateTime = 1.0 / UpdatesPerSecond;
+const double 
+    RuntimeToRealTime = (1.0 / 60.0) / 0.0166666,
+    UpdatesPerSecond = 10,
+    UpdateTime = 1.0 / UpdatesPerSecond;
 
-readonly Color DefaultTextColor = new Color(150, 150, 150);
-readonly Color TargetLockedColor = new Color(150, 150, 150);
-readonly Color TargetNotLockedColor = new Color(100, 0, 0);
-readonly Color TargetSearchingColor = new Color(100, 100, 0);
-readonly Color TargetTooCloseColor = new Color(100, 100, 0);
+readonly Color 
+    DefaultTextColor = new Color(150, 150, 150),
+    TargetLockedColor = new Color(150, 150, 150),
+    TargetNotLockedColor = new Color(100, 0, 0),
+    TargetSearchingColor = new Color(100, 100, 0),
+    TargetTooCloseColor = new Color(100, 100, 0);
 
 string _statusText = "";
 Color _statusColor;
@@ -220,19 +239,6 @@ enum TargetingStatus { Idle, Searching, Targeting };
 TargetingStatus _targetingStatus = TargetingStatus.Idle;
 TargetingStatus _lastTargetingStatus = TargetingStatus.Idle;
 
-bool _retask = false;
-bool _stealth = true;
-bool _spiral = false;
-bool _topdown = false;
-bool _semiActiveAllowed = false;
-bool _opticalAllowed = false;
-bool _turretAllowed = false;
-bool _isSetup = false;
-bool _killGuidance = false;
-bool _hasKilled = false;
-bool _inGravity = false;
-bool _showBSOD = false;
-bool _broadcastRangeOverride = false;
 const double BsodShowTime = 5 * 60;
 double _currentBsodShowTime = 0;
 GuidanceMode _allowedGuidanceEnum = GuidanceMode.None;
@@ -279,10 +285,11 @@ Dictionary<string, GuidanceMode> _guidanceModeDict = new Dictionary<string, Guid
 {"BEAMRIDE", GuidanceMode.BeamRiding},
 };
 
-SoundConfig _lockSearchSound = new SoundConfig("ArcSoundBlockAlert2", 0.5f, 1f, true);
-SoundConfig _lockGoodSound = new SoundConfig("ArcSoundBlockAlert2", 0.2f, 1f, true);
-SoundConfig _lockBadSound = new SoundConfig("ArcSoundBlockAlert1", 0.15f, 1f, true);
-SoundConfig _lockLostSound = new SoundConfig("ArcSoundBlockAlert1", 0.5f, 0f, false);
+SoundConfig 
+    _lockSearchSound = new SoundConfig("ArcSoundBlockAlert2", 0.5f, 1f, true),
+    _lockGoodSound = new SoundConfig("ArcSoundBlockAlert2", 0.2f, 1f, true),
+    _lockBadSound = new SoundConfig("ArcSoundBlockAlert1", 0.15f, 1f, true),
+    _lockLostSound = new SoundConfig("ArcSoundBlockAlert1", 0.5f, 0f, false);
 
 public struct SoundConfig
 {
@@ -1412,6 +1419,7 @@ void HandleIni()
         _activeAntennaRange = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE).ToDouble(_activeAntennaRange);
         _stealthySemiActiveAntenna = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC).ToBoolean(_stealthySemiActiveAntenna);
         _minRaycastRange = _setupIni.Get(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE).ToDouble(_minRaycastRange);
+        _searchScanRandomSpread = _setupIni.Get(INI_SECTION_GENERAL, INI_SEARCH_SCAN_SPREAD).ToDouble(_searchScanRandomSpread);
 
         TopBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
         TitleTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
@@ -1451,6 +1459,8 @@ void HandleIni()
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE, _activeAntennaRange);
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC, _stealthySemiActiveAntenna);
     _setupIni.Set(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE, _minRaycastRange);
+    _setupIni.Set(INI_SECTION_GENERAL, INI_SEARCH_SCAN_SPREAD, _searchScanRandomSpread);
+    _raycastHoming.SearchScanSpread = _searchScanRandomSpread;
 
     MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
     MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
@@ -1902,6 +1912,7 @@ class RaycastHoming
             return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
         }
     }
+    public double SearchScanSpread {get; set; } = 0;
     public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
     public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
     public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
@@ -2029,6 +2040,16 @@ class RaycastHoming
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
     }
+    
+    double RndDbl()
+    {
+        return 2 * _rngeesus.NextDouble() - 1;
+    }
+    
+    double GaussRnd()
+    {
+        return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
+    }
 
     Vector3D CalculateFudgeVector(Vector3D targetDirection, double fudgeFactor = 5)
     {
@@ -2042,8 +2063,18 @@ class RaycastHoming
         if (!Vector3D.IsUnit(ref perpVector2))
             perpVector2.Normalize();
 
-        var randomVector = (2.0 * _rngeesus.NextDouble() - 1.0) * perpVector1 + (2.0 * _rngeesus.NextDouble() - 1.0) * perpVector2;
+        var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
         return randomVector * fudgeFactor * TimeSinceLastLock;
+    }
+    
+    Vector3D GetSearchDirection(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
+    {
+        Vector3D scanPos = origin + direction * MaxRange;
+        if (SearchScanSpread < 1e-2)
+        {
+            return scanPos;
+        }
+        return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
     }
 
     public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
@@ -2149,16 +2180,15 @@ class RaycastHoming
 
         // This operates under the assumption that raycast charges at 2km/s
         AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
-        var availableScanRange = thisCamera.AvailableScanRange;
 
         //Attempt to scan adjusted target position
-        if (availableScanRange > scanRange &&
+        if (thisCamera.AvailableScanRange >= scanRange &&
             _timeSinceLastScan >= AutoScanInterval)
         {
             if (Status == TargetingStatus.Locked || _manualLockOverride)
                 _targetInfo = thisCamera.Raycast(adjustedTargetPos);
             else if (!Vector3D.IsZero(testDirection))
-                _targetInfo = thisCamera.Raycast(cameraMatrix.Translation + testDirection * MaxRange);
+                _targetInfo = thisCamera.Raycast(GetSearchDirection(reference.GetPosition(), testDirection, thisCamera));
             else
                 _targetInfo = thisCamera.Raycast(MaxRange);
 
