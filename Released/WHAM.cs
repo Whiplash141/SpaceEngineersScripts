@@ -1,6 +1,6 @@
 
 #region Script
-const string VERSION = "170.2.0";
+const string VERSION = "170.2.1";
 const string DATE = "2022/06/13";
 const string COMPAT_VERSION = "95.0.0";
 
@@ -2975,6 +2975,7 @@ class RaycastHoming
             return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
         }
     }
+    public double SearchScanSpread {get; set; } = 0;
     public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
     public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
     public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
@@ -3102,6 +3103,16 @@ class RaycastHoming
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
     }
+    
+    double RndDbl()
+    {
+        return 2 * _rngeesus.NextDouble() - 1;
+    }
+    
+    double GaussRnd()
+    {
+        return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
+    }
 
     Vector3D CalculateFudgeVector(Vector3D targetDirection, double fudgeFactor = 5)
     {
@@ -3115,8 +3126,18 @@ class RaycastHoming
         if (!Vector3D.IsUnit(ref perpVector2))
             perpVector2.Normalize();
 
-        var randomVector = (2.0 * _rngeesus.NextDouble() - 1.0) * perpVector1 + (2.0 * _rngeesus.NextDouble() - 1.0) * perpVector2;
+        var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
         return randomVector * fudgeFactor * TimeSinceLastLock;
+    }
+    
+    Vector3D GetSearchDirection(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
+    {
+        Vector3D scanPos = origin + direction * MaxRange;
+        if (SearchScanSpread < 1e-2)
+        {
+            return scanPos;
+        }
+        return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
     }
 
     public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
@@ -3222,16 +3243,15 @@ class RaycastHoming
 
         // This operates under the assumption that raycast charges at 2km/s
         AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
-        var availableScanRange = thisCamera.AvailableScanRange;
 
         //Attempt to scan adjusted target position
-        if (availableScanRange > scanRange &&
+        if (thisCamera.AvailableScanRange >= scanRange &&
             _timeSinceLastScan >= AutoScanInterval)
         {
             if (Status == TargetingStatus.Locked || _manualLockOverride)
                 _targetInfo = thisCamera.Raycast(adjustedTargetPos);
             else if (!Vector3D.IsZero(testDirection))
-                _targetInfo = thisCamera.Raycast(cameraMatrix.Translation + testDirection * MaxRange);
+                _targetInfo = thisCamera.Raycast(GetSearchDirection(reference.GetPosition(), testDirection, thisCamera));
             else
                 _targetInfo = thisCamera.Raycast(MaxRange);
 
