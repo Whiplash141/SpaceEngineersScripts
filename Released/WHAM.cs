@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "170.1.2";
-const string DATE = "2022/06/09";
+const string VERSION = "170.2.0";
+const string DATE = "2022/06/13";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -308,6 +308,8 @@ const double
     RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666,
     GYRO_SLOWDOWN_ANGLE = Math.PI / 36,
     GYRO_PLANETARY_ROLL_ACTIVATION_ANGLE = Math.PI / 18;
+
+const float MIN_THRUST = 1e-9f;
 
 readonly MyIni _guidanceIni = new MyIni();
 readonly StringBuilder _saveSB = new StringBuilder();
@@ -1446,16 +1448,16 @@ void GetThrusterOrientation(IMyTerminalBlock refBlock)
 {
     var forwardDirn = refBlock.Orientation.Forward;
 
-    foreach (IMyThrust thisThrust in _unsortedThrusters)
+    foreach (IMyThrust t in _unsortedThrusters)
     {
-        var thrustDirn = Base6Directions.GetFlippedDirection(thisThrust.Orientation.Forward);
+        var thrustDirn = Base6Directions.GetFlippedDirection(t.Orientation.Forward);
         if (thrustDirn == forwardDirn)
         {
-            _mainThrusters.Add(thisThrust);
+            _mainThrusters.Add(t);
         }
         else
         {
-            _sideThrusters.Add(thisThrust);
+            _sideThrusters.Add(t);
         }
     }
 }
@@ -1597,7 +1599,7 @@ void MissileStage2()
         block.CustomName = "";
     }
 
-    ApplyThrustOverride(_sideThrusters, 0.00001f, false);
+    ApplyThrustOverride(_sideThrusters, MIN_THRUST, false);
     ApplyThrustOverride(_detachThrusters, 100f);
 }
 
@@ -1606,7 +1608,7 @@ void MissileStage3()
 {
     _missileStage = 3;
 
-    ApplyThrustOverride(_detachThrusters, 0.00001f);
+    ApplyThrustOverride(_detachThrusters, MIN_THRUST);
 }
 
 // Ignites main thrust.
@@ -1633,8 +1635,8 @@ void MissileStage4()
             thisCamera.Enabled = true;
     }
 
-    ApplyThrustOverride(_detachThrusters, 0f);
-    ApplyThrustOverride(_sideThrusters, 0f);
+    ApplyThrustOverride(_detachThrusters, MIN_THRUST);
+    ApplyThrustOverride(_sideThrusters, MIN_THRUST);
     ApplyThrustOverride(_mainThrusters, 100f);
 
     Me.CubeGrid.CustomName = _missileGroupNameTag;
@@ -1660,7 +1662,7 @@ void GuidanceNavAndControl()
 
     Vector3D missilePos, missileVel, gravityVec;
     MatrixD missileMatrix;
-    double missileAccel;
+    double missileMass, missileAccel;
     bool pastArmingRange, shouldSpiral;
 
     Navigation(_minimumArmingRange,
@@ -1671,6 +1673,7 @@ void GuidanceNavAndControl()
         out missileVel,
         out _shooterPos, 
         out gravityVec,
+        out missileMass,
         out missileAccel,
         out _distanceFromShooter,
         out pastArmingRange,
@@ -1687,7 +1690,7 @@ void GuidanceNavAndControl()
         shouldSpiral,
         out _shouldProximityScan);
 
-    Control(missileMatrix, headingVec, gravityVec);
+    Control(missileMatrix, headingVec, gravityVec, missileVel, missileMass);
     #endregion
 }
 
@@ -1700,6 +1703,7 @@ void Navigation(
     out Vector3D missileVel, 
     out Vector3D shooterPos, 
     out Vector3D gravity,
+    out double missileMass,
     out double missileAcceleration,
     out double distanceFromShooter,
     out bool pastMinArmingRange,
@@ -1721,7 +1725,7 @@ void Navigation(
 
     // Computing mass, thrust, and acceleration
     double missileThrust = CalculateMissileThrust(_mainThrusters);
-    double missileMass = _missileReference.CalculateShipMass().PhysicalMass;
+    missileMass = _missileReference.CalculateShipMass().PhysicalMass;
     missileAcceleration = missileThrust / missileMass;
 
     pastMinArmingRange = Vector3D.DistanceSquared(missilePos, shooterPos) >= minArmingRange * minArmingRange;
@@ -1878,12 +1882,14 @@ Vector3D HomingGuidance(
     return headingVec;
 }
 
-void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec)
+void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec, Vector3D velocityVec, double mass)
 {
     if (_missileStage == 4)
     {
         var headingDeviation = VectorMath.CosBetween(headingVec, missileMatrix.Forward);
         ApplyThrustOverride(_mainThrusters, (float)MathHelper.Clamp(headingDeviation, 0.25f, 1f) * 100f);
+        var sideVelocity = VectorMath.Rejection(velocityVec, headingVec);
+        ApplySideThrust(_sideThrusters, sideVelocity, gravityVec, mass);
     }
 
     // Get pitch and yaw angles
@@ -2001,16 +2007,41 @@ void ScaleAntennaRange(double dist)
 void ApplyThrustOverride(List<IMyThrust> thrusters, float overrideValue, bool turnOn = true)
 {
     float thrustProportion = overrideValue * 0.01f;
-    foreach (IMyThrust thisThrust in thrusters)
+    foreach (IMyThrust t in thrusters)
     {
-        if (thisThrust.Closed)
+        if (t.Closed)
             continue;
 
-        if (thisThrust.Enabled != turnOn)
-            thisThrust.Enabled = turnOn;
+        if (t.Enabled != turnOn)
+            t.Enabled = turnOn;
 
-        if (thrustProportion != thisThrust.ThrustOverridePercentage)
-            thisThrust.ThrustOverridePercentage = thrustProportion;
+        if (thrustProportion != t.ThrustOverridePercentage)
+            t.ThrustOverridePercentage = thrustProportion;
+    }
+}
+
+void ApplySideThrust(List<IMyThrust> thrusters, Vector3D controlAccel, Vector3D gravity, double mass)
+{
+    var desiredThrust = mass * (2 * controlAccel + gravity);
+    var thrustToApply = desiredThrust;
+    foreach (IMyThrust t in thrusters)
+    {
+        if (!t.IsWorking)
+        {
+            continue;
+        }
+
+        double neededThrust = Vector3D.Dot(t.WorldMatrix.Forward, thrustToApply);
+        if (neededThrust > 0)
+        {
+            var outputProportion = MathHelper.Clamp(neededThrust / t.MaxEffectiveThrust, 0, 1);
+            t.ThrustOverridePercentage = (float)outputProportion;
+            thrustToApply -= t.WorldMatrix.Forward * outputProportion * t.MaxEffectiveThrust;
+        }
+        else
+        {
+            t.ThrustOverridePercentage = MIN_THRUST;
+        }
     }
 }
 
