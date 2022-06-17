@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.1.0";
-const string DATE = "2022/06/13";
+const string VERSION = "95.1.1";
+const string DATE = "2022/06/16";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -21,44 +21,18 @@ I have NOT obfuscated any of the code, so that if you copy paste this into an
 IDE like Visual Studio or use a website like https://codebeautify.org/csharpviewer,
 you can uncompress this and it will be human readable.
 
-_______________________________
-    ARGUMENTS
 
-fire
-remote_fire
-alpha
-kill
-stealth
-stealth_switch
-stealth_off
-evasion
-evasion_switch
-evasion_on
-evasion_off
-spiral
-spiral_switch
-spiral_on
-spiral_off
-topdown
-topdown_switch
-topdown_on
-topdown_off
-mode_switch
-mode_optical | mode_beamride
-mode_semiactive | mode_camera
-mode_turret
-lock_on
-lock_off
-lock_switch
-retask
-precise
-precise_switch
-precise_on
-precise_off
-autofire
-autofire_toggle
-autofire_on
-autofire_off
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1239,6 +1213,7 @@ void ParseArguments(string arg)
         #region Auto fire toggle
         case "autofire":
         case "autofire_toggle":
+        case "autofire_switch":
             _autoFire = !_autoFire;
             WriteAutoFire();
             break;
