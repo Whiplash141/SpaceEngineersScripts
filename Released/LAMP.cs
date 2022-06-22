@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.1.1";
-const string DATE = "2022/06/16";
+const string VERSION = "95.2.0";
+const string DATE = "2022/06/17";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -86,8 +86,6 @@ ___________________________________________________________________
 */
 
 #region Fields
-GuidanceMode _preferredGuidanceMode = GuidanceMode.Camera;
-GuidanceMode _designationMode = GuidanceMode.None;
 string 
     _missileNameTag = "Missile",
     _fireControlGroupName = "Fire Control",
@@ -140,7 +138,7 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_MSL_NAME = "Missile group name tag",
     INI_REFERENCE_NAME = "Optional reference block name tag",
     INI_PREFERRED_GUID = "Preferred guidance mode",
-    INI_PREFERRED_GUID_COMMENT = "Accepted guidance modes are\n  CAMERA\n  TURRET\n  BEAMRIDE",
+    INI_PREFERRED_GUID_COMMENT = " Accepted guidance modes are: CAMERA, TURRET, or BEAMRIDE",
     INI_AUTO_FIRE = "Enable auto-fire",
     INI_AUTO_FIRE_INTERVAL = "Auto-fire interval (s)",
     INI_AUTO_FIRE_REMOTE = "Auto-fire remote missiles",
@@ -149,6 +147,8 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_ANTENNA_RANGE_DYNAMIC = "Use dynamic active antenna range",
     INI_MIN_RAYCAST_RANGE = "Minimum allowed lock on range (m)",
     INI_SEARCH_SCAN_SPREAD = "Randomized raycast scan spread (m)",
+    INI_FIRE_ORDER = "Fire order",
+    INI_FIRE_ORDER_COMMENT = " Accepted values are: NUMBER, ANGLE, or DISTANCE\n Missiles will be fired smallest to largest value",
 // Sound config
     INI_SECTION_SOUND_LOCK_SEARCH = "LAMP - Sound Config - Lock Search",
     INI_SECTION_SOUND_LOCK_GOOD = "LAMP - Sound Config - Lock Good",
@@ -171,13 +171,13 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_TEXT_SURF_TEMPLATE = "Show on screen {0}",
 // Silo door config
     INI_SECTION_SILO_DOOR = "LAMP - Silo Door Config",
-    INI_SILO_NUMBER_COMMENT = "This door will be opened when this specified missile is fired",
+    INI_SILO_NUMBER_COMMENT = " This door will be opened when this specified missile is fired",
     INI_SILO_NUMBER = "Missile number",
 // Fire timer config
     INI_SECTION_FIRE_TIMER = "LAMP - Fire Timer Config",
-    INI_FIRE_TIMER_NUMBER_COMMENT = "This timer will be triggered when this specified missile is fired",
+    INI_FIRE_TIMER_NUMBER_COMMENT = " This timer will be triggered when this specified missile is fired",
     INI_FIRE_TIMER_NUMBER = "Missile number",
-    INI_FIRE_TIMER_ANY_COMMENT = "If this timer should be triggered ANY time a missile is fired",
+    INI_FIRE_TIMER_ANY_COMMENT = " If this timer should be triggered ANY time a missile is fired",
     INI_FIRE_TIMER_ANY = "Trigger on any fire",
     INI_FIRE_TIMER_TRIGGER_ON_STATE = "Trigger on targeting state",
     INI_FIRE_TIMER_TRIGGER_ON_STATE_COMMENT = " This timer will be triggered when the script enters one of the following\n targeting states:\n"+
@@ -210,6 +210,25 @@ ArgumentParser _args = new ArgumentParser();
 
 public enum GuidanceMode : int { None = 0, BeamRiding = 1, Camera = 1 << 1, Turret = 1 << 2 };
 enum TargetingStatus { Idle, Searching, Targeting };
+enum FireOrder { LowestMissileNumber, SmallestDistanceToTarget, SmallestAngleToTarget };
+
+static Dictionary<string, GuidanceMode> _guidanceModeDict = new Dictionary<string, GuidanceMode>()
+{
+{"CAMERA", GuidanceMode.Camera},
+{"TURRET", GuidanceMode.Turret},
+{"BEAMRIDE", GuidanceMode.BeamRiding},
+};
+
+static Dictionary<string, FireOrder> _fireOrderDict = new Dictionary<string, FireOrder>()
+{
+{"NUMBER", FireOrder.LowestMissileNumber},
+{"DISTANCE", FireOrder.SmallestDistanceToTarget},
+{"ANGLE", FireOrder.SmallestAngleToTarget},
+};
+
+GuidanceMode _preferredGuidanceMode = _guidanceModeDict.Values.First();
+FireOrder _fireOrder = _fireOrderDict.Values.First();
+GuidanceMode _designationMode = GuidanceMode.None;
 TargetingStatus _targetingStatus = TargetingStatus.Idle;
 TargetingStatus _lastTargetingStatus = TargetingStatus.Idle;
 
@@ -252,13 +271,6 @@ IMyBroadcastListener _remoteFireNotificationListener;
 
 bool _clearSpriteCache = false;
 
-Dictionary<string, GuidanceMode> _guidanceModeDict = new Dictionary<string, GuidanceMode>()
-{
-{"CAMERA", GuidanceMode.Camera},
-{"TURRET", GuidanceMode.Turret},
-{"BEAMRIDE", GuidanceMode.BeamRiding},
-};
-
 SoundConfig 
     _lockSearchSound = new SoundConfig("ArcSoundBlockAlert2", 0.5f, 1f, true),
     _lockGoodSound = new SoundConfig("ArcSoundBlockAlert2", 0.2f, 1f, true),
@@ -272,10 +284,11 @@ public struct SoundConfig
     public float Interval;
     public bool Loop;
     
-    const string INI_SOUND_NAME = "Sound name";
-    const string INI_SOUND_DURATION = "Duration (s)";
-    const string INI_SOUND_INTERVAL = "Loop interval (s)";
-    const string INI_SOUND_SHOULD_LOOP = "Should loop";
+    const string 
+        INI_SOUND_NAME = "Sound name",
+        INI_SOUND_DURATION = "Duration (s)",
+        INI_SOUND_INTERVAL = "Loop interval (s)",
+        INI_SOUND_SHOULD_LOOP = "Should loop";
     
     public SoundConfig(string name, float duration, float interval, bool loop)
     {
@@ -301,16 +314,17 @@ public struct SoundConfig
     }
 }
 
-public Color TopBarColor = new Color(25, 25, 25);
-public Color TitleTextColor = new Color(150, 150, 150);
-public Color BackgroundColor = new Color(0, 0, 0);
-public Color TextColor = new Color(150, 150, 150);
-public Color SecondaryTextColor = new Color(75, 75, 75);
-public Color StatusTextColor = new Color(150, 150, 150);
-public Color StatusBarBackgroundColor = new Color(25, 25, 25);
-public Color GuidanceSelectedColor = new Color(0, 50, 0);
-public Color GuidanceAllowedColor = new Color(150, 150, 150);
-public Color GuidanceDisallowedColor = new Color(25, 25, 25);
+public Color 
+    TopBarColor = new Color(25, 25, 25),
+    TitleTextColor = new Color(150, 150, 150),
+    BackgroundColor = new Color(0, 0, 0),
+    TextColor = new Color(150, 150, 150),
+    SecondaryTextColor = new Color(75, 75, 75),
+    StatusTextColor = new Color(150, 150, 150),
+    StatusBarBackgroundColor = new Color(25, 25, 25),
+    GuidanceSelectedColor = new Color(0, 50, 0),
+    GuidanceAllowedColor = new Color(150, 150, 150),
+    GuidanceDisallowedColor = new Color(25, 25, 25);
 
 #endregion
 
@@ -522,10 +536,10 @@ void BroadcastTargetingData()
     {
         case GuidanceMode.BeamRiding:
             SendMissileBeamRideMessage(
-                frontVec,
-                leftVec,
-                upVec,
-                originPos,
+                _frontVec,
+                _leftVec,
+                _upVec,
+                _originPos,
                 broadcastKey);
             break;
         case GuidanceMode.Camera:
@@ -541,7 +555,7 @@ void BroadcastTargetingData()
             break;
         case GuidanceMode.Turret:
             SendMissileHomingMessage(
-                _targetInfo.Position,
+                _targetInfo.HitPosition.Value,
                 _targetInfo.Position,
                 _targetInfo.Velocity,
                 Vector3D.Zero,
@@ -1381,7 +1395,8 @@ bool GrabBlocks()
 void HandleIni()
 {
     _setupIni.Clear();
-    string preferredStr = "CAMERA";
+    string preferredStr = _guidanceModeDict.Keys.First(),
+           orderStr = _fireOrderDict.Keys.First();
     if (_setupIni.TryParse(Me.CustomData))
     {
         _fireControlGroupName = _setupIni.Get(INI_SECTION_GENERAL, INI_FIRE_GROUP_NAME).ToString(_fireControlGroupName);
@@ -1407,12 +1422,28 @@ void HandleIni()
         GuidanceAllowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
         GuidanceDisallowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
 
-        // Get preferred guidance mode
-        preferredStr = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
-        GuidanceMode preferredMode = GuidanceMode.None;
-        if (_guidanceModeDict.TryGetValue(preferredStr, out preferredMode))
+        string temp = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
+        GuidanceMode preferredMode;
+        if (_guidanceModeDict.TryGetValue(temp, out preferredMode))
         {
             _preferredGuidanceMode = preferredMode;
+            preferredStr = temp;
+        }
+        else
+        {
+            _preferredGuidanceMode = _guidanceModeDict.Values.First();
+        }
+        
+        temp = _setupIni.Get(INI_SECTION_GENERAL, INI_FIRE_ORDER).ToString(orderStr);
+        FireOrder fireOrder;
+        if (_fireOrderDict.TryGetValue(temp, out fireOrder))
+        {
+            _fireOrder = fireOrder;
+            orderStr = temp;
+        }
+        else
+        {
+            _fireOrder = _fireOrderDict.Values.First();
         }
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
@@ -1428,6 +1459,8 @@ void HandleIni()
     _setupIni.SetComment(INI_SECTION_GENERAL, INI_PREFERRED_GUID, INI_PREFERRED_GUID_COMMENT);
     _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE, _autoFire);
     _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_REMOTE, _autoFireRemote);
+    _setupIni.Set(INI_SECTION_GENERAL, INI_FIRE_ORDER, orderStr);
+    _setupIni.SetComment(INI_SECTION_GENERAL, INI_FIRE_ORDER, INI_FIRE_ORDER_COMMENT);
 
     _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL, _autoFireInterval);
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_IDLE, _idleAntennaRange);
@@ -1664,7 +1697,72 @@ void GetCurrentMissiles()
     currentMissileNumbers.Clear();
     missileNumberDict.Clear();
     GridTerminalSystem.GetBlockGroups(null, CollectMissileNumbers);
-    currentMissileNumbers.Sort();
+    
+    switch (_fireOrder)
+    {
+        case FireOrder.LowestMissileNumber:
+            currentMissileNumbers.Sort();
+            break;
+        case FireOrder.SmallestAngleToTarget:
+            currentMissileNumbers.Sort((a,b) => MissileCompare(a, b, true));
+            break;
+        case FireOrder.SmallestDistanceToTarget:
+            currentMissileNumbers.Sort((a,b) => MissileCompare(a, b, false));
+            break;
+    }
+}
+
+int MissileCompare(int a, int b, bool angle)
+{
+    if (_targetingStatus != TargetingStatus.Targeting)
+    {
+        return -1;
+    }
+    return (int)Math.Sign(GetCompareValue(a, angle) - GetCompareValue(b, angle));
+}
+
+public static double CosBetween(Vector3D a, Vector3D b)
+{
+    if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        return 0;
+    else
+        return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+}
+
+
+List<IMyShipController> _controllerCompareList = new List<IMyShipController>();
+double GetCompareValue(int num, bool angle)
+{
+    _controllerCompareList.Clear();
+    missileNumberDict[num].GetBlocksOfType(_controllerCompareList);
+    if (_controllerCompareList.Count == 0)
+    {
+        return double.MaxValue;
+    }
+    IMyShipController c = _controllerCompareList[0];
+    
+    Vector3D targetPos = Vector3D.Zero;
+    switch (_designationMode)
+    {
+        case GuidanceMode.BeamRiding:
+            targetPos = _originPos + _frontVec * 200;
+            break;
+        case GuidanceMode.Camera:
+            targetPos = _raycastHoming.TargetPosition;
+            break;
+        case GuidanceMode.Turret:
+            targetPos = _targetInfo.Position;
+            break;
+    }
+
+    if (angle)
+    {
+        return -CosBetween(c.WorldMatrix.Forward, targetPos - c.GetPosition());
+    }
+    else
+    {
+        return Vector3D.DistanceSquared(c.GetPosition(), targetPos);
+    }
 }
 
 bool CollectMissileNumbers(IMyBlockGroup g)
@@ -1822,10 +1920,10 @@ void TriggerFireTimer(int missileNumber)
 #endregion
 
 #region Optical Guidance
-Vector3D originPos = new Vector3D(0, 0, 0);
-Vector3D frontVec = new Vector3D(0, 0, 0);
-Vector3D leftVec = new Vector3D(0, 0, 0);
-Vector3D upVec = new Vector3D(0, 0, 0);
+Vector3D _originPos = new Vector3D(0, 0, 0);
+Vector3D _frontVec = new Vector3D(0, 0, 0);
+Vector3D _leftVec = new Vector3D(0, 0, 0);
+Vector3D _upVec = new Vector3D(0, 0, 0);
 
 void OpticalGuidance()
 {
@@ -1869,10 +1967,10 @@ void OpticalGuidance()
 
     _lastControlledReference = reference;
 
-    originPos = reference.GetPosition();
-    frontVec = reference.WorldMatrix.Forward;
-    leftVec = reference.WorldMatrix.Left;
-    upVec = reference.WorldMatrix.Up;
+    _originPos = reference.GetPosition();
+    _frontVec = reference.WorldMatrix.Forward;
+    _leftVec = reference.WorldMatrix.Left;
+    _upVec = reference.WorldMatrix.Up;
 }
 #endregion
 
@@ -2660,73 +2758,79 @@ public class MissileStatusScreenHandler
     List<MySpriteContainer> _spriteContainers = new List<MySpriteContainer>();
 
     // Default sizes
-    const float DEFAULT_SCREEN_SIZE = 512;
-    const float DEFAULT_SCREEN_HALF_SIZE = 512 * 0.5f;
+    const float 
+        DEFAULT_SCREEN_SIZE = 512,
+        DEFAULT_SCREEN_HALF_SIZE = 512 * 0.5f;
 
     // UI positions
-    Vector2 TOP_BAR_SIZE;
-    Vector2 STATUS_BAR_SIZE;
-    Vector2 TOP_BAR_POS;
-    Vector2 TOP_BAR_TEXT_POS;
-    Vector2 STEALTH_TEXT_POS;
-    Vector2 AIM_POINT_POS;
-    Vector2 RANGE_TEXT_POS;
-    Vector2 SPIRAL_TEXT_POS;
-    Vector2 TOPDOWN_TEXT_POS;
-    Vector2 STATUS_BAR_POS;
-    Vector2 STATUS_BAR_TEXT_POS;
-    Vector2 STATUS_BAR_WEAK_TEXT_POS;
-    Vector2 STATUS_BAR_STRONG_TEXT_POS;
-    Vector2 SECONDARY_TEXT_POS_OFFSET;
-    Vector2 DROP_SHADOW_OFFSET;
-    Vector2 MODE_CAMERA_POS;
-    Vector2 MODE_TURRET_POS;
-    Vector2 MODE_BEAMRIDE_POS;
-    Vector2 MODE_CAMERA_SELECT_POS;
-    Vector2 MODE_TURRET_SELECT_POS;
-    Vector2 MODE_BEAMRIDE_SELECT_POS;
-    Vector2 MODE_CAMERA_SELECT_SIZE;
-    Vector2 MODE_TURRET_SELECT_SIZE;
-    Vector2 MODE_BEAMRIDE_SELECT_SIZE;
-    Vector2 AUTOFIRE_TEXT_POS;
-    Vector2 FIRE_DISABLED_POS;
-    Vector2 FIRE_DISABLED_TEXT_BOX_SIZE;
+    Vector2 
+        TOP_BAR_SIZE,
+        STATUS_BAR_SIZE,
+        TOP_BAR_POS,
+        TOP_BAR_TEXT_POS,
+        STEALTH_TEXT_POS,
+        AIM_POINT_POS,
+        RANGE_TEXT_POS,
+        SPIRAL_TEXT_POS,
+        TOPDOWN_TEXT_POS,
+        STATUS_BAR_POS,
+        STATUS_BAR_TEXT_POS,
+        STATUS_BAR_WEAK_TEXT_POS,
+        STATUS_BAR_STRONG_TEXT_POS,
+        SECONDARY_TEXT_POS_OFFSET,
+        DROP_SHADOW_OFFSET,
+        MODE_CAMERA_POS,
+        MODE_TURRET_POS,
+        MODE_BEAMRIDE_POS,
+        MODE_CAMERA_SELECT_POS,
+        MODE_TURRET_SELECT_POS,
+        MODE_BEAMRIDE_SELECT_POS,
+        MODE_CAMERA_SELECT_SIZE,
+        MODE_TURRET_SELECT_SIZE,
+        MODE_BEAMRIDE_SELECT_SIZE,
+        AUTOFIRE_TEXT_POS,
+        FIRE_DISABLED_POS,
+        FIRE_DISABLED_TEXT_BOX_SIZE;
 
     // Constants
-    const float PRIMARY_TEXT_SIZE = 1.5f;
-    const float SECONDARY_TEXT_SIZE = 1.2f;
-    const float TERTIARY_TEXT_SIZE = 1f;
-    const float BASE_TEXT_HEIGHT_PX = 37f;
-    const float PRIMARY_TEXT_OFFSET = -0.5f * BASE_TEXT_HEIGHT_PX * PRIMARY_TEXT_SIZE;
-    const float MODE_SELECT_LINE_LENGTH = 20f;
-    const float MODE_SELECT_LINE_WIDTH = 6f;
-    const string FONT = "DEBUG";
-    const string TOP_TEXT = "WMI Missile Fire Control";
-    const string MODE_TEXT = "Mode";
-    const string MODE_CAMERA_TEXT = "Camera";
-    const string MODE_TURRET_TEXT = "Turret";
-    const string MODE_BEAMRIDE_TEXT = "Beam Ride";
-    const string RANGE_TEXT = "Range";
-    const string STEALTH_TEXT = "Stealth";
-    const string SPIRAL_TEXT = "Evasion";
-    const string TOPDOWN_TEXT = "Topdown";
-    const string ENABLED_TEXT = "Enabled";
-    const string DISABLED_TEXT = "Disabled";
-    const string NOT_APPLICABLE_TEXT = "N/A";
-    const string STATUS_TEXT = "Status";
-    const string WEAK_TEXT = "Weak";
-    const string STRONG_TEXT = "Strong";
-    const string AIM_POINT_TEXT = "Aim Point";
-    const string AIM_CENTER_TEXT = "Center";
-    const string AIM_OFFSET_TEXT = "Offset";
-    const string AUTOFIRE_TEXT = "Autofire";
-    const string FIRE_DISABLED_TEXT = "FIRING DISABLED";
+    const float 
+        PRIMARY_TEXT_SIZE = 1.5f,
+        SECONDARY_TEXT_SIZE = 1.2f,
+        TERTIARY_TEXT_SIZE = 1f,
+        BASE_TEXT_HEIGHT_PX = 37f,
+        PRIMARY_TEXT_OFFSET = -0.5f * BASE_TEXT_HEIGHT_PX * PRIMARY_TEXT_SIZE,
+        MODE_SELECT_LINE_LENGTH = 20f,
+        MODE_SELECT_LINE_WIDTH = 6f;
+
+    const string 
+        FONT = "DEBUG",
+        TOP_TEXT = "WMI Missile Fire Control",
+        MODE_TEXT = "Mode",
+        MODE_CAMERA_TEXT = "Camera",
+        MODE_TURRET_TEXT = "Turret",
+        MODE_BEAMRIDE_TEXT = "Beam Ride",
+        RANGE_TEXT = "Range",
+        STEALTH_TEXT = "Stealth",
+        SPIRAL_TEXT = "Evasion",
+        TOPDOWN_TEXT = "Topdown",
+        ENABLED_TEXT = "Enabled",
+        DISABLED_TEXT = "Disabled",
+        NOT_APPLICABLE_TEXT = "N/A",
+        STATUS_TEXT = "Status",
+        WEAK_TEXT = "Weak",
+        STRONG_TEXT = "Strong",
+        AIM_POINT_TEXT = "Aim Point",
+        AIM_CENTER_TEXT = "Center",
+        AIM_OFFSET_TEXT = "Offset",
+        AUTOFIRE_TEXT = "Autofire",
+        FIRE_DISABLED_TEXT = "FIRING DISABLED";
 
     // Non-configurable colors
-    readonly Color STATUS_GOOD_COLOR = new Color(0, 50, 0);
-    readonly Color STATUS_BAD_COLOR = new Color(50, 0, 0);
-    readonly Color _warningColor = Color.Red;
-    readonly Color _warningBackgroundColor = new Color(10, 10, 10, 200);
+    readonly Color 
+        STATUS_GOOD_COLOR = new Color(0, 50, 0),
+        STATUS_BAD_COLOR = new Color(50, 0, 0),
+        _warningColor = Color.Red,
+        _warningBackgroundColor = new Color(10, 10, 10, 200);
 
     Program _p;
     #endregion
@@ -2787,17 +2891,12 @@ public class MissileStatusScreenHandler
 
     public Color CustomInterpolation(Color color1, Color color2, float ratio)
     {
-        float scale = 2f * (1f - ratio);
-        if (ratio >= 0.5)
+        Color midpoint = color1 + color2;
+        if (ratio < 0.5)
         {
-            return new Color(color1.R + (byte)(scale * (float)color2.R),
-                              color1.G + (byte)(scale * (float)color2.G),
-                              color1.B + (byte)(scale * (float)color2.B));
+            return Color.Lerp(color1, midpoint, ratio * 2f);
         }
-
-        return new Color(color2.R + (byte)(2 * ratio * (float)color1.R),
-                          color2.G + (byte)(2 * ratio * (float)color1.G),
-                          color2.B + (byte)(2 * ratio * (float)color1.B));
+        return Color.Lerp(midpoint, color2, (ratio * 2f) - 1f);
     }
 
     public void ComputeScreenParams(GuidanceMode mode,
@@ -2864,9 +2963,8 @@ public class MissileStatusScreenHandler
         container = new MySpriteContainer("SquareSimple", STATUS_BAR_SIZE, STATUS_BAR_POS, 0, _p.StatusBarBackgroundColor);
         _spriteContainers.Add(container);
 
-        Color lerpedStatusColor = CustomInterpolation(STATUS_GOOD_COLOR, STATUS_BAD_COLOR, lockStrength);
+        Color lerpedStatusColor = CustomInterpolation(STATUS_BAD_COLOR, STATUS_GOOD_COLOR, lockStrength);
         Vector2 statusBarSize = STATUS_BAR_SIZE * new Vector2(lockStrength, 1f);
-        //Vector2 statusBarPos = new Vector2(-0.5f * (STATUS_BAR_SIZE.X - statusBarSize.X), STATUS_BAR_POS.Y);
         container = new MySpriteContainer("SquareSimple", statusBarSize, STATUS_BAR_POS, 0, lerpedStatusColor);
         _spriteContainers.Add(container);
 
