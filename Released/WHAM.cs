@@ -1,7 +1,7 @@
 
 #region Script
-const string VERSION = "170.2.1";
-const string DATE = "2022/06/13";
+const string VERSION = "170.2.5";
+const string DATE = "2022/07/01";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -71,66 +71,87 @@ ZeroEffortMissGuidance _zeroEffortMissGuid;
 
 List<MissileGuidanceBase> _guidanceAlgorithms = new List<MissileGuidanceBase>();
 
-#region Guidance Variables
-bool _topDownAttack = false;
-bool _enableEvasion = false;
-bool _precisionMode = false;
-bool _retask = false;
-#endregion
-
 const string MISSILE_NAME_PATTERN = "({0} {1})";
 const string MISSILE_GROUP_PATTERN = "{0} {1}";
-string _missileGroupNameTag = "";
-string _missileNameTag = "";
 
-#region Custom Data Variables
-string _missileTag = "Missile";
-int _missileNumber = 1;
-string _fireControlGroupNameTag = "Fire Control";
-string _detachThrustTag = "Detach";
+Vector3D
+    _shooterForwardVec,
+    _shooterLeftVec,
+    _shooterUpVec,
+    _shooterPos,
+    _shooterPosCached,
+    _randomizedHeadingVector,
+    _targetPos,
+    _targetVel,
+    _aimDispersion;
 
-double _disconnectDelay = 1;
-double _guidanceDelay = 2;
-double _detachDuration = 0;
-double _mainIgnitionDelay = 0;
+string 
+    _missileGroupNameTag = "",
+    _missileNameTag = "",
+    _missileTag = "Missile",
+    _fireControlGroupNameTag = "Fire Control",
+    _detachThrustTag = "Detach";
 
-bool _useCamerasForHoming = true;
-double _raycastRange = 2.5;
-double _raycastMinimumTargetSize = 10;
-bool _raycastIgnoreFriends = false;
-bool _raycastIgnorePlanetSurface = true;
-bool _ignoreIdForDetonation = false;
+double 
+    _disconnectDelay = 1,
+    _guidanceDelay = 2,
+    _detachDuration = 0,
+    _mainIgnitionDelay = 0,
+    _raycastRange = 2.5,
+    _raycastMinimumTargetSize = 10,
+    _spiralDegrees = 15,
+    _timeMaxSpiral = 3,
+    _spiralActivationRange = 1000,
+    _gyroProportionalGain = 10,
+    _gyroIntegralGain = 0,
+    _gyroDerivativeGain = 10,
+    _navConstant = 3,
+    _accelNavConstant = 0,
+    _offsetUp = 0,
+    _offsetLeft = 0,
+    _missileSpinRPM = 0,
+    _minimumArmingRange = 100,
+    _randomVectorInterval = 0.5,
+    _maxRandomAccelRatio = 0.25,
+    _maxAimDispersion = 0,
+    _topDownAttackHeight = 1500,
+    _timeSinceLastLock = 0,
+    _distanceFromShooter = 0,
+    _timeTotal = 0,
+    _timeSinceLastIngest = 0;
 
-double _spiralDegrees = 15;
-double _timeMaxSpiral = 3;
-double _spiralActivationRange = 1000;
+int 
+    _missileNumber = 1,   
+    _setupTicks = 0,
+    _missileStage = 0;
 
-double _gyroProportionalGain = 10;
-double _gyroIntegralGain = 0;
-double _gyroDerivativeGain = 10;
+bool
+    _useCamerasForHoming = true,
+    _raycastIgnoreFriends = false,
+    _raycastIgnorePlanetSurface = true,
+    _ignoreIdForDetonation = false,
+    _allowRemoteFire = false,
+    _evadeWithRandomizedHeading = true,
+    _evadeWithSpiral = false,
+    _shouldFire = false,
+    _shouldKill = false,
+    _hasPassed = false,
+    _killAllowed = false,
+    _shouldDive = false,
+    _shouldStealth = true,
+    _shouldProximityScan = false,
+    _enableGuidance = false,
+    _broadcastListenersRegistered = false,
+    _foundLampAntennas = false,
+    _markedForDetonation = false,
+    _canSetup = true,
+    _preSetupFailed = false,
+    _remotelyFired = false,
+    _topDownAttack = false,
+    _enableEvasion = false,
+    _precisionMode = false,
+    _retask = false;
 
-double _navConstant = 5;
-double _accelNavConstant = 0;
-
-double _offsetUp = 0;
-double _offsetLeft = 0;
-
-double _missileSpinRPM = 0;
-
-bool _allowRemoteFire = false;
-
-double _minimumArmingRange = 100;
-
-double _randomVectorInterval = 0.5;
-double _maxRandomAccelRatio = 0.25;
-double _maxAimDispersion = 0;
-bool _evadeWithRandomizedHeading = true;
-bool _evadeWithSpiral = false;
-
-double _topDownAttackHeight = 1500;
-#endregion
-
-bool _remotelyFired = false;
 #region Meme Mode Stuff
 bool _antennaMemeMode = true;
 string _antennaName = "";
@@ -254,47 +275,10 @@ List<MyTuple<Vector3D, long>> _remoteFireRequests = new List<MyTuple<Vector3D, l
 
 HashSet<long> _savedKeycodes = new HashSet<long>();
 
-//Yo dawg... I heard u like vectors...
-Vector3D
-    _shooterForwardVec,
-    _shooterLeftVec,
-    _shooterUpVec,
-    _shooterPos,
-    _shooterPosCached,
-    _randomizedHeadingVector,
-    _targetPos,
-    _targetVel,
-    _aimDispersion;
-double _timeSinceLastLock = 0;
-
 IMyShipController _missileReference = null;
-
-//These booleans track the status of the missile
-bool _shouldFire = false,
-    _shouldKill = false,
-    _hasPassed = false,
-    _killAllowed = false,
-    _shouldDive = false,
-    _shouldStealth = true,
-    _shouldProximityScan = false,
-    _enableGuidance = false,
-    _broadcastListenersRegistered = false,
-    _foundLampAntennas = false,
-    _markedForDetonation = false;
 
 enum PostSetupAction { None = 0, Fire = 1, FireRequestResponse = 2 };
 PostSetupAction _postSetupAction = PostSetupAction.None;
-bool _canSetup = true;
-bool _preSetupFailed = false;
-int _setupTicks = 0;
-
-int _missileStage = 0;
-
-//Store all this important stuff for computations between methods
-double _distanceFromShooter;
-double _timeTotal = 0;
-
-double _timeSinceLastIngest = 0;
 
 const int MAX_INSTRUCTIONS_PER_SETUP_RUN = 5000;
 
@@ -306,8 +290,7 @@ const double
     TOPDOWN_DESCENT_ANGLE = Math.PI / 6,
     MAX_GUIDANCE_TIME = 180,
     RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666,
-    GYRO_SLOWDOWN_ANGLE = Math.PI / 36,
-    GYRO_PLANETARY_ROLL_ACTIVATION_ANGLE = Math.PI / 18;
+    GYRO_SLOWDOWN_ANGLE = Math.PI / 36;
 
 const float MIN_THRUST = 1e-9f;
 
@@ -317,8 +300,7 @@ readonly RaycastHoming _raycastHoming;
 
 enum GuidanceMode : int { BeamRiding = 1, SemiActive = 2, Active = 4 };
 
-PID _yawPID;
-PID _pitchPID;
+PID _yawPID, _pitchPID;
 IMyBlockGroup _missileGroup;
 Scheduler _scheduler;
 GuidanceMode _guidanceMode = GuidanceMode.SemiActive;
@@ -373,52 +355,44 @@ const string
     INI_NAME_TAG = "Missile name tag",
     INI_NAME_NUM = "Missile number",
     INI_NAME_FIRE_CTRL = "Fire control group name",
-    INI_NAME_DETACH = "Detach thruster name tag";
+    INI_NAME_DETACH = "Detach thruster name tag",
 
-const string
     INI_SECTION_DELAY = "Delays",
     INI_DELAY_GUIDANCE = "Guidance delay (s)",
     INI_DELAY_DISCONNECT = "Stage 1: Disconnect delay (s)",
     INI_DELAY_DETACH = "Stage 2: Detach duration (s)",
-    INI_DELAY_MAIN_IGITION = "Stage 3: Main ignition delay (s)";
+    INI_DELAY_MAIN_IGITION = "Stage 3: Main ignition delay (s)",
 
-const string
     INI_SECTION_GYRO = "Gyros",
     INI_GYRO_KP = "Proportional gain",
     INI_GYRO_KI = "Integral gain",
-    INI_GYRO_KD = "Derivative gain";
+    INI_GYRO_KD = "Derivative gain",
 
-const string
     INI_SECTION_HOMING = "Homing Parameters",
     INI_HOMING_RELNAV = "Navigation constant",
     INI_HOMING_RELNAV_ACCEL = "Acceleration constant",
     INI_HOMING_AIM_DISPERSION = "Max aim dispersion (m)",
-    INI_TOPDOWN_ATTACK_HEIGHT = "Topdown attack height (m)";
+    INI_TOPDOWN_ATTACK_HEIGHT = "Topdown attack height (m)",
 
-const string
     INI_SECTION_BEAMRIDE = "Beam Riding Parameters",
     INI_BEAMRIDE_OFFSET_UP = "Hit offset up (m)",
-    INI_BEAMRIDE_OFFSET_LEFT = "Hit offset left (m)";
+    INI_BEAMRIDE_OFFSET_LEFT = "Hit offset left (m)",
 
-const string
     INI_SECTION_EVASION = "Evasion Parameters",
     INI_EVASION_SPIN_RPM = "Spin rate (RPM)",
     INI_EVASION_USE_SPIRAL = "Use spiral",
     INI_EVASION_USE_RANDOM = "Use random flight path",
-    INI_COMMENT_EVASION_USE_RANDOM = " AKA \"Drunken Missile Mode\"";
+    INI_COMMENT_EVASION_USE_RANDOM = " AKA \"Drunken Missile Mode\"",
 
-const string
     INI_SECTION_SPIRAL = "Spiral Parameters",
     INI_SPIRAL_DEG = "Spiral angle (deg)",
     INI_SPIRAL_TIME = "Spiral time (sec)",
-    INI_SPIRAL_RANGE = "Spiral activation range (m)";
+    INI_SPIRAL_RANGE = "Spiral activation range (m)",
 
-const string
     INI_SECTION_RANDOM = "Random Fligh Path Parameters",
     INI_RANDOM_INTERVAL = "Direction change interval (sec)",
-    INI_RANDOM_MAX_ACCEL = "Max acceleration ratio";
+    INI_RANDOM_MAX_ACCEL = "Max acceleration ratio",
 
-const string
     INI_SECTION_RAYCAST = "Raycast/Sensors",
     INI_RAYCAST_CAMS_FOR_HOMING = "Use cameras for homing",
     INI_RAYCAST_RANGE = "Tripwire range (m)",
@@ -426,20 +400,22 @@ const string
     INI_RAYCAST_MIN_RANGE = "Minimum warhead arming range (m)",
     INI_RAYCAST_FRIENDS = "Ignore friendlies",
     INI_RAYCAST_IGNORE_PLANETS = "Ignore planets",
-    INI_RAYCAST_IGNORE_ID_DETONATION = "Ignore target ID for detonation";
+    INI_RAYCAST_IGNORE_ID_DETONATION = "Ignore target ID for detonation",
 
-const string
     INI_SECTION_MISC = "Misc.",
     INI_REMOTE_FIRE = "Allow remote firing",
     INI_MEME_MODE = "Antenna meme mode";
 #endregion
 
-QueuedAction _stage1Action;
-QueuedAction _stage2Action;
-QueuedAction _stage3Action;
-QueuedAction _stage4Action;
-ScheduledAction _guidanceActivateAction;
-ScheduledAction _randomHeadingVectorAction;
+QueuedAction 
+    _stage1Action,
+    _stage2Action,
+    _stage3Action,
+    _stage4Action;
+
+ScheduledAction 
+    _guidanceActivateAction,
+    _randomHeadingVectorAction;
 #endregion
 
 #region Main Methods
@@ -965,17 +941,6 @@ void ArgumentHandling(string arg)
         InitiateSetup();
     }
 }
-
-bool ContainsKey(string message, HashSet<string> savedKeycodes)
-{
-    foreach (string thisKeycode in savedKeycodes)
-    {
-        if (message.Contains(thisKeycode))
-            return true;
-    }
-
-    return false;
-}
 #endregion
 
 #region Setup
@@ -1166,10 +1131,10 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         }
         else
         {
-            foreach (IMyRadioAntenna thisAntenna in _broadcasters)
+            foreach (IMyRadioAntenna a in _broadcasters)
             {
                 //x.IsSameConstructAs(Me))? Check if missile has connectors before this?
-                _savedKeycodes.Add(thisAntenna.EntityId);
+                _savedKeycodes.Add(a.EntityId);
                 if (AtInstructionLimit()) { yield return SetupStatus.Running; }
             }
             _setupBuilder.Append($"> Info: Found antenna(s) on firing ship\n");
@@ -1494,55 +1459,40 @@ void MissileStage1()
 {
     _missileStage = 1;
 
-    foreach (IMyBatteryBlock block in _batteries)
+    foreach (var b in _batteries)
     {
-        if (block.Closed)
-            continue;
-
-        block.Enabled = true;
-        block.ChargeMode = ChargeMode.Discharge;
+        b.Enabled = true;
+        b.ChargeMode = ChargeMode.Discharge;
     }
 
-    foreach (IMyReactor block in _reactors)
+    foreach (var r in _reactors)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = true;
+        r.Enabled = true;
     }
 
-    foreach (IMySensorBlock block in _sensors)
+    foreach (var s in _sensors)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = false;
+        s.Enabled = false;
     }
 
-    foreach (IMyWarhead block in _warheads)
+    foreach (var w in _warheads)
     {
-        if (block.Closed)
-            continue;
-        block.IsArmed = false;
+        w.IsArmed = false;
     }
 
-    foreach (IMyGyro block in _gyros)
+    foreach (var g in _gyros)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = true;
+        g.Enabled = true;
     }
 
-    foreach (IMyGasTank block in _gasTanks)
+    foreach (var t in _gasTanks)
     {
-        if (block.Closed)
-            continue;
-        block.Stockpile = false;
+        t.Stockpile = false;
     }
-    
-    foreach (IMyTimerBlock block in _timers)
+
+    foreach (var t in _timers)
     {
-        if (block.Closed)
-            continue;
-        block.Trigger();
+        t.Trigger();
     }
 }
 
@@ -1551,52 +1501,40 @@ void MissileStage2()
 {
     _missileStage = 2;
 
-    foreach (IMyVirtualMass block in _artMasses)
+    foreach (var m in _artMasses)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = true;
+        m.Enabled = true;
     }
 
-    foreach (IMyShipMergeBlock block in _mergeBlocks)
+    foreach (var b in _mergeBlocks)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = false;
+        b.Enabled = false;
     }
 
-    foreach (IMyShipConnector block in _connectors)
+    foreach (var c in _connectors)
     {
-        if (block.Closed)
-            continue;
-        block.Disconnect();
+        c.Disconnect();
     }
 
-    foreach (IMyMotorStator block in _rotors)
+    foreach (var r in _rotors)
     {
-        if (block.Closed)
-            continue;
-        block.Detach();
+        r.Detach();
     }
 
-    foreach (IMyRadioAntenna block in _antennas)
+    foreach (var a in _antennas)
     {
-        if (block.Closed)
-            continue;
-        block.Radius = 1f;
-        block.Enabled = false;
-        block.EnableBroadcasting = false;
-        block.Enabled = true; //this used to be a bug workaround, not sure if it is still needed tbh
-        block.CustomName = "";
+        a.Radius = 1f;
+        a.Enabled = false;
+        a.EnableBroadcasting = false;
+        a.Enabled = true; //this used to be a bug workaround, not sure if it is still needed tbh
+        a.CustomName = "";
     }
 
-    foreach (IMyBeacon block in _beacons)
+    foreach (var b in _beacons)
     {
-        if (block.Closed)
-            continue;
-        block.Radius = 1f;
-        block.Enabled = true;
-        block.CustomName = "";
+        b.Radius = 1f;
+        b.Enabled = true;
+        b.CustomName = "";
     }
 
     ApplyThrustOverride(_sideThrusters, MIN_THRUST, false);
@@ -1616,23 +1554,15 @@ void MissileStage4()
 {
     _missileStage = 4;
 
-    foreach (IMyVirtualMass block in _artMasses)
+    foreach (var m in _artMasses)
     {
-        if (block.Closed)
-            continue;
-        block.Enabled = false;
+        m.Enabled = false;
     }
 
-    foreach (IMyCameraBlock thisCamera in _cameras)
+    foreach (var c in _cameras)
     {
-        if (thisCamera.Closed)
-            continue;
-
-        if (!thisCamera.EnableRaycast)
-            thisCamera.EnableRaycast = true;
-
-        if (!thisCamera.Enabled)
-            thisCamera.Enabled = true;
+        c.EnableRaycast = true;
+        c.Enabled = true;
     }
 
     ApplyThrustOverride(_detachThrusters, MIN_THRUST);
@@ -1713,13 +1643,10 @@ void Navigation(
     missileVel = _missileReference.GetShipVelocities().LinearVelocity;
     missileMatrix = _missileReference.WorldMatrix; // TODO: Determine from thrust allocation
 
-    //Get positions of our origin with offsets added in
     shooterPos = _shooterPosCached + _offsetLeft * _shooterLeftVec + _offsetUp * _shooterUpVec;
 
-    //aligning bottom of missile to gravity
     gravity = _missileReference.GetNaturalGravity();
 
-    //Find current distance from shooter to missile
     distanceFromShooter = Vector3D.Distance(_shooterPos, missilePos);
     ScaleAntennaRange(distanceFromShooter + 100);
 
@@ -1777,7 +1704,6 @@ Vector3D GuidanceMain(
         }
     }
 
-    // Calc spiral trajectory
     if (shouldSpiral)
     {
         headingVec = missileAcceleration * SpiralTrajectory(headingVec, _missileReference.WorldMatrix.Up);
@@ -1798,16 +1724,13 @@ Vector3D BeamRideGuidance(
     Vector3D missileForwardVec,
     double missileAcceleration)
 {
-    //Find vector from shooter to missile
     var shooterToMissileVec = missilePos - _shooterPos;
 
     if (Vector3D.IsZero(_shooterForwardVec)) //this is to avoid NaN cases when the shooterForwardVec isnt cached yet
-        _shooterForwardVec = missileForwardVec; //messy but stops my code from breaking lol
+        _shooterForwardVec = missileForwardVec;
 
-    //Calculate perpendicular distance from shooter vector
     var projectionVec = VectorMath.Projection(shooterToMissileVec, _shooterForwardVec);
 
-    //Determine scaling factor
     double missileSpeed = missileVel.Length();
     Vector3D destinationVec = _shooterPos + projectionVec + _shooterForwardVec * Math.Max(2 * missileSpeed, 200);
 
@@ -1826,10 +1749,8 @@ Vector3D BeamRideGuidance(
         destinationVec += signLeft * 100 * _shooterLeftVec + signUp * 100 * _shooterUpVec;
     }
 
-    //Find vector from missile to destinationVec
     Vector3D missileToTargetVec = destinationVec - missilePos;
 
-    //Drift compensation
     Vector3D headingVec;
     if (_missileStage == 4)
     {
@@ -1922,13 +1843,6 @@ void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec, Ve
         pitchSpeed = UPDATES_PER_SECOND * .5 * pitch;
     }
 
-    // Disable roll until we are close to aligned with pitch and yaw to reduce errors due to simultaneous 3-axis control.
-    //if (inGravity && (Math.Abs(yawAngle) > GYRO_PLANETARY_ROLL_ACTIVATION_ANGLE || Math.Abs(pitchAngle) > GYRO_PLANETARY_ROLL_ACTIVATION_ANGLE))
-    //{
-    //    rollSpeed = 0;
-    //}
-
-    //Set appropriate gyro override
     ApplyGyroOverride(pitchSpeed, yawSpeed, rollSpeed, _gyros, missileMatrix);
 }
 
@@ -1977,22 +1891,22 @@ void NetworkTargets()
 #region Block Property Functions
 void ScaleAntennaRange(double dist)
 {
-    foreach (IMyRadioAntenna thisAntenna in _antennas)
+    foreach (IMyRadioAntenna a in _antennas)
     {
-        if (thisAntenna.Closed)
+        if (a.Closed)
             continue;
 
-        thisAntenna.Radius = (float)dist;
+        a.Radius = (float)dist;
 
         if (_shouldStealth)
-            thisAntenna.EnableBroadcasting = false;
+            a.EnableBroadcasting = false;
         else
-            thisAntenna.EnableBroadcasting = true;
+            a.EnableBroadcasting = true;
 
         if (_debugAntennas)
-            thisAntenna.CustomName = $"{_guidanceMode}\n{_guidanceAlgoIndex}\n{_raycastHoming.Status}\n";
+            a.CustomName = $"{_guidanceMode}\n{_guidanceAlgoIndex}\n{_raycastHoming.Status}\n";
         else
-            thisAntenna.CustomName = _antennaName;
+            a.CustomName = _antennaName;
     }
 
     foreach (IMyBeacon thisBeacon in _beacons)
@@ -2188,23 +2102,15 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
 
 bool IsValidTarget(MyDetectedEntityInfo targetInfo)
 {
-    if (targetInfo.IsEmpty())
-        return false;
-
-    if (targetInfo.EntityId == Me.CubeGrid.EntityId)
-        return false;
-
-    if (!_ignoreIdForDetonation && ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId))
-        return false;
-
-    if (_raycastIgnorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet)
-        return false;
-
-    if (_raycastIgnoreFriends && (targetInfo.Relationship & (MyRelationsBetweenPlayerAndBlock.FactionShare | MyRelationsBetweenPlayerAndBlock.Owner)) != 0)
-        return false;
-
-    if (targetInfo.BoundingBox.Size.LengthSquared() < _raycastMinimumTargetSize * _raycastMinimumTargetSize)
-        return false;
+    if (targetInfo.IsEmpty() ||
+       (targetInfo.EntityId == Me.CubeGrid.EntityId) ||
+       (!_ignoreIdForDetonation && ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId)) ||
+       (_raycastIgnorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet) ||
+       (_raycastIgnoreFriends && (targetInfo.Relationship & (MyRelationsBetweenPlayerAndBlock.FactionShare | MyRelationsBetweenPlayerAndBlock.Owner)) != 0) ||
+       (targetInfo.BoundingBox.Size.LengthSquared() < _raycastMinimumTargetSize * _raycastMinimumTargetSize))
+    {
+        return false;       
+    }
 
     return true;
 }
@@ -2240,7 +2146,6 @@ double CalculateMissileThrust(List<IMyThrust> mainThrusters)
         if (block.Closed)
             continue;
         thrust += block.IsFunctional ? block.MaxEffectiveThrust : 0;
-        //compensate for grav later
     }
     return thrust;
 }
@@ -2996,7 +2901,7 @@ class RaycastHoming
     public MyDetectedEntityType TargetType { get; private set; }
 
     public enum TargetingStatus { NotLocked, Locked, TooClose };
-    enum AimMode { None = 0, Center = 1, Offset = 2, OffsetRelative = 4 };
+    enum AimMode { Center, Offset, OffsetRelative };
 
     AimMode _currentAimMode = AimMode.Center;
 
@@ -3004,9 +2909,8 @@ class RaycastHoming
     readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
     readonly Random _rngeesus = new Random();
 
-    MyDetectedEntityInfo _targetInfo = default(MyDetectedEntityInfo);
+    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
     MatrixD _targetOrientation;
-    Vector3D _targetPosCached;
     Vector3D _targetPositionOverride;
     HashSet<long> _gridIDsToIgnore = new HashSet<long>();
     double _timeSinceLastScan = 0;
@@ -3061,14 +2965,6 @@ class RaycastHoming
         }
     }
 
-    public void RemoveEntityTypeToFilter(params MyDetectedEntityType[] types)
-    {
-        foreach (var type in types)
-        {
-            _targetFilter.Remove(type);
-        }
-    }
-
     public void AcknowledgeLockLost()
     {
         LockLost = false;
@@ -3089,7 +2985,7 @@ class RaycastHoming
 
     void ClearLockInternal()
     {
-        _targetInfo = default(MyDetectedEntityInfo);
+        _info = default(MyDetectedEntityInfo);
         IsScanning = false;
         Status = TargetingStatus.NotLocked;
         MissedLastScan = false;
@@ -3098,7 +2994,6 @@ class RaycastHoming
         HitPosition = Vector3D.Zero;
         TargetId = 0;
         _timeSinceLastScan = 141;
-        _targetPosCached = Vector3D.Zero;
         _currentAimMode = AimMode.Center;
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
@@ -3130,7 +3025,7 @@ class RaycastHoming
         return randomVector * fudgeFactor * TimeSinceLastLock;
     }
     
-    Vector3D GetSearchDirection(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
+    Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
     {
         Vector3D scanPos = origin + direction * MaxRange;
         if (SearchScanSpread < 1e-2)
@@ -3149,7 +3044,7 @@ class RaycastHoming
 
         TimeSinceLastLock += timeStep;
 
-        _targetInfo = default(MyDetectedEntityInfo);
+        _info = default(MyDetectedEntityInfo);
         _availableCameras.Clear();
 
         //Check for lock lost
@@ -3162,17 +3057,17 @@ class RaycastHoming
 
         // Determine where to scan next
         var scanPosition = Vector3D.Zero;
-        if (_currentAimMode == AimMode.Offset)
+        switch (_currentAimMode)
         {
-            scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
-        }
-        else if (_currentAimMode == AimMode.OffsetRelative)
-        {
-            scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
-        }
-        else
-        {
-            scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
+            case AimMode.Offset:
+                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            case AimMode.OffsetRelative:
+                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            default:
+                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
+                break;
         }
 
         if (MissedLastScan && cameraList.Count > 0)
@@ -3216,18 +3111,16 @@ class RaycastHoming
         }
 
         // Check for transition between faces
-        if (_availableCameras.Count == 0) //transition between faces
+        if (_availableCameras.Count == 0)
         {
-            _timeSinceLastScan = 100000; // Set to scan immediately on the next cycle
+            _timeSinceLastScan = 100000;
             MissedLastScan = true;
             return;
         }
 
-        //Get camera with maximum available range
-        var thisCamera = GetCameraWithMaxRange(_availableCameras);
-        var cameraMatrix = thisCamera.WorldMatrix;
+        var camera = GetCameraWithMaxRange(_availableCameras);
+        var cameraMatrix = camera.WorldMatrix;
 
-        // Determine scan range
         double scanRange;
         Vector3D adjustedTargetPos = Vector3D.Zero;
         if (Status == TargetingStatus.Locked || _manualLockOverride)
@@ -3241,19 +3134,18 @@ class RaycastHoming
             scanRange = MaxRange;
         }
 
-        // This operates under the assumption that raycast charges at 2km/s
-        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
+        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
 
         //Attempt to scan adjusted target position
-        if (thisCamera.AvailableScanRange >= scanRange &&
+        if (camera.AvailableScanRange >= scanRange &&
             _timeSinceLastScan >= AutoScanInterval)
         {
             if (Status == TargetingStatus.Locked || _manualLockOverride)
-                _targetInfo = thisCamera.Raycast(adjustedTargetPos);
+                _info = camera.Raycast(adjustedTargetPos);
             else if (!Vector3D.IsZero(testDirection))
-                _targetInfo = thisCamera.Raycast(GetSearchDirection(reference.GetPosition(), testDirection, thisCamera));
+                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
             else
-                _targetInfo = thisCamera.Raycast(MaxRange);
+                _info = camera.Raycast(MaxRange);
 
             _timeSinceLastScan = 0;
         }
@@ -3263,38 +3155,34 @@ class RaycastHoming
         }
 
         // Validate target and assign values
-        if (!_targetInfo.IsEmpty() &&
-            !_targetFilter.Contains(_targetInfo.Type) &&
-            !_gridIDsToIgnore.Contains(_targetInfo.EntityId)) //target lock
+        if (!_info.IsEmpty() &&
+            !_targetFilter.Contains(_info.Type) &&
+            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
         {
-            if (Vector3D.DistanceSquared(_targetInfo.Position, thisCamera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
+            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
             {
                 Status = TargetingStatus.TooClose;
                 return;
             }
             else if (Status == TargetingStatus.Locked) // Target already locked
             {
-                if (_targetInfo.EntityId == TargetId)
+                if (_info.EntityId == TargetId)
                 {
-                    TargetCenter = _targetInfo.Position;
-                    HitPosition = _targetInfo.HitPosition.Value;
+                    TargetCenter = _info.Position;
+                    HitPosition = _info.HitPosition.Value;
 
-                    _targetOrientation = _targetInfo.Orientation;
+                    _targetOrientation = _info.Orientation;
                     OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
 
-                    TargetVelocity = _targetInfo.Velocity;
-                    TargetSize = _targetInfo.BoundingBox.Size.Length();
+                    TargetVelocity = _info.Velocity;
+                    TargetSize = _info.BoundingBox.Size.Length();
                     TimeSinceLastLock = 0;
 
-                    if (_manualLockOverride)
-                    {
-                        TargetId = _targetInfo.EntityId;
-                        _manualLockOverride = false;
-                    }
-
+                    _manualLockOverride = false;
+                    
                     MissedLastScan = false;
-                    TargetRelation = _targetInfo.Relationship;
-                    TargetType = _targetInfo.Type;
+                    TargetRelation = _info.Relationship;
+                    TargetType = _info.Type;
                 }
                 else
                 {
@@ -3303,43 +3191,34 @@ class RaycastHoming
             }
             else // Target not yet locked: initial lockon
             {
-                if (_manualLockOverride && TargetId != _targetInfo.EntityId && TargetId != 0)
+                if (_manualLockOverride && TargetId != _info.EntityId)
                     return;
 
-                if (_manualLockOverride && TargetId == 0)
-                {
-                    double maxDispPerTickSq = 100 + _targetInfo.Velocity.LengthSquared() * timeStep * timeStep;
-                    if (Vector3D.DistanceSquared(_targetPositionOverride, _targetInfo.HitPosition.Value) > maxDispPerTickSq)
-                    {
-                        return; // Abort lock since it is not locked onto what we want
-                    }
-                }
-
                 Status = TargetingStatus.Locked;
-                TargetId = _targetInfo.EntityId;
-                TargetCenter = _targetInfo.Position;
-                HitPosition = _targetInfo.HitPosition.Value;
-                TargetVelocity = _targetInfo.Velocity;
-                TargetSize = _targetInfo.BoundingBox.Size.Length();
+                TargetId = _info.EntityId;
+                TargetCenter = _info.Position;
+                HitPosition = _info.HitPosition.Value;
+                TargetVelocity = _info.Velocity;
+                TargetSize = _info.BoundingBox.Size.Length();
                 TimeSinceLastLock = 0;
 
                 var aimingCamera = GetControlledCamera(_availableCameras);
                 Vector3D hitPosOffset = Vector3D.Zero;
                 if (aimingCamera != null)
                 {
-                    hitPosOffset = aimingCamera.GetPosition() - thisCamera.GetPosition();
+                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
                 }
                 else if (reference != null)
                 {
-                    hitPosOffset = reference.GetPosition() - thisCamera.GetPosition();
+                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
                 }
                 if (!Vector3D.IsZero(hitPosOffset))
                 {
-                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - thisCamera.GetPosition());
+                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
                 }
 
-                var hitPos = _targetInfo.HitPosition.Value + hitPosOffset;
-                _targetOrientation = _targetInfo.Orientation;
+                var hitPos = _info.HitPosition.Value + hitPosOffset;
+                _targetOrientation = _info.Orientation;
 
                 if (_manualLockOverride)
                 {
@@ -3352,34 +3231,18 @@ class RaycastHoming
                 }
 
                 MissedLastScan = false;
-                TargetRelation = _targetInfo.Relationship;
-                TargetType = _targetInfo.Type;
+                TargetRelation = _info.Relationship;
+                TargetType = _info.Type;
             }
-
-            _targetPosCached = _targetInfo.Position;
         }
         else
         {
-            //TODO: Investigate if we should only count a miss when we are LOCKED
             MissedLastScan = true;
         }
 
         if (MissedLastScan)
         {
-            // If scan missed, switch aim mode
-            if (_currentAimMode == AimMode.Center)
-            {
-                _currentAimMode = AimMode.Offset;
-            }
-            else if (_currentAimMode == AimMode.Offset)
-            {
-                _currentAimMode = AimMode.OffsetRelative;
-            }
-            else
-            {
-                _currentAimMode = AimMode.Center;
-            }
-            //_timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
+            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
         }
     }
 
@@ -3387,39 +3250,39 @@ class RaycastHoming
     {
         availableCameras.Clear();
 
-        foreach (var block in allCameras)
+        foreach (var c in allCameras)
         {
-            if (block.Closed)
+            if (c.Closed)
                 continue;
 
-            if (TestCameraAngles(block, vectorIsPosition ? testVector - block.GetPosition() : testVector))
-                availableCameras.Add(block);
+            if (TestCameraAngles(c, vectorIsPosition ? testVector - c.GetPosition() : testVector))
+                availableCameras.Add(c);
         }
     }
 
     bool TestCameraAngles(IMyCameraBlock camera, Vector3D direction)
     {
-        Vector3D localDirection = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
+        Vector3D local = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
 
-        if (localDirection.Z > 0) //pointing backwards
+        if (local.Z > 0)
             return false;
 
-        var yawTan = Math.Abs(localDirection.X / localDirection.Z);
-        var pitchTanSq = localDirection.Y * localDirection.Y / (localDirection.X * localDirection.X + localDirection.Z * localDirection.Z);
+        var yawTan = Math.Abs(local.X / local.Z);
+        var localSq = local * local;
+        var pitchTanSq = localSq.Y / (localSq.X + localSq.Z);
 
         return yawTan <= 1 && pitchTanSq <= 1;
     }
 
-    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameraList)
+    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameras)
     {
-        double maxRange = double.MinValue;
-        IMyCameraBlock maxRangeCamera = default(IMyCameraBlock);
-
-        foreach (IMyCameraBlock thisCamera in cameraList)
+        double maxRange = 0;
+        IMyCameraBlock maxRangeCamera = null;
+        foreach (var c in cameras)
         {
-            if (thisCamera.AvailableScanRange > maxRange)
+            if (c.AvailableScanRange > maxRange)
             {
-                maxRangeCamera = thisCamera;
+                maxRangeCamera = c;
                 maxRange = maxRangeCamera.AvailableScanRange;
             }
         }
@@ -3429,37 +3292,37 @@ class RaycastHoming
 
     IMyCameraBlock GetControlledCamera(List<IMyCameraBlock> cameras)
     {
-        foreach (var block in cameras)
+        foreach (var c in cameras)
         {
-            if (block.Closed)
+            if (c.Closed)
                 continue;
 
-            if (block.IsActive)
-                return block;
+            if (c.IsActive)
+                return c;
         }
         return null;
     }
 
-    IMyShipController GetControlledShipController(List<IMyShipController> shipControllers)
+    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
     {
-        if (shipControllers.Count == 0)
+        if (controllers.Count == 0)
             return null;
 
         IMyShipController mainController = null;
         IMyShipController controlled = null;
 
-        foreach (IMyShipController thisController in shipControllers)
+        foreach (var sc in controllers)
         {
-            if (thisController.IsUnderControl && thisController.CanControlShip)
+            if (sc.IsUnderControl && sc.CanControlShip)
             {
                 if (controlled == null)
                 {
-                    controlled = thisController;
+                    controlled = sc;
                 }
 
-                if (thisController.IsMainCockpit)
+                if (sc.IsMainCockpit)
                 {
-                    mainController = thisController; // Only one per grid so no null check needed
+                    mainController = sc; // Only one per grid so no null check needed
                 }
             }
         }
@@ -3470,7 +3333,7 @@ class RaycastHoming
         if (controlled != null)
             return controlled;
 
-        return shipControllers[0];
+        return controllers[0];
     }
 
     public static Vector3D VectorRejection(Vector3D a, Vector3D b)
