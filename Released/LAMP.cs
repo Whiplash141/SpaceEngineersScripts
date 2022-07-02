@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.2.0";
-const string DATE = "2022/06/17";
+const string VERSION = "95.4.0";
+const string DATE = "2022/06/28";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -20,6 +20,7 @@ This code has been minified so that it will fit in the programmable block.
 I have NOT obfuscated any of the code, so that if you copy paste this into an 
 IDE like Visual Studio or use a website like https://codebeautify.org/csharpviewer,
 you can uncompress this and it will be human readable.
+
 
 
 
@@ -112,15 +113,14 @@ bool
     _stealth = true,
     _spiral = false,
     _topdown = false,
-    _semiActiveAllowed = false,
-    _opticalAllowed = false,
-    _turretAllowed = false,
     _isSetup = false,
     _killGuidance = false,
     _hasKilled = false,
     _inGravity = false,
     _showBSOD = false,
     _broadcastRangeOverride = false;
+    
+int _autofireLimitPerTarget = 0;
 
 const string IGC_TAG_IFF = "IGC_IFF_MSG",
     IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
@@ -142,6 +142,7 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     INI_AUTO_FIRE = "Enable auto-fire",
     INI_AUTO_FIRE_INTERVAL = "Auto-fire interval (s)",
     INI_AUTO_FIRE_REMOTE = "Auto-fire remote missiles",
+    INI_AUTO_MSL_LIMIT = "Auto-fire missile limit per target",
     INI_ANTENNA_RANGE_IDLE = "Antenna range - Idle (m)",
     INI_ANTENNA_RANGE_ACTIVE = "Antenna range - Active (m)",
     INI_ANTENNA_RANGE_DYNAMIC = "Use dynamic active antenna range",
@@ -188,7 +189,8 @@ const string IGC_TAG_IFF = "IGC_IFF_MSG",
     TARGET_NOT_LOCKED_TEXT = "No Target",
     TARGET_TOO_CLOSE_TEXT = "Target Too Close",
     TARGET_SEARCHING_TEXT = "Searching",
-    BEAM_RIDE_ACTIVE = "Active";
+    BEAM_RIDE_ACTIVE = "Active",
+    DEFAULT_MISSILE_LIMIT = "none";
 
 const double 
     RuntimeToRealTime = (1.0 / 60.0) / 0.0166666,
@@ -226,9 +228,26 @@ static Dictionary<string, FireOrder> _fireOrderDict = new Dictionary<string, Fir
 {"ANGLE", FireOrder.SmallestAngleToTarget},
 };
 
+Dictionary<long, int> _autofiredMissiles = new Dictionary<long, int>();
+
 GuidanceMode _preferredGuidanceMode = _guidanceModeDict.Values.First();
 FireOrder _fireOrder = _fireOrderDict.Values.First();
 GuidanceMode _designationMode = GuidanceMode.None;
+public GuidanceMode DesignationMode
+{
+    get
+    {
+        return _designationMode;
+    }
+    set
+    {
+        if (_designationMode != value && _allowedGuidanceModes.Contains(value))
+        {
+            _designationMode = value;
+            _raycastHoming.ClearLock();
+        }
+    }
+}
 TargetingStatus _targetingStatus = TargetingStatus.Idle;
 TargetingStatus _lastTargetingStatus = TargetingStatus.Idle;
 
@@ -357,7 +376,7 @@ Program()
 
     float step = 1f / 9f;
     _screenUpdateBuffer = new CircularBuffer<Action>(10);
-    _screenUpdateBuffer.Add(() => _screenHandler.ComputeScreenParams(_designationMode, _allowedGuidanceEnum, _lockStrength, _statusText, _statusColor, _maxRaycastRange, _inGravity, _stealth, _spiral, _topdown, _usePreciseAiming, _autoFire, _fireEnabled));
+    _screenUpdateBuffer.Add(() => _screenHandler.ComputeScreenParams(DesignationMode, _allowedGuidanceEnum, _lockStrength, _statusText, _statusColor, _maxRaycastRange, _inGravity, _stealth, _spiral, _topdown, _usePreciseAiming, _autoFire, _fireEnabled));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 0 * step, 1 * step, _clearSpriteCache));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 1 * step, 2 * step, _clearSpriteCache));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 2 * step, 3 * step, _clearSpriteCache));
@@ -442,8 +461,7 @@ void PrintDetailedInfo()
     _echoBuilder.AppendLine($"LAMP | Launch A Missile Program\n(Version {VERSION} - {DATE})");
     _echoBuilder.AppendLine($"\nFor use with WHAM v{COMPAT_VERSION} or later.\n");
     _echoBuilder.AppendLine($"Next refresh in {Math.Max(_scheduledSetup.RunInterval - _scheduledSetup.TimeSinceLastRun, 0):N0} seconds\n");
-    _echoBuilder.AppendLine($"Text Surfaces: {_textSurfaces.Count}\n");
-    _echoBuilder.AppendLine($"Last setup results:\n{_setupStringbuilder}");
+    _echoBuilder.AppendLine($"Last setup result: {(_isSetup ? "SUCCESS" : "FAIL")}\n{_setupStringbuilder}");
     _echoBuilder.AppendLine(_runtimeTracker.Write());
     Echo(_echoBuilder.ToString());
     _echoBuilder.Clear();
@@ -498,7 +516,7 @@ void GuidanceProcess()
         _inGravity = !Vector3D.IsZero(_shipControllers[0].GetNaturalGravity());
     }
 
-    switch (_designationMode)
+    switch (DesignationMode)
     {
         case GuidanceMode.BeamRiding:
             HandleOptical(ref shouldBroadcast);
@@ -532,7 +550,7 @@ void GuidanceProcess()
 void BroadcastTargetingData()
 {
     long broadcastKey = GetBroadcastKey();
-    switch (_designationMode)
+    switch (DesignationMode)
     {
         case GuidanceMode.BeamRiding:
             SendMissileBeamRideMessage(
@@ -633,15 +651,7 @@ void HandleCameraHoming(ref bool shouldBroadcast)
         _statusColor = TargetLockedColor;
         _targetingStatus = TargetingStatus.Targeting;
 
-        // Autofire
-        if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
-        {
-            if (_autoFireRemote)
-                RequestRemoteMissileFire();
-            else
-                FireNextMissile(1);
-            _timeSinceAutoFire = 0;
-        }
+        HandleAutofire(_raycastHoming.TargetId);
     }
     else
     {
@@ -708,15 +718,7 @@ void HandleTurretHoming(ref bool shouldBroadcast)
         _statusColor = TargetLockedColor;
         _targetingStatus = TargetingStatus.Targeting;
 
-        // Handle autofire
-        if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
-        {
-            if (_autoFireRemote)
-                RequestRemoteMissileFire();
-            else
-                FireNextMissile(1);
-            _timeSinceAutoFire = 0;
-        }
+        HandleAutofire(_targetInfo.EntityId);
     }
     else
     {
@@ -729,6 +731,36 @@ void HandleTurretHoming(ref bool shouldBroadcast)
     // Set antenna range
     if (!_broadcastRangeOverride)
         ScaleAntennaRange(antennaRange);
+}
+
+void HandleAutofire(long targetId)
+{
+    if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
+    {
+        if (_autofireLimitPerTarget > 0)
+        {
+            int firedCount;
+            if (_autofiredMissiles.TryGetValue(targetId, out firedCount))
+            {
+                if (firedCount >= _autofireLimitPerTarget)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                firedCount = 0;
+            }
+            firedCount += 1;
+            _autofiredMissiles[targetId] = firedCount;
+        }
+        
+        if (_autoFireRemote)
+            RequestRemoteMissileFire();
+        else
+            FireNextMissile(1);
+        _timeSinceAutoFire = 0;
+    }
 }
 #endregion
 
@@ -809,7 +841,7 @@ List<RemoteFireResponse> _remoteFireResponses = new List<RemoteFireResponse>();
 void ParseRemoteFireResponses()
 {
     Vector3D referencePosition = Me.GetPosition();
-    switch (_designationMode)
+    switch (DesignationMode)
     {
         case GuidanceMode.Turret:
             referencePosition = _targetInfo.Position;
@@ -909,14 +941,14 @@ void NetworkTargets()
     IGC.SendBroadcastMessage(IGC_TAG_IFF, myTuple);
 
     // Broadcast target pos
-    if ((_designationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
-        || (_designationMode == GuidanceMode.Turret && _turretLocked))
+    if ((DesignationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
+        || (DesignationMode == GuidanceMode.Turret && _turretLocked))
     {
         MyRelationsBetweenPlayerAndBlock relationBetweenPlayerAndBlock;
         MyDetectedEntityType type;
         long targetId = 0;
         Vector3D targetPos = Vector3.Zero;
-        switch (_designationMode)
+        switch (DesignationMode)
         {
             case GuidanceMode.Camera:
                 relationBetweenPlayerAndBlock = _raycastHoming.TargetRelation;
@@ -983,9 +1015,9 @@ bool FiringAllowed
 {
     get
     {
-        bool allowed = (_designationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked);
-        allowed |= (_designationMode == GuidanceMode.Turret && _turretLocked);
-        allowed |= (_designationMode == GuidanceMode.BeamRiding);
+        bool allowed = (DesignationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked);
+        allowed |= (DesignationMode == GuidanceMode.Turret && _turretLocked);
+        allowed |= (DesignationMode == GuidanceMode.BeamRiding);
         allowed &= _fireEnabled;
         return allowed;
     }
@@ -1145,48 +1177,42 @@ void ParseArguments(string arg)
 
         case "mode_beamride":
         case "mode_optical":
-            if (_opticalAllowed)
-                _designationMode = GuidanceMode.BeamRiding;
+            DesignationMode = GuidanceMode.BeamRiding;                
             break;
 
         case "mode_camera":
         case "mode_semiactive":
-            if (_semiActiveAllowed)
-            {
-                _raycastHoming.ClearLock();
-                _designationMode = GuidanceMode.Camera;
-            }
+            DesignationMode = GuidanceMode.Camera;
             break;
 
         case "mode_turret":
-            if (_turretAllowed)
-                _designationMode = GuidanceMode.Turret;
+            DesignationMode = GuidanceMode.Turret;
             break;
         #endregion
 
         #region lock on
         case "lock_on":
-            if (_semiActiveAllowed)
+            if (_allowedGuidanceModes.Contains(GuidanceMode.Camera))
             {
-                _designationMode = GuidanceMode.Camera;
+                DesignationMode = GuidanceMode.Camera;
                 _raycastHoming.LockOn();
             }
             break;
 
         case "lock_off":
-            if (_semiActiveAllowed)
+            if (_allowedGuidanceModes.Contains(GuidanceMode.Camera))
             {
-                _designationMode = GuidanceMode.Camera;
+                DesignationMode = GuidanceMode.Camera;
                 _raycastHoming.ClearLock();
                 PlayFireAbortSound(_soundBlocks);
             }
             break;
 
         case "lock_switch":
-            if (_semiActiveAllowed)
+            if (_allowedGuidanceModes.Contains(GuidanceMode.Camera))
             {
-                _designationMode = GuidanceMode.Camera;
-                if (_raycastHoming.IsScanning) //if scanning, switch
+                DesignationMode = GuidanceMode.Camera;
+                if (_raycastHoming.IsScanning)
                 {
                     _raycastHoming.ClearLock();
                     PlayFireAbortSound(_soundBlocks);
@@ -1263,11 +1289,9 @@ void CycleGuidanceModes()
     if (_allowedGuidanceModes.Count == 0)
         return;
 
-    int index = _allowedGuidanceModes.FindIndex(x => x == _designationMode);
+    int index = _allowedGuidanceModes.FindIndex(x => x == DesignationMode);
     index = ++index % _allowedGuidanceModes.Count;
-    _designationMode = _allowedGuidanceModes[index];
-    if (_designationMode == GuidanceMode.Camera)
-        _raycastHoming.ClearLock();
+    DesignationMode = _allowedGuidanceModes[index];
 }
 #endregion
 
@@ -1280,7 +1304,7 @@ bool GrabBlocks()
     var group = GridTerminalSystem.GetBlockGroupWithName(_fireControlGroupName);
     if (group == null)
     {
-        _setupStringbuilder.AppendLine($"ERROR: No block group named '{_fireControlGroupName}' was found");
+        _setupStringbuilder.AppendLine($"> ERRROR: No block group named '{_fireControlGroupName}' was found");
         return false;
     }
 
@@ -1302,92 +1326,62 @@ bool GrabBlocks()
     group.GetBlocksOfType<IMyTerminalBlock>(null, CollectionFunction);
     GridTerminalSystem.GetBlocksOfType<IMyShipController>(_shipControllers);
 
-    if (_textSurfaces.Count == 0)
-    {
-        _setupStringbuilder.AppendLine($"Info: No text surfaces in '{_fireControlGroupName}' group");
-    }
+    _setupStringbuilder.AppendLine($"- Text surfaces: {_textSurfaces.Count}");
+    _setupStringbuilder.AppendLine($"- Sound blocks: {_soundBlocks.Count}");
 
-    if (_soundBlocks.Count == 0)
-    {
-        _setupStringbuilder.AppendLine($"Info: No sound blocks in '{_fireControlGroupName}' group");
-    }
-
-    // Getting allowed guidance modes
     _allowedGuidanceModes.Clear();
 
     // Camera guidance checks
-    _semiActiveAllowed = true;
-    if (_cameraList.Count == 0)
-    {
-        _setupStringbuilder.AppendLine("WARNING: Camera homing unavailable.");
-        _setupStringbuilder.AppendLine($"Info: No cameras in '{_fireControlGroupName}' group");
-        _semiActiveAllowed = false;
-    }
-    else
+    _setupStringbuilder.AppendLine($"- Cameras: {_cameraList.Count}");
+    if (_cameraList.Count != 0)
         _allowedGuidanceModes.Add(GuidanceMode.Camera);
 
     // Turret guidance checks
-    _turretAllowed = true;
-    if (_turrets.Count == 0 && _turretControlBlocks.Count == 0)
-    {
-        _setupStringbuilder.AppendLine("WARNING: Turret homing unavailable.");
-        _setupStringbuilder.AppendLine($"Info: No turrets in '{_fireControlGroupName}' group");
-        _turretAllowed = false;
-    }
-    else
+    _setupStringbuilder.AppendLine($"- Turrets: {_turrets.Count}");
+    _setupStringbuilder.AppendLine($"- Custom turret controllers: {_turretControlBlocks.Count}");
+    if (_turrets.Count != 0 || _turretControlBlocks.Count != 0)
         _allowedGuidanceModes.Add(GuidanceMode.Turret);
 
     // Optical guidance checks
-    _opticalAllowed = true;
-
-    if (_shipControllers.Count == 0 && _cameraList.Count == 0 && _reference == null)
-    {
-        _setupStringbuilder.AppendLine("WARNING: Optical guidance unavailable.");
-        _opticalAllowed = false;
-    }
-    else
-    {
+    _setupStringbuilder.AppendLine($"- Ship controllers: {_shipControllers.Count}");
+    _setupStringbuilder.AppendLine($"- Reference block: {(_reference != null ? $"'{_reference.CustomName}'" : "(none)")}");
+    if (_shipControllers.Count != 0 || _cameraList.Count != 0 || _reference != null)
         _allowedGuidanceModes.Add(GuidanceMode.BeamRiding);
-    }
-
-    if (_shipControllers.Count == 0)
-    {
-        _setupStringbuilder.AppendLine("Info: No ship controllers on this ship");
-    }
 
     //Antenna Blocks
     if (_broadcastList.Count == 0)
     {
-        _setupStringbuilder.AppendLine($"ERROR: No antenna named found in '{_fireControlGroupName}' group");
-        _setupStringbuilder.AppendLine("\n<<< SETUP FAILED >>>");
+        _setupStringbuilder.AppendLine($"> ERROR: No antennas");
         return false;
+    }
+    else
+    {
+        _setupStringbuilder.AppendLine($"- Antennas: {_broadcastList.Count}");
     }
 
     if (_allowedGuidanceModes.Count == 0)
     {
-        _setupStringbuilder.AppendLine("ERROR: No allowed guidance modes");
-        _setupStringbuilder.AppendLine("\n<<< SETUP FAILED >>>");
+        _setupStringbuilder.AppendLine("> ERROR: No allowed guidance modes");
         return false;
     }
 
-    if (_designationMode == GuidanceMode.None)
+    if (DesignationMode == GuidanceMode.None)
     {
         if (_allowedGuidanceModes.Contains(_preferredGuidanceMode))
         {
-            _designationMode = _preferredGuidanceMode;
+            DesignationMode = _preferredGuidanceMode;
         }
     }
 
-    if (_designationMode == GuidanceMode.None)
-        _designationMode = _allowedGuidanceModes[0];
+    if (DesignationMode == GuidanceMode.None)
+        DesignationMode = _allowedGuidanceModes[0];
 
-    _setupStringbuilder.AppendLine("\n>>> SETUP SUCCESSFUL <<<");
     _setupStringbuilder.AppendLine($"\nAllowed guidance modes:");
     _allowedGuidanceEnum = GuidanceMode.None;
     foreach (var mode in _allowedGuidanceModes)
     {
         _allowedGuidanceEnum |= mode;
-        _setupStringbuilder.AppendLine($" - {mode}");
+        _setupStringbuilder.AppendLine($"- {mode}");
     }
     return true;
 }
@@ -1396,7 +1390,8 @@ void HandleIni()
 {
     _setupIni.Clear();
     string preferredStr = _guidanceModeDict.Keys.First(),
-           orderStr = _fireOrderDict.Keys.First();
+           orderStr = _fireOrderDict.Keys.First(),
+           limitStr = DEFAULT_MISSILE_LIMIT;
     if (_setupIni.TryParse(Me.CustomData))
     {
         _fireControlGroupName = _setupIni.Get(INI_SECTION_GENERAL, INI_FIRE_GROUP_NAME).ToString(_fireControlGroupName);
@@ -1404,6 +1399,19 @@ void HandleIni()
         _referenceNameTag = _setupIni.Get(INI_SECTION_GENERAL, INI_REFERENCE_NAME).ToString(_referenceNameTag);
         _autoFire = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE).ToBoolean(_autoFire);
         _autoFireRemote = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE_REMOTE).ToBoolean(_autoFireRemote);
+
+        string temp = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_MSL_LIMIT).ToString(limitStr);
+        int limit;
+        if (int.TryParse(temp, out limit) && limit > 0)
+        {
+            _autofireLimitPerTarget = limit;
+            limitStr = temp;
+        }
+        else
+        {
+            _autofireLimitPerTarget = 0;
+        }
+
         _autoFireInterval = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL).ToDouble(_autoFireInterval);
         _idleAntennaRange = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_IDLE).ToDouble(_idleAntennaRange);
         _activeAntennaRange = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE).ToDouble(_activeAntennaRange);
@@ -1422,7 +1430,7 @@ void HandleIni()
         GuidanceAllowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
         GuidanceDisallowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
 
-        string temp = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
+        temp = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
         GuidanceMode preferredMode;
         if (_guidanceModeDict.TryGetValue(temp, out preferredMode))
         {
@@ -1458,11 +1466,11 @@ void HandleIni()
     _setupIni.Set(INI_SECTION_GENERAL, INI_PREFERRED_GUID, preferredStr);
     _setupIni.SetComment(INI_SECTION_GENERAL, INI_PREFERRED_GUID, INI_PREFERRED_GUID_COMMENT);
     _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE, _autoFire);
+    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL, _autoFireInterval);
     _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_REMOTE, _autoFireRemote);
+    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_MSL_LIMIT, limitStr);
     _setupIni.Set(INI_SECTION_GENERAL, INI_FIRE_ORDER, orderStr);
     _setupIni.SetComment(INI_SECTION_GENERAL, INI_FIRE_ORDER, INI_FIRE_ORDER_COMMENT);
-
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL, _autoFireInterval);
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_IDLE, _idleAntennaRange);
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE, _activeAntennaRange);
     _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC, _stealthySemiActiveAntenna);
@@ -1742,7 +1750,7 @@ double GetCompareValue(int num, bool angle)
     IMyShipController c = _controllerCompareList[0];
     
     Vector3D targetPos = Vector3D.Zero;
-    switch (_designationMode)
+    switch (DesignationMode)
     {
         case GuidanceMode.BeamRiding:
             targetPos = _originPos + _frontVec * 200;
@@ -2006,7 +2014,7 @@ class RaycastHoming
     public MyDetectedEntityType TargetType { get; private set; }
 
     public enum TargetingStatus { NotLocked, Locked, TooClose };
-    enum AimMode { None = 0, Center = 1, Offset = 2, OffsetRelative = 4 };
+    enum AimMode { Center, Offset, OffsetRelative };
 
     AimMode _currentAimMode = AimMode.Center;
 
@@ -2014,9 +2022,8 @@ class RaycastHoming
     readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
     readonly Random _rngeesus = new Random();
 
-    MyDetectedEntityInfo _targetInfo = default(MyDetectedEntityInfo);
+    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
     MatrixD _targetOrientation;
-    Vector3D _targetPosCached;
     Vector3D _targetPositionOverride;
     HashSet<long> _gridIDsToIgnore = new HashSet<long>();
     double _timeSinceLastScan = 0;
@@ -2071,14 +2078,6 @@ class RaycastHoming
         }
     }
 
-    public void RemoveEntityTypeToFilter(params MyDetectedEntityType[] types)
-    {
-        foreach (var type in types)
-        {
-            _targetFilter.Remove(type);
-        }
-    }
-
     public void AcknowledgeLockLost()
     {
         LockLost = false;
@@ -2099,7 +2098,7 @@ class RaycastHoming
 
     void ClearLockInternal()
     {
-        _targetInfo = default(MyDetectedEntityInfo);
+        _info = default(MyDetectedEntityInfo);
         IsScanning = false;
         Status = TargetingStatus.NotLocked;
         MissedLastScan = false;
@@ -2108,7 +2107,6 @@ class RaycastHoming
         HitPosition = Vector3D.Zero;
         TargetId = 0;
         _timeSinceLastScan = 141;
-        _targetPosCached = Vector3D.Zero;
         _currentAimMode = AimMode.Center;
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
@@ -2140,7 +2138,7 @@ class RaycastHoming
         return randomVector * fudgeFactor * TimeSinceLastLock;
     }
     
-    Vector3D GetSearchDirection(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
+    Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
     {
         Vector3D scanPos = origin + direction * MaxRange;
         if (SearchScanSpread < 1e-2)
@@ -2159,7 +2157,7 @@ class RaycastHoming
 
         TimeSinceLastLock += timeStep;
 
-        _targetInfo = default(MyDetectedEntityInfo);
+        _info = default(MyDetectedEntityInfo);
         _availableCameras.Clear();
 
         //Check for lock lost
@@ -2172,17 +2170,17 @@ class RaycastHoming
 
         // Determine where to scan next
         var scanPosition = Vector3D.Zero;
-        if (_currentAimMode == AimMode.Offset)
+        switch (_currentAimMode)
         {
-            scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
-        }
-        else if (_currentAimMode == AimMode.OffsetRelative)
-        {
-            scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
-        }
-        else
-        {
-            scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
+            case AimMode.Offset:
+                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            case AimMode.OffsetRelative:
+                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            default:
+                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
+                break;
         }
 
         if (MissedLastScan && cameraList.Count > 0)
@@ -2226,18 +2224,16 @@ class RaycastHoming
         }
 
         // Check for transition between faces
-        if (_availableCameras.Count == 0) //transition between faces
+        if (_availableCameras.Count == 0)
         {
-            _timeSinceLastScan = 100000; // Set to scan immediately on the next cycle
+            _timeSinceLastScan = 100000;
             MissedLastScan = true;
             return;
         }
 
-        //Get camera with maximum available range
-        var thisCamera = GetCameraWithMaxRange(_availableCameras);
-        var cameraMatrix = thisCamera.WorldMatrix;
+        var camera = GetCameraWithMaxRange(_availableCameras);
+        var cameraMatrix = camera.WorldMatrix;
 
-        // Determine scan range
         double scanRange;
         Vector3D adjustedTargetPos = Vector3D.Zero;
         if (Status == TargetingStatus.Locked || _manualLockOverride)
@@ -2251,19 +2247,18 @@ class RaycastHoming
             scanRange = MaxRange;
         }
 
-        // This operates under the assumption that raycast charges at 2km/s
-        AutoScanInterval = scanRange / 2000 / _availableCameras.Count * AutoScanScaleFactor; // Give a fudge factor for safety
+        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
 
         //Attempt to scan adjusted target position
-        if (thisCamera.AvailableScanRange >= scanRange &&
+        if (camera.AvailableScanRange >= scanRange &&
             _timeSinceLastScan >= AutoScanInterval)
         {
             if (Status == TargetingStatus.Locked || _manualLockOverride)
-                _targetInfo = thisCamera.Raycast(adjustedTargetPos);
+                _info = camera.Raycast(adjustedTargetPos);
             else if (!Vector3D.IsZero(testDirection))
-                _targetInfo = thisCamera.Raycast(GetSearchDirection(reference.GetPosition(), testDirection, thisCamera));
+                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
             else
-                _targetInfo = thisCamera.Raycast(MaxRange);
+                _info = camera.Raycast(MaxRange);
 
             _timeSinceLastScan = 0;
         }
@@ -2273,38 +2268,34 @@ class RaycastHoming
         }
 
         // Validate target and assign values
-        if (!_targetInfo.IsEmpty() &&
-            !_targetFilter.Contains(_targetInfo.Type) &&
-            !_gridIDsToIgnore.Contains(_targetInfo.EntityId)) //target lock
+        if (!_info.IsEmpty() &&
+            !_targetFilter.Contains(_info.Type) &&
+            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
         {
-            if (Vector3D.DistanceSquared(_targetInfo.Position, thisCamera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
+            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
             {
                 Status = TargetingStatus.TooClose;
                 return;
             }
             else if (Status == TargetingStatus.Locked) // Target already locked
             {
-                if (_targetInfo.EntityId == TargetId)
+                if (_info.EntityId == TargetId)
                 {
-                    TargetCenter = _targetInfo.Position;
-                    HitPosition = _targetInfo.HitPosition.Value;
+                    TargetCenter = _info.Position;
+                    HitPosition = _info.HitPosition.Value;
 
-                    _targetOrientation = _targetInfo.Orientation;
+                    _targetOrientation = _info.Orientation;
                     OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
 
-                    TargetVelocity = _targetInfo.Velocity;
-                    TargetSize = _targetInfo.BoundingBox.Size.Length();
+                    TargetVelocity = _info.Velocity;
+                    TargetSize = _info.BoundingBox.Size.Length();
                     TimeSinceLastLock = 0;
 
-                    if (_manualLockOverride)
-                    {
-                        TargetId = _targetInfo.EntityId;
-                        _manualLockOverride = false;
-                    }
-
+                    _manualLockOverride = false;
+                    
                     MissedLastScan = false;
-                    TargetRelation = _targetInfo.Relationship;
-                    TargetType = _targetInfo.Type;
+                    TargetRelation = _info.Relationship;
+                    TargetType = _info.Type;
                 }
                 else
                 {
@@ -2313,43 +2304,34 @@ class RaycastHoming
             }
             else // Target not yet locked: initial lockon
             {
-                if (_manualLockOverride && TargetId != _targetInfo.EntityId && TargetId != 0)
+                if (_manualLockOverride && TargetId != _info.EntityId)
                     return;
 
-                if (_manualLockOverride && TargetId == 0)
-                {
-                    double maxDispPerTickSq = 100 + _targetInfo.Velocity.LengthSquared() * timeStep * timeStep;
-                    if (Vector3D.DistanceSquared(_targetPositionOverride, _targetInfo.HitPosition.Value) > maxDispPerTickSq)
-                    {
-                        return; // Abort lock since it is not locked onto what we want
-                    }
-                }
-
                 Status = TargetingStatus.Locked;
-                TargetId = _targetInfo.EntityId;
-                TargetCenter = _targetInfo.Position;
-                HitPosition = _targetInfo.HitPosition.Value;
-                TargetVelocity = _targetInfo.Velocity;
-                TargetSize = _targetInfo.BoundingBox.Size.Length();
+                TargetId = _info.EntityId;
+                TargetCenter = _info.Position;
+                HitPosition = _info.HitPosition.Value;
+                TargetVelocity = _info.Velocity;
+                TargetSize = _info.BoundingBox.Size.Length();
                 TimeSinceLastLock = 0;
 
                 var aimingCamera = GetControlledCamera(_availableCameras);
                 Vector3D hitPosOffset = Vector3D.Zero;
                 if (aimingCamera != null)
                 {
-                    hitPosOffset = aimingCamera.GetPosition() - thisCamera.GetPosition();
+                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
                 }
                 else if (reference != null)
                 {
-                    hitPosOffset = reference.GetPosition() - thisCamera.GetPosition();
+                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
                 }
                 if (!Vector3D.IsZero(hitPosOffset))
                 {
-                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - thisCamera.GetPosition());
+                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
                 }
 
-                var hitPos = _targetInfo.HitPosition.Value + hitPosOffset;
-                _targetOrientation = _targetInfo.Orientation;
+                var hitPos = _info.HitPosition.Value + hitPosOffset;
+                _targetOrientation = _info.Orientation;
 
                 if (_manualLockOverride)
                 {
@@ -2362,34 +2344,18 @@ class RaycastHoming
                 }
 
                 MissedLastScan = false;
-                TargetRelation = _targetInfo.Relationship;
-                TargetType = _targetInfo.Type;
+                TargetRelation = _info.Relationship;
+                TargetType = _info.Type;
             }
-
-            _targetPosCached = _targetInfo.Position;
         }
         else
         {
-            //TODO: Investigate if we should only count a miss when we are LOCKED
             MissedLastScan = true;
         }
 
         if (MissedLastScan)
         {
-            // If scan missed, switch aim mode
-            if (_currentAimMode == AimMode.Center)
-            {
-                _currentAimMode = AimMode.Offset;
-            }
-            else if (_currentAimMode == AimMode.Offset)
-            {
-                _currentAimMode = AimMode.OffsetRelative;
-            }
-            else
-            {
-                _currentAimMode = AimMode.Center;
-            }
-            //_timeSinceLastScan = 1000000; // Make sure we scan as fast as we can to try and re-establish lock.
+            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
         }
     }
 
@@ -2397,39 +2363,39 @@ class RaycastHoming
     {
         availableCameras.Clear();
 
-        foreach (var block in allCameras)
+        foreach (var c in allCameras)
         {
-            if (block.Closed)
+            if (c.Closed)
                 continue;
 
-            if (TestCameraAngles(block, vectorIsPosition ? testVector - block.GetPosition() : testVector))
-                availableCameras.Add(block);
+            if (TestCameraAngles(c, vectorIsPosition ? testVector - c.GetPosition() : testVector))
+                availableCameras.Add(c);
         }
     }
 
     bool TestCameraAngles(IMyCameraBlock camera, Vector3D direction)
     {
-        Vector3D localDirection = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
+        Vector3D local = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
 
-        if (localDirection.Z > 0) //pointing backwards
+        if (local.Z > 0)
             return false;
 
-        var yawTan = Math.Abs(localDirection.X / localDirection.Z);
-        var pitchTanSq = localDirection.Y * localDirection.Y / (localDirection.X * localDirection.X + localDirection.Z * localDirection.Z);
+        var yawTan = Math.Abs(local.X / local.Z);
+        var localSq = local * local;
+        var pitchTanSq = localSq.Y / (localSq.X + localSq.Z);
 
         return yawTan <= 1 && pitchTanSq <= 1;
     }
 
-    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameraList)
+    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameras)
     {
-        double maxRange = double.MinValue;
-        IMyCameraBlock maxRangeCamera = default(IMyCameraBlock);
-
-        foreach (IMyCameraBlock thisCamera in cameraList)
+        double maxRange = 0;
+        IMyCameraBlock maxRangeCamera = null;
+        foreach (var c in cameras)
         {
-            if (thisCamera.AvailableScanRange > maxRange)
+            if (c.AvailableScanRange > maxRange)
             {
-                maxRangeCamera = thisCamera;
+                maxRangeCamera = c;
                 maxRange = maxRangeCamera.AvailableScanRange;
             }
         }
@@ -2439,37 +2405,37 @@ class RaycastHoming
 
     IMyCameraBlock GetControlledCamera(List<IMyCameraBlock> cameras)
     {
-        foreach (var block in cameras)
+        foreach (var c in cameras)
         {
-            if (block.Closed)
+            if (c.Closed)
                 continue;
 
-            if (block.IsActive)
-                return block;
+            if (c.IsActive)
+                return c;
         }
         return null;
     }
 
-    IMyShipController GetControlledShipController(List<IMyShipController> shipControllers)
+    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
     {
-        if (shipControllers.Count == 0)
+        if (controllers.Count == 0)
             return null;
 
         IMyShipController mainController = null;
         IMyShipController controlled = null;
 
-        foreach (IMyShipController thisController in shipControllers)
+        foreach (var sc in controllers)
         {
-            if (thisController.IsUnderControl && thisController.CanControlShip)
+            if (sc.IsUnderControl && sc.CanControlShip)
             {
                 if (controlled == null)
                 {
-                    controlled = thisController;
+                    controlled = sc;
                 }
 
-                if (thisController.IsMainCockpit)
+                if (sc.IsMainCockpit)
                 {
-                    mainController = thisController; // Only one per grid so no null check needed
+                    mainController = sc; // Only one per grid so no null check needed
                 }
             }
         }
@@ -2480,7 +2446,7 @@ class RaycastHoming
         if (controlled != null)
             return controlled;
 
-        return shipControllers[0];
+        return controllers[0];
     }
 
     public static Vector3D VectorRejection(Vector3D a, Vector3D b)
@@ -3417,12 +3383,12 @@ public class RuntimeTracker
     public string Write()
     {
         _sb.Clear();
-        _sb.AppendLine("\n_____________________________\nGeneral Runtime Info\n");
-        _sb.AppendLine($"Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"Max runtime: {MaxRuntime:n4} ms");
+        _sb.AppendLine("General Runtime Info");
+        _sb.AppendLine($"- Avg runtime: {AverageRuntime:n4} ms");
+        _sb.AppendLine($"- Max runtime: {MaxRuntime:n4} ms");
+        _sb.AppendLine($"- Avg instructions: {AverageInstructions:n2}");
+        _sb.AppendLine($"- Max instructions: {MaxInstructions:n0}");
+        _sb.AppendLine($"- Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
         return _sb.ToString();
     }
 }
