@@ -43,8 +43,8 @@ DO NOT EDIT VARIABLES IN THE SCRIPT
 */
 
 
-public const string Version = "1.2.0",
-                    Date = "2022/07/09";
+public const string Version = "1.3.1",
+                    Date = "2022/07/10";
 
 public const string ScriptName = "Speed Timers";
 const string IniSectionGeneral = ScriptName + " - General Config";
@@ -220,13 +220,16 @@ ReturnCode GetBlocks()
 public class SpeedTimer
 {
     const string IniSection = ScriptName + " - Timer Config";
+    const string IniKeyNumberOfThresholds = "Number of thresholds";
+    const string IniKeyLogicGate = "Logic gate type";
+    const string IniSectionThresholdTemplate = ScriptName + " - Threshold {0} Config";
     const string IniKeyThresholdType = "Threshold type";
-    const string IniCommentThresholdType = " Accepted values are SPEED, ACCEL, ANGULAR_SPEED, or ANGULAR_ACCEL";
     const string IniKeyThresholdDirection = "Trigger when";
-    const string IniCommentThresholdDirection = " Accepted values are BELOW or ABOVE";
     const string IniKeyValueThreshold = "Value threshold";
     const string IniCommentUnits = 
-        " Accepted \"Threshold type\" values:\n"
+        " Accepted \"Logic gate type\" values:\n"
+        + "      AND or OR\n"
+        + " Accepted \"Threshold type\" values:\n"
         + "     SPEED, ACCEL, ANGULAR_SPEED, or ANGULAR_ACCEL\n"
         + " Accepted \"Trigger when\" values:\n"
         + "     BELOW or ABOVE\n"
@@ -237,13 +240,51 @@ public class SpeedTimer
 
     IMyTimerBlock _timer;
     MyIni _ini;
-    ThresholdDirection _direction = ThresholdDirection.Above;
-    ThresholdType _type = ThresholdType.Speed;
-    double _thresholdValue = 50;
     bool _lastThresholdMet = false;
+    ThresholdLogicGate _logicGate = ThresholdLogicGate.And;
 
+    enum ThresholdLogicGate { And, Or }
     enum ThresholdDirection { Below, Above }
     enum ThresholdType { Speed, Acceleration, AngularSpeed, AngularAcceleration }
+    
+    List<Threshold> _thresholds = new List<Threshold>();
+    
+    class Threshold
+    {
+        public ThresholdType Type = ThresholdType.Speed;
+        public ThresholdDirection Direction = ThresholdDirection.Above;
+        public double Value = 50;
+
+        public bool Update(double speedSq, double accelSq, double angularSpeedSq, double angularAccelSq)
+        {
+            double val = 0;
+            switch (Type)
+            {
+                case ThresholdType.Speed:
+                    val = speedSq;
+                    break;
+                case ThresholdType.Acceleration:
+                    val = accelSq;
+                    break;
+                case ThresholdType.AngularSpeed:
+                    val = angularSpeedSq;
+                    break;
+                case ThresholdType.AngularAcceleration:
+                    val = angularAccelSq;
+                    break;
+            }
+
+            var threshSq = Value * Value;
+            if (Direction == ThresholdDirection.Above)
+            {
+                return val > threshSq;
+            }
+            else
+            {
+                return val < threshSq;
+            }
+        }
+    }
 
     public SpeedTimer(IMyTimerBlock timer, MyIni ini)
     {
@@ -255,27 +296,36 @@ public class SpeedTimer
     void ProcessIni()
     {
         _ini.Clear();
-        if (_ini.TryParse(_timer.CustomData))
-        {
-            string typeStr = _ini.Get(IniSection, IniKeyThresholdType).ToString();
-            _type = StringToThresholdType(typeStr, _type);
-
-            string dirnStr = _ini.Get(IniSection, IniKeyThresholdDirection).ToString();
-            _direction = StringToThresholdDirection(dirnStr, _direction);
-
-            _thresholdValue = _ini.Get(IniSection, IniKeyValueThreshold).ToDouble(_thresholdValue);
-        }
-        else if (!string.IsNullOrWhiteSpace(_timer.CustomData))
+        if (!_ini.TryParse(_timer.CustomData) && !string.IsNullOrWhiteSpace(_timer.CustomData))
         {
             _ini.EndContent = _timer.CustomData;
         }
+        
+        _thresholds.Clear();
+        int numThresholds = Math.Max(1, _ini.Get(IniSection, IniKeyNumberOfThresholds).ToInt32(1));
+        string gate = _ini.Get(IniSection, IniKeyLogicGate).ToString();
+        _logicGate = StringToThresholdLogicGate(gate, _logicGate);
+        _ini.Set(IniSection, IniKeyNumberOfThresholds, numThresholds);
+        _ini.Set(IniSection, IniKeyLogicGate, ThresholdLogicGateToString(_logicGate));
 
-        _ini.Set(IniSection, IniKeyThresholdType, ThresholdTypeToString(_type));
-        _ini.Set(IniSection, IniKeyThresholdDirection, ThresholdDirectionToString(_direction));
-        _ini.Set(IniSection, IniKeyValueThreshold, _thresholdValue);
+        for (int ii = 0; ii < numThresholds; ++ii)
+        {
+            string section = string.Format(IniSectionThresholdTemplate, ii + 1);
+            Threshold thresh = new Threshold();
 
-        // _ini.SetComment(IniSection, IniKeyThresholdType, IniCommentThresholdType);
-        // _ini.SetComment(IniSection, IniKeyThresholdDirection, IniCommentThresholdDirection);
+            string typeStr = _ini.Get(section, IniKeyThresholdType).ToString();
+            thresh.Type = StringToThresholdType(typeStr, thresh.Type);
+
+            string dirnStr = _ini.Get(section, IniKeyThresholdDirection).ToString();
+            thresh.Direction = StringToThresholdDirection(dirnStr, thresh.Direction);
+
+            thresh.Value = _ini.Get(section, IniKeyValueThreshold).ToDouble(thresh.Value);
+        
+            _ini.Set(section, IniKeyThresholdType, ThresholdTypeToString(thresh.Type));
+            _ini.Set(section, IniKeyThresholdDirection, ThresholdDirectionToString(thresh.Direction));
+            _ini.Set(section, IniKeyValueThreshold, thresh.Value);
+            _thresholds.Add(thresh);
+        }
         
         _ini.EndComment = IniCommentUnits;
 
@@ -288,32 +338,19 @@ public class SpeedTimer
 
     public void Update(double speedSq, double accelSq, double angularSpeedSq, double angularAccelSq)
     {
-        double val = 0;
-        switch (_type)
+        bool thresholdMet = _logicGate == ThresholdLogicGate.And;
+        foreach (var thresh in _thresholds)
         {
-            case ThresholdType.Speed:
-                val = speedSq;
-                break;
-            case ThresholdType.Acceleration:
-                val = accelSq;
-                break;
-            case ThresholdType.AngularSpeed:
-                val = angularSpeedSq;
-                break;
-            case ThresholdType.AngularAcceleration:
-                val = angularAccelSq;
-                break;
-        }
-
-        bool thresholdMet = false;
-        var threshSq = _thresholdValue * _thresholdValue;
-        if (_direction == ThresholdDirection.Above)
-        {
-            thresholdMet = val > threshSq;
-        }
-        else
-        {
-            thresholdMet = val < threshSq;
+            bool thresholdValid = thresh.Update(speedSq, accelSq, angularSpeedSq, angularAccelSq);
+            switch (_logicGate)
+            {
+                case ThresholdLogicGate.And:
+                    thresholdMet &= thresholdValid;
+                    break;
+                case ThresholdLogicGate.Or:
+                    thresholdMet |= thresholdValid;
+                    break;
+            }
         }
 
         // Only trigger once per crossing
@@ -337,18 +374,6 @@ public class SpeedTimer
         }
     }
 
-    string ThresholdDirectionToString(ThresholdDirection val)
-    {
-        switch (val)
-        {
-            default:
-            case ThresholdDirection.Above:
-                return "ABOVE";
-            case ThresholdDirection.Below:
-                return "BELOW";
-        }
-    }
-
     ThresholdType StringToThresholdType(string val, ThresholdType defaultVal)
     {
         switch (val.ToUpperInvariant())
@@ -365,6 +390,31 @@ public class SpeedTimer
                 return ThresholdType.AngularAcceleration;
         }
     }
+    
+    ThresholdLogicGate StringToThresholdLogicGate(string val, ThresholdLogicGate defaultVal)
+    {
+        switch (val.ToUpperInvariant())
+        {
+            default:
+                return defaultVal;
+            case "AND":
+                return ThresholdLogicGate.And;
+            case "OR":
+                return ThresholdLogicGate.Or;
+        }
+    }
+    
+    string ThresholdDirectionToString(ThresholdDirection val)
+    {
+        switch (val)
+        {
+            default:
+            case ThresholdDirection.Above:
+                return "ABOVE";
+            case ThresholdDirection.Below:
+                return "BELOW";
+        }
+    }
 
     string ThresholdTypeToString(ThresholdType val)
     {
@@ -379,6 +429,18 @@ public class SpeedTimer
                 return "ANGULAR_SPEED";
             case ThresholdType.AngularAcceleration:
                 return "ANGULAR_ACCEL";
+        }
+    }
+    
+    string ThresholdLogicGateToString(ThresholdLogicGate val)
+    {
+        switch (val)
+        {
+            default:
+            case ThresholdLogicGate.And:
+                return "AND";
+            case ThresholdLogicGate.Or:
+                return "OR";
         }
     }
 }
@@ -635,3 +697,4 @@ class SpeedTimerTitleScreen
 
     #endregion
 }
+
