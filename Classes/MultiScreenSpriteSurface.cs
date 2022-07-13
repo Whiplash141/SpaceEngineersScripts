@@ -11,7 +11,7 @@ Program()
     _multiScreen.Draw();
 }
 
-public void DrawSprites(MultiScreenSpriteSurface frame, Vector2 centerPos, float scale = 1f)
+public void DrawSprites(ISpriteSurface frame, Vector2 centerPos, float scale = 1f)
 {
     frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(450f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 7
     frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(300f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 6
