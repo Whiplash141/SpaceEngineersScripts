@@ -1,10 +1,36 @@
 
 /*
 / //// / Whip's Ship Integrity Monitoring Program (Lite) / //// /
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+============================================
+    DO NOT EDIT VARIABLES IN THE SCRIPT
+           USE THE CUSTOM DATA!
+============================================
 */
 
-const string VERSION = "1.1.3";
-const string DATE = "2021/04/22";
+const string VERSION = "1.4.3";
+const string DATE = "2022/07/11";
 
 // Configurable
 string _textSurfaceGroupName = "SIMPL";
@@ -59,6 +85,10 @@ const string INI_KEY_TEXT_SURF_TEMPLATE = "Show on screen {0}";
 
 const string INI_COMMENT_NORMAL = " Normal axis values: X, Y, or Z";
 
+const string INI_SECTION_MULTISCREEN = "SIMPL - Multiscreen Config";
+const string INI_KEY_MULTISCREEN_ROWS = "Screen rows";
+const string INI_KEY_MULTISCREEN_COLS = "Screen cols";
+
 List<TextSurfaceConfig> _textSurfaces = new List<TextSurfaceConfig>();
 List<BlockInfo> _blockInfoArray = new List<BlockInfo>();
 PlanarMap _planarMap;
@@ -89,8 +119,6 @@ int _spritesX = 0;
 int _spritesY = 0;
 int _spritesZ = 0;
 
-List<MySprite> _spriteCache = new List<MySprite>();
-
 public enum NormalAxis { X, Y, Z }
 public enum BlockMask { None, Power = 1, Gyro = 2, Thrust = 4, Weapon = 8 }
 
@@ -103,7 +131,7 @@ Program()
     _scheduler.AddScheduledAction(TryStartSpriteDraw, 0.5);
     _scheduler.AddScheduledAction(HandleStateMachines, 60);
     _scheduler.AddScheduledAction(WriteDetailedInfo, 1);
-    
+
     _forceDrawTimeout = new ScheduledAction(() => _allowForceDraw = true, 1.0 / 30.0, true);
 
     _planarMap = new PlanarMap(Me.CubeGrid, _minDensityColor, _maxDensityColor, _missingColor, _powerColor, _weaponColor, _gyroColor, _thrustColor);
@@ -143,16 +171,16 @@ void WriteDetailedInfo()
     else
     {
         Echo($"QuadTree Compression Ratio:");
-        Echo($"  X: {(float)_planarMap.QuadTreeXNormal.UncompressedNodeCount/_planarMap.QuadTreeXNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeXNormal.FinishedNodes.Count})");
-        Echo($"  Y: {(float)_planarMap.QuadTreeYNormal.UncompressedNodeCount/_planarMap.QuadTreeYNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeYNormal.FinishedNodes.Count})");
-        Echo($"  Z: {(float)_planarMap.QuadTreeZNormal.UncompressedNodeCount/_planarMap.QuadTreeZNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeZNormal.FinishedNodes.Count})\n");
+        Echo($"  X: {(float)_planarMap.QuadTreeXNormal.UncompressedNodeCount / _planarMap.QuadTreeXNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeXNormal.FinishedNodes.Count})");
+        Echo($"  Y: {(float)_planarMap.QuadTreeYNormal.UncompressedNodeCount / _planarMap.QuadTreeYNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeYNormal.FinishedNodes.Count})");
+        Echo($"  Z: {(float)_planarMap.QuadTreeZNormal.UncompressedNodeCount / _planarMap.QuadTreeZNormal.FinishedNodes.Count:0.000} (count: {_planarMap.QuadTreeZNormal.FinishedNodes.Count})\n");
         if (_blockCheckStateMachine != null)
         {
             Echo($"Block check status: {100f * _blockCheckStateMachine.Current / _blockInfoArray.Count:n0}%\n    ({_blockCheckStateMachine.Current}/{_blockInfoArray.Count})");
         }
     }
 
-    if(_spriteDrawStateMachine != null)
+    if (_spriteDrawStateMachine != null)
     {
         Echo($"Sprite draw progress: {_spriteDrawStateMachine.Current:n0}%");
     }
@@ -172,14 +200,14 @@ void Main(string arg, UpdateType updateSource)
         case "REFRESH":
             GetScreens();
             break;
-            
+
         case "FORCE_DRAW":
-            if(_allowForceDraw)
+            if (_allowForceDraw)
             {
                 _drawRefreshSprite = !_drawRefreshSprite;
                 _allowForceDraw = false;
                 _scheduler.AddScheduledAction(_forceDrawTimeout);
-            }            
+            }
             break;
 
         case "SCAN":
@@ -189,7 +217,7 @@ void Main(string arg, UpdateType updateSource)
             }
             break;
     }
-  
+
     _scheduler.Update();
     _runtimeTracker.AddInstructions();
 }
@@ -197,7 +225,7 @@ void Main(string arg, UpdateType updateSource)
 #region Block Fetching
 struct TextSurfaceConfig
 {
-    public readonly IMyTextSurface Surface;
+    public readonly ISpriteSurface Surface;
     public readonly NormalAxis Normal;
     public readonly float RotationRad;
     public readonly bool Autoscale;
@@ -205,7 +233,7 @@ struct TextSurfaceConfig
     public readonly float LegendScale;
     public readonly bool Invert;
 
-    public TextSurfaceConfig(IMyTextSurface surface, NormalAxis normal, float rotationDeg, float scale, float legendScale, bool invert, bool autoscale)
+    public TextSurfaceConfig(ISpriteSurface surface, NormalAxis normal, float rotationDeg, float scale, float legendScale, bool invert, bool autoscale)
     {
         Surface = surface;
         Normal = normal;
@@ -217,7 +245,7 @@ struct TextSurfaceConfig
     }
 }
 
-void GetSurfaceConfigValues(bool parsed, IMyTerminalBlock b, bool isMultiScreen, int surfaceIdx, out NormalAxis normal, out float rotation, out float scale, out float legendScale, out bool invert, out bool autoscale)
+void GetSurfaceConfigValues(bool parsed, IMyTerminalBlock b, bool hasMulltipleScreens, int surfaceIdx, out NormalAxis normal, out float rotation, out float scale, out float legendScale, out bool invert, out bool autoscale, out bool multiscreen, out int rows, out int cols)
 {
     normal = DEFAULT_NORMAL_AXIS;
     rotation = DEFAULT_ROTATION;
@@ -225,11 +253,25 @@ void GetSurfaceConfigValues(bool parsed, IMyTerminalBlock b, bool isMultiScreen,
     legendScale = DEFAULT_LEGEND_SCALE;
     invert = DEFAULT_INVERT;
     autoscale = DEFAULT_AUTOSCALE;
+    multiscreen = false;
+    rows = 1;
+    cols = 1;
+
 
     string sectionName = INI_SECTION_TEXT_CONFIG;
-    if (isMultiScreen)
+    if (hasMulltipleScreens)
     {
         sectionName = string.Format("{0} - Screen {1}", INI_SECTION_TEXT_CONFIG, surfaceIdx);
+    }
+    else if (_ini.ContainsSection(INI_SECTION_MULTISCREEN))
+    {
+        multiscreen = true;
+        rows = _ini.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS).ToInt32(rows);
+        cols = _ini.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS).ToInt32(cols);
+        rows = Math.Max(rows, 1);
+        cols = Math.Max(cols, 1);
+        _ini.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS, rows);
+        _ini.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS, cols);
     }
 
     if (parsed)
@@ -260,7 +302,7 @@ bool CollectScreens(IMyTerminalBlock b)
 {
     if (!b.IsSameConstructAs(Me))
         return false;
-    
+
     NormalAxis normal;
     float rotation;
     float scale;
@@ -268,14 +310,28 @@ bool CollectScreens(IMyTerminalBlock b)
     bool invert;
     bool autoscale;
     bool parsed = false;
+    bool multiscreen;
+    int rows;
+    int cols;
 
-    if (b is IMyTextSurface)
+
+    if (b is IMyTextPanel)
     {
         _ini.Clear();
         parsed = _ini.TryParse(b.CustomData);
 
-        var surf = (IMyTextSurface)b;
-        GetSurfaceConfigValues(parsed, b, false, 0, out normal, out rotation, out scale, out legendScale, out invert, out autoscale);
+        GetSurfaceConfigValues(parsed, b, false, 0, out normal, out rotation, out scale, out legendScale, out invert, out autoscale, out multiscreen, out rows, out cols);
+        ISpriteSurface surf;
+        var tp = (IMyTextPanel)b;
+        if (multiscreen && (rows > 1 || cols > 1))
+        {
+            surf = new MultiScreenSpriteSurface(tp, rows, cols, this);
+        }
+        else
+        {
+            surf = new SingleScreenSpriteSurface(tp);
+        }
+
         _textSurfaces.Add(new TextSurfaceConfig(surf, normal, rotation, scale, legendScale, invert, autoscale));
 
         if (!parsed && !string.IsNullOrWhiteSpace(b.CustomData))
@@ -306,8 +362,9 @@ bool CollectScreens(IMyTerminalBlock b)
 
             if (display)
             {
-                GetSurfaceConfigValues(parsed, b, true, i, out normal, out rotation, out scale, out legendScale, out invert, out autoscale);
-                _textSurfaces.Add(new TextSurfaceConfig(tsp.GetSurface(i), normal, rotation, scale, legendScale, invert, autoscale));
+                GetSurfaceConfigValues(parsed, b, true, i, out normal, out rotation, out scale, out legendScale, out invert, out autoscale, out multiscreen, out rows, out cols);
+                var surf = new SingleScreenSpriteSurface(tsp.GetSurface(i));
+                _textSurfaces.Add(new TextSurfaceConfig(surf, normal, rotation, scale, legendScale, invert, autoscale));
             }
         }
 
@@ -357,7 +414,7 @@ void ParseGeneralConfig()
     MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_GYRO, _gyroColor, _ini);
     MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_THRUST, _thrustColor, _ini);
     _ini.SetSectionComment(INI_SECTION_COLOR, INI_COMMENT_COLOR);
-    
+
     _legend.UpdateLegendItemColor(INI_KEY_COLOR_MISSING, ref _missingColor);
     _legend.UpdateLegendItemColor(INI_KEY_COLOR_WEAPON, ref _weaponColor);
     _legend.UpdateLegendItemColor(INI_KEY_COLOR_POWER, ref _powerColor);
@@ -603,38 +660,34 @@ void UpdateSpriteDrawStateMachine()
 }
 
 public IEnumerator<float> SpriteDrawStateMachine()
-{  
+{
     _spritesX = _spritesY = _spritesZ = 0;
     for (int jj = 0; jj < _textSurfaces.Count; ++jj)
     {
         TextSurfaceConfig config = _textSurfaces[jj];
-        IMyTextSurface surf = config.Surface;
+        ISpriteSurface surf = config.Surface;
         NormalAxis normal = config.Normal;
         float rotation = config.RotationRad;
         float scale = config.Scale;
         float legendScale = config.LegendScale;
         bool invert = config.Invert;
         bool autoscale = config.Autoscale;
-        surf.ContentType = ContentType.SCRIPT;
-        surf.Script = "";
         surf.ScriptBackgroundColor = _bgColor;
-        
-        _spriteCache.Clear();
 
         Vector2 screenCenter = surf.TextureSize * 0.5f;
         Matrix rotationMatrix = CreateRotMatrix(rotation);
-        
+
         if (!_blockInfoStored)
         {
             _loadingScreen.Draw(surf, _blockStorageStateMachine.Current * 0.01f, $"{_storageStageStr} ({_blockStorageStateMachine.Current:n0}%)");
             yield return 100f * jj / _textSurfaces.Count;
             continue;
         }
-        
+
         // Adding or removing this sprite will force an entire resync of the sprite cache
         if (_drawRefreshSprite)
         {
-            _spriteCache.Add(new MySprite());
+            surf.Add(new MySprite());
         }
 
         List<BlockStatusSpriteCreator> statusSpriteCreators = null;
@@ -654,14 +707,14 @@ public IEnumerator<float> SpriteDrawStateMachine()
                 quadTree = _planarMap.QuadTreeZNormal;
                 break;
         }
-        
+
         if (autoscale)
         {
             float x = (float)quadTree.MaxRows;
             float y = (float)quadTree.MaxColumns;
             float cos = Math.Abs(rotationMatrix.M11);
             float sin = Math.Abs(rotationMatrix.M12);
-            
+
             float width = x * cos + y * sin;
             float height = x * sin + y * cos;
             Vector2 baseSize = new Vector2(width, height);
@@ -671,8 +724,8 @@ public IEnumerator<float> SpriteDrawStateMachine()
 
         for (int ii = 0; ii < quadTree.FinishedNodes.Count; ++ii)
         {
-            var leaf = quadTree.FinishedNodes[ii]; // TODO: Make leaf a class?
-            quadTree.AddSpriteFromQuadTreeLeaf(_spriteCache, normal, invert, scale, rotation, _planarMap, leaf, ref screenCenter, ref rotationMatrix);
+            var leaf = quadTree.FinishedNodes[ii];
+            quadTree.AddSpriteFromQuadTreeLeaf(surf, normal, invert, scale, rotation, _planarMap, leaf, ref screenCenter, ref rotationMatrix);
 
             if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
             {
@@ -682,7 +735,7 @@ public IEnumerator<float> SpriteDrawStateMachine()
 
         for (int ii = 0; ii < statusSpriteCreators.Count; ++ii)
         {
-            statusSpriteCreators[ii].CreateSprite(_spriteCache, normal, scale, rotation, invert, ref screenCenter, ref rotationMatrix);
+            statusSpriteCreators[ii].CreateSprite(surf, normal, scale, rotation, invert, ref screenCenter, ref rotationMatrix);
 
             if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
             {
@@ -690,25 +743,22 @@ public IEnumerator<float> SpriteDrawStateMachine()
             }
         }
 
-        _legend.GenerateSprites(_spriteCache, surf, legendScale);
+        _legend.GenerateSprites(surf, legendScale);
 
         switch (normal)
         {
             case NormalAxis.X:
-                _spritesX += (1 + _spriteCache.Count);
+                _spritesX += (1 + surf.SpriteCount);
                 break;
             case NormalAxis.Y:
-                _spritesY += (1 + _spriteCache.Count);
+                _spritesY += (1 + surf.SpriteCount);
                 break;
             case NormalAxis.Z:
-                _spritesZ += (1 + _spriteCache.Count);
+                _spritesZ += (1 + surf.SpriteCount);
                 break;
         }
 
-        using (var frame = surf.DrawFrame())
-        {
-            frame.AddRange(_spriteCache);
-        }
+        surf.Draw();
 
         // Only one screen per tick
         yield return 100f * (jj + 1) / _textSurfaces.Count;
@@ -724,10 +774,10 @@ public class LoadingScreen
 {
     readonly string _title;
     string _subtitle;
-    
+
     const float TitleSize = 1.5f;
     const float SubtitleSize = 1f;
-    
+
     readonly Vector2 LoadingBarSize = new Vector2(384, 32);
     readonly Vector2 TitleLocation = new Vector2(0, -80);
     readonly Vector2 SubtitleLocation = new Vector2(0, -35);
@@ -736,53 +786,52 @@ public class LoadingScreen
     readonly Color LoadingBarColor = new Color(100, 100, 100);
     readonly Color LoadingBarBackgroundColor = new Color(10, 10, 10);
     readonly Color BackgroundColor = new Color(0, 0, 0);
-    
+
     public LoadingScreen(string title, string subtitle)
     {
         _title = title;
         _subtitle = subtitle;
     }
-    
-    public void Draw(IMyTextSurface surf, float progress, string subtitle)
+
+    public void Draw(ISpriteSurface surf, float progress, string subtitle)
     {
         _subtitle = subtitle;
         Draw(surf, progress);
     }
-    
-    public void Draw(IMyTextSurface surf, float progress)
+
+    public void Draw(ISpriteSurface surf, float progress)
     {
         Vector2 screenCenter = surf.TextureSize * 0.5f;
         Vector2 scaleVec = surf.TextureSize / 512f;
         float scale = Math.Min(scaleVec.X, scaleVec.Y);
 
-        using (var frame = surf.DrawFrame())
-        {
-            // Background
-            MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: BackgroundColor);
-            frame.Add(background);
-            
-            // Title
-            MySprite title = MySprite.CreateText(_title, "Debug", TextColor, TitleSize * scale, TextAlignment.CENTER);
-            title.Position = screenCenter + TitleLocation * scale;
-            frame.Add(title);
-            
-            // Subtitle
-            MySprite subtitle = MySprite.CreateText(_subtitle, "Debug", TextColor, SubtitleSize * scale, TextAlignment.CENTER);
-            subtitle.Position = screenCenter + SubtitleLocation * scale;
-            frame.Add(subtitle);
-            
-            // Status bar background
-            Vector2 loadingBarSize = scale * LoadingBarSize;
-            MySprite barBackground = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarBackgroundColor, size: loadingBarSize);
-            barBackground.Position = screenCenter + LoadingBarLocation * scale;
-            frame.Add(barBackground);
+        // Background
+        MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: BackgroundColor);
+        surf.Add(background);
 
-            // Status bar
-            Vector2 statusBarSize = loadingBarSize * new Vector2(progress, 1f);
-            MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarColor, size: statusBarSize);
-            bar.Position = screenCenter + LoadingBarLocation * scale + new Vector2(-0.5f * (loadingBarSize.X - statusBarSize.X), 0);
-            frame.Add(bar);
-        }
+        // Title
+        MySprite title = MySprite.CreateText(_title, "Debug", TextColor, TitleSize * scale, TextAlignment.CENTER);
+        title.Position = screenCenter + TitleLocation * scale;
+        surf.Add(title);
+
+        // Subtitle
+        MySprite subtitle = MySprite.CreateText(_subtitle, "Debug", TextColor, SubtitleSize * scale, TextAlignment.CENTER);
+        subtitle.Position = screenCenter + SubtitleLocation * scale;
+        surf.Add(subtitle);
+
+        // Status bar background
+        Vector2 loadingBarSize = scale * LoadingBarSize;
+        MySprite barBackground = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarBackgroundColor, size: loadingBarSize);
+        barBackground.Position = screenCenter + LoadingBarLocation * scale;
+        surf.Add(barBackground);
+
+        // Status bar
+        Vector2 statusBarSize = loadingBarSize * new Vector2(progress, 1f);
+        MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarColor, size: statusBarSize);
+        bar.Position = screenCenter + LoadingBarLocation * scale + new Vector2(-0.5f * (loadingBarSize.X - statusBarSize.X), 0);
+        surf.Add(bar);
+
+        surf.Draw();
     }
 }
 
@@ -822,7 +871,7 @@ public class QuadTreeLeaf
             {
                 if (!firstValueSet)
                 {
-                    Value = _quadTreePtr.GetValue(r,c);
+                    Value = _quadTreePtr.GetValue(r, c);
                     firstValueSet = true;
                     continue;
                 }
@@ -869,26 +918,26 @@ public class QuadTree
     Vector2 _center;
     public int MaxValue = 1;
     int _maxSteps;
-    
+
 
     int[,] _buffer;
 
     public bool Finished { get; private set; } = false;
 
-    public void AddSpriteFromQuadTreeLeaf(List<MySprite> spriteList, NormalAxis normal, bool invert, float scale, float rotation, PlanarMap _planarMapPtr, QuadTreeLeaf leaf, ref Vector2 screenCenter, ref Matrix rotationMatrix)
+    public void AddSpriteFromQuadTreeLeaf(ISpriteSurface surf, NormalAxis normal, bool invert, float scale, float rotation, PlanarMap _planarMapPtr, QuadTreeLeaf leaf, ref Vector2 screenCenter, ref Matrix rotationMatrix)
     {
         Vector2 leafCenter = (Vector2)(leaf.Max + leaf.Min) * 0.5f;
         Vector2 fromCenterPlanar = leafCenter - _center;
         Vector2 rotatedFromCenterPlanar;
         Vector2.TransformNormal(ref fromCenterPlanar, ref rotationMatrix, out rotatedFromCenterPlanar);
-        
+
         float sign = invert ? -1f : 1f;
         rotatedFromCenterPlanar.X *= sign;
 
         float lerpScale = (float)(leaf.Value - 1) / _maxSteps;
         Color spriteColor = _planarMapPtr.GetColor(lerpScale);
 
-        spriteList.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", screenCenter + rotatedFromCenterPlanar * scale, (Vector2)leaf.Span * scale, spriteColor, rotation: rotation * sign));
+        surf.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", screenCenter + rotatedFromCenterPlanar * scale, (Vector2)leaf.Span * scale, spriteColor, rotation: rotation * sign));
     }
 
     public bool IndexInRange(int row, int column)
@@ -913,8 +962,8 @@ public class QuadTree
         _min = Vector2I.Zero;
         var maxDim = Math.Max(MaxRows, MaxColumns) - 1;
         _max = new Vector2I(maxDim, maxDim);
-        _center = new Vector2(MaxRows-1, MaxColumns-1) * 0.5f;
-        
+        _center = new Vector2(MaxRows - 1, MaxColumns - 1) * 0.5f;
+
         var span = _max - _min;
         TotalNodeCount = span.X * span.Y;
         ProcessedNodeCount = 0;
@@ -1008,7 +1057,7 @@ public class Legend
         _legendSquareSize = fontSize * BASE_TEXT_HEIGHT_PX;
     }
 
-    public void GenerateSprites(List<MySprite> sprites, IMyTextSurface surf, float scale)
+    public void GenerateSprites(ISpriteSurface surf, float scale)
     {
         Vector2 textVerticalOffset = TEXT_OFFSET_BASE * _legendFontSize * scale;
         Vector2 legendPosition = Vector2.One * (_legendSquareSize * scale * 0.5f + 4f);
@@ -1021,7 +1070,7 @@ public class Legend
                 continue;
 
             // Add colored square
-            sprites.Add(new MySprite(
+            surf.Add(new MySprite(
                 SpriteType.TEXTURE,
                 "SquareSimple",
                 legendPosition,
@@ -1030,7 +1079,7 @@ public class Legend
 
             Vector2 textOffset = legendPosition + Vector2.UnitX * (HORIZONTAL_SPACING * scale + _legendSquareSize * scale * 0.5f) + textVerticalOffset;
 
-            sprites.Add(new MySprite(
+            surf.Add(new MySprite(
                 SpriteType.TEXT,
                 data: item.Name,
                 position: textOffset,
@@ -1102,7 +1151,7 @@ public class BlockStatusSpriteCreator
 {
     readonly Vector2 _fromCenter;
     readonly PlanarMap _planarMapPtr;
-    Vector3I _gridPosition; 
+    Vector3I _gridPosition;
 
     public BlockStatusSpriteCreator(Vector3I gridPosition, Vector3 positionFromCenter, PlanarMap planarMapPtr, NormalAxis normal)
     {
@@ -1127,7 +1176,7 @@ public class BlockStatusSpriteCreator
         _planarMapPtr = planarMapPtr;
     }
 
-    public void CreateSprite(List<MySprite> spriteList, NormalAxis normal, float scale, float rotation, bool invert, ref Vector2 screenCenter, ref Matrix rotationMatrix)
+    public void CreateSprite(ISpriteSurface surf, NormalAxis normal, float scale, float rotation, bool invert, ref Vector2 screenCenter, ref Matrix rotationMatrix)
     {
         Vector2 fromCenterPlanar = _fromCenter;
 
@@ -1140,7 +1189,7 @@ public class BlockStatusSpriteCreator
         Color functionalSpriteColor;
         if (_planarMapPtr.DrawBlockMaskSprite(normal, ref _gridPosition, out functionalSpriteColor) && functionalSpriteColor.A > 0)
         {
-            spriteList.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", screenCenter + rotatedFromCenterPlanar * scale, Vector2.One * scale, functionalSpriteColor, rotation: rotation * sign));
+            surf.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", screenCenter + rotatedFromCenterPlanar * scale, Vector2.One * scale, functionalSpriteColor, rotation: rotation * sign));
         }
     }
 }
@@ -1368,13 +1417,13 @@ public class RuntimeTracker
 {
     public int Capacity { get; set; }
     public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
-    
+    public double MaxRuntime { get; private set; }
+    public double MaxInstructions { get; private set; }
+    public double AverageRuntime { get; private set; }
+    public double AverageInstructions { get; private set; }
+    public double LastRuntime { get; private set; }
+    public double LastInstructions { get; private set; }
+
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
     readonly StringBuilder _sb = new StringBuilder();
@@ -1398,7 +1447,7 @@ public class RuntimeTracker
         int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
         if (roundedTicksSinceLastRuntime == 1)
         {
-            AverageRuntime *= (1 - Sensitivity); 
+            AverageRuntime *= (1 - Sensitivity);
         }
         else if (roundedTicksSinceLastRuntime > 1)
         {
@@ -1410,7 +1459,7 @@ public class RuntimeTracker
         {
             _runtimes.Dequeue();
         }
-        
+
         MaxRuntime = _runtimes.Max();
     }
 
@@ -1419,13 +1468,13 @@ public class RuntimeTracker
         double instructions = _program.Runtime.CurrentInstructionCount;
         LastInstructions = instructions;
         AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-        
+
         _instructions.Enqueue(instructions);
         if (_instructions.Count == Capacity)
         {
             _instructions.Dequeue();
         }
-        
+
         MaxInstructions = _instructions.Max();
     }
 
@@ -1640,6 +1689,205 @@ public static class MyIniHelper
         a = MathHelper.Clamp(a, 0, 255);
 
         return new Color(r, g, b, a);
+    }
+}
+
+public interface ISpriteSurface
+{
+    Vector2 TextureSize { get; }
+    Vector2 SurfaceSize { get; }
+    Color ScriptBackgroundColor { get; set; }
+    int SpriteCount { get; }
+    void Add(MySprite sprite);
+    void Draw();
+}
+
+public class SingleScreenSpriteSurface : ISpriteSurface
+{
+    public bool IsValid
+    {
+        get
+        {
+            return Surface != null;
+        }
+    }
+
+    public Vector2 TextureSize { get { return IsValid ? Surface.TextureSize : Vector2.Zero; } }
+    public Vector2 SurfaceSize { get { return IsValid ? Surface.SurfaceSize : Vector2.Zero; } }
+    public Color ScriptBackgroundColor
+    {
+        get { return Surface.ScriptBackgroundColor; }
+        set { Surface.ScriptBackgroundColor = value; }
+    }
+    public int SpriteCount { get; private set; } = 0;
+
+    public readonly IMyTextSurface Surface;
+    public MySpriteDrawFrame? Frame = null;
+    readonly List<MySprite> _sprites = new List<MySprite>(64);
+
+    public void Add(MySprite sprite)
+    {
+        if (!IsValid)
+        {
+            return;
+        }
+        if (Frame == null)
+        {
+            Frame = Surface.DrawFrame();
+        }
+        Frame.Value.Add(sprite);
+        SpriteCount++;
+    }
+
+    public void Draw()
+    {
+        Draw(Surface.ScriptBackgroundColor);
+        SpriteCount = 0;
+    }
+
+    public void Draw(Color scriptBackgroundColor)
+    {
+        if (!IsValid)
+        {
+            return;
+        }
+        Surface.ContentType = ContentType.SCRIPT;
+        Surface.Script = "";
+        Surface.ScriptBackgroundColor = scriptBackgroundColor;
+        if (Frame == null)
+        {
+            Surface.DrawFrame().Dispose();
+        }
+        else
+        {
+            Frame.Value.Dispose();
+            Frame = null;
+        }
+    }
+
+    public SingleScreenSpriteSurface(IMyTextSurface surf)
+    {
+        Surface = surf;
+    }
+
+    public SingleScreenSpriteSurface(IMyCubeGrid grid, Vector3I position)
+    {
+        var slim = grid.GetCubeBlock(position);
+        if (slim != null && slim.FatBlock != null)
+        {
+            var surf = slim.FatBlock as IMyTextSurface;
+            if (surf != null)
+            {
+                Surface = surf;
+            }
+        }
+    }
+}
+
+// Assumes that all text panels are the same size
+public class MultiScreenSpriteSurface : ISpriteSurface
+{
+    readonly SingleScreenSpriteSurface[,] _surfaces;
+
+    public bool Initialized { get; private set; } = false;
+
+    public Vector2 TextureSize { get; private set; }
+    public Vector2 SurfaceSize
+    {
+        get { return TextureSize; }
+    }
+    public int SpriteCount { get; private set; } = 0;
+    public readonly Vector2 BasePanelSize;
+    public readonly int Rows;
+    public readonly int Cols;
+
+    public Color ScriptBackgroundColor { get; set; } = Color.Black;
+    StringBuilder _stringBuilder = new StringBuilder(128);
+    Program _p;
+    IMyTextPanel _anchor;
+
+    public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
+    {
+        _anchor = anchor;
+        _p = p;
+        _surfaces = new SingleScreenSpriteSurface[rows, cols];
+        BasePanelSize = anchor.TextureSize;
+        TextureSize = anchor.TextureSize * new Vector2(cols, rows);
+        Rows = rows;
+        Cols = cols;
+
+        Vector3I anchorPos = anchor.Position;
+        Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
+        Vector3I anchorDown = -Base6Directions.GetIntVector(anchor.Orientation.Up);
+        Vector3I anchorBlockSize = anchor.Max - anchor.Min + Vector3I.One;
+        Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
+        Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
+        IMyCubeGrid grid = anchor.CubeGrid;
+        for (int r = 0; r < Rows; ++r)
+        {
+            for (int c = 0; c < Cols; ++c)
+            {
+                Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
+                _surfaces[r, c] = new SingleScreenSpriteSurface(grid, blockPosition);
+                //_p.Echo($"({r},{c}): Pos {blockPosition} | Valid: {_surfaces[r, c].IsValid}");
+            }
+        }
+    }
+
+    public void Add(MySprite sprite)
+    {
+        //_p.Echo("---\nSprite");
+        Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
+        Vector2 spriteSize;
+        if (sprite.Size != null)
+        {
+            spriteSize = sprite.Size.Value;
+        }
+        else if (sprite.Type == SpriteType.TEXT)
+        {
+            _stringBuilder.Clear();
+            _stringBuilder.Append(sprite.Data);
+            spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            //_p.Echo($"Text size:{spriteSize}\nScale:{sprite.RotationOrScale}\nFont:{sprite.FontId}\nData:{sprite.Data}");
+        }
+        else
+        {
+            spriteSize = TextureSize;
+        }
+        float rad = spriteSize.Length();
+
+        var lowerCoords = Vector2I.Floor((pos - rad) / BasePanelSize);
+        var upperCoords = Vector2I.Floor((pos + rad) / BasePanelSize);
+
+        int lowerCol = Math.Max(0, lowerCoords.X);
+        int upperCol = Math.Min(Cols - 1, upperCoords.X);
+
+        int lowerRow = Math.Max(0, lowerCoords.Y);
+        int upperRow = Math.Min(Rows - 1, upperCoords.Y);
+
+        for (int r = lowerRow; r <= upperRow; ++r)
+        {
+            for (int c = lowerCol; c <= upperCol; ++c)
+            {
+                Vector2 adjustedPos = pos - BasePanelSize * new Vector2(c, r);
+                //_p.Echo($"({r},{c}) {adjustedPos}");
+                sprite.Position = adjustedPos;
+                _surfaces[r, c].Add(sprite);
+                SpriteCount++;
+            }
+        }
+    }
+
+    public void Draw()
+    {
+        for (int r = 0; r < Rows; ++r)
+        {
+            for (int c = 0; c < Cols; ++c)
+            {
+                _surfaces[r, c].Draw(ScriptBackgroundColor);
+            }
+        }
+        SpriteCount = 0;
     }
 }
 #endregion
