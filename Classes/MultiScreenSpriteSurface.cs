@@ -142,6 +142,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     Program _p;
     IMyTextPanel _anchor;
 
+    // Note: "anchor" must be the top left block in the LCD wall 
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
