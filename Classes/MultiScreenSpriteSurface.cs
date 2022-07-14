@@ -1,3 +1,13 @@
+/*
+/ //// / 
+DEMO INSTRUCTIONS
+    1. Add a 3x3 array of screens to your grid
+    2. Name the top left screen "Anchor"
+    3. Recompile this script
+/ //// /
+*/
+
+
 MultiScreenSpriteSurface _multiScreen;
 IMyTextPanel _anchor;
 
