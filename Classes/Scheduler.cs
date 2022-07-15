@@ -173,7 +173,7 @@ public class ScheduledAction
                 return;
 
             _runIntervalTicks = value < 0 ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : 1.0 / _runIntervalTicks;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
         }
     }
 
