@@ -1,11 +1,11 @@
-/*
-/ //// / 
-DEMO INSTRUCTIONS
-    1. Add a 3x3 array of screens to your grid
-    2. Name the top left screen "Anchor"
-    3. Recompile this script
-/ //// /
-*/
+/*	
+/ //// / 	
+DEMO INSTRUCTIONS	
+    1. Add a 3x3 array of screens to your grid	
+    2. Name the top left screen "Anchor"	
+    3. Recompile this script	
+/ //// /	
+*/	
 
 
 MultiScreenSpriteSurface _multiScreen;
@@ -16,21 +16,21 @@ Program()
     _anchor = GridTerminalSystem.GetBlockWithName("Anchor") as IMyTextPanel;
     _multiScreen = new MultiScreenSpriteSurface(_anchor, 3, 3, this);
 
-    DrawSprites(_multiScreen, _multiScreen.TextureSize * 0.5f, 3);
+    DrawSprites(_multiScreen, _multiScreen.TextureSize * 0.5f, 5);
 
     _multiScreen.Draw();
 }
 
 public void DrawSprites(ISpriteSurface frame, Vector2 centerPos, float scale = 1f)
 {
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(450f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 7
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(300f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 6
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(150f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 5
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 4
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-150f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 3
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-450f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 2
-    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-300f, 0f) * scale + centerPos, new Vector2(50f, 1000f) * scale, new Color(150, 150, 0, 255), null, TextAlignment.CENTER, 0.7854f)); // stripe 1
-    frame.Add(new MySprite(SpriteType.TEXT, "CAUTION", new Vector2(-100f, -35f) * scale + centerPos, null, new Color(255, 255, 255, 255), "Debug", TextAlignment.LEFT, 2f * scale)); // text
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f,-80f)*scale+centerPos, new Vector2(100f,100f)*scale, new Color(128,0,0,255), null, TextAlignment.CENTER, 0f)); // head
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f,-30f)*scale+centerPos, new Vector2(100f,100f)*scale, new Color(128,0,0,255), null, TextAlignment.CENTER, 0f)); // body
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(30f,40f)*scale+centerPos, new Vector2(40f,70f)*scale, new Color(128,0,0,255), null, TextAlignment.CENTER, 0f)); // leg r
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-30f,40f)*scale+centerPos, new Vector2(40f,70f)*scale, new Color(128,0,0,255), null, TextAlignment.CENTER, 0f)); // leg l
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-70f,-41f)*scale+centerPos, new Vector2(40f,80f)*scale, new Color(128,0,0,255), null, TextAlignment.CENTER, 0f)); // backpack
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(50f,-65f)*scale+centerPos, new Vector2(40f,40f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, 0f)); // visor right
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(10f,-65f)*scale+centerPos, new Vector2(40f,40f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, 0f)); // visor left
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(30f,-65f)*scale+centerPos, new Vector2(40f,40f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, 0f)); // visor center
 }
 
 void Main()
@@ -38,6 +38,7 @@ void Main()
     
 }
 
+#region Multi-screen Sprite Surface
 public interface ISpriteSurface
 {
     Vector2 TextureSize { get; }
@@ -46,6 +47,7 @@ public interface ISpriteSurface
     int SpriteCount { get; }
     void Add(MySprite sprite);
     void Draw();
+    Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale);
 }
 
 public class SingleScreenSpriteSurface : ISpriteSurface
@@ -62,10 +64,14 @@ public class SingleScreenSpriteSurface : ISpriteSurface
     public Vector2 SurfaceSize { get { return IsValid ? Surface.SurfaceSize : Vector2.Zero; } }
     public Color ScriptBackgroundColor
     {
-        get { return Surface.ScriptBackgroundColor; }
-        set { Surface.ScriptBackgroundColor = value; }
+        get { return IsValid ? Surface.ScriptBackgroundColor : Color.Black; }
+        set { if (IsValid) { Surface.ScriptBackgroundColor = value; } }
     }
     public int SpriteCount { get; private set; } = 0;
+    public Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale)
+    {
+        return IsValid ? Surface.MeasureStringInPixels(text, font, scale) : Vector2.Zero;
+    }
 
     public readonly IMyTextSurface Surface;
     public MySpriteDrawFrame? Frame = null;
@@ -143,6 +149,10 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         get { return TextureSize; }
     }
     public int SpriteCount { get; private set; } = 0;
+    public Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale)
+    {
+        return _anchor.MeasureStringInPixels(text, font, scale);
+    }
     public readonly Vector2 BasePanelSize;
     public readonly int Rows;
     public readonly int Cols;
@@ -152,7 +162,6 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     Program _p;
     IMyTextPanel _anchor;
 
-    // Note: "anchor" must be the top left block in the LCD wall 
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
@@ -176,14 +185,12 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             {
                 Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
                 _surfaces[r, c] = new SingleScreenSpriteSurface(grid, blockPosition);
-                //_p.Echo($"({r},{c}): Pos {blockPosition} | Valid: {_surfaces[r, c].IsValid}");
             }
         }
     }
 
     public void Add(MySprite sprite)
     {
-        //_p.Echo("---\nSprite");
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
         Vector2 spriteSize;
         if (sprite.Size != null)
@@ -195,7 +202,6 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             _stringBuilder.Clear();
             _stringBuilder.Append(sprite.Data);
             spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
-            //_p.Echo($"Text size:{spriteSize}\nScale:{sprite.RotationOrScale}\nFont:{sprite.FontId}\nData:{sprite.Data}");
         }
         else
         {
@@ -217,7 +223,6 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             for (int c = lowerCol; c <= upperCol; ++c)
             {
                 Vector2 adjustedPos = pos - BasePanelSize * new Vector2(c, r);
-                //_p.Echo($"({r},{c}) {adjustedPos}");
                 sprite.Position = adjustedPos;
                 _surfaces[r, c].Add(sprite);
                 SpriteCount++;
@@ -237,3 +242,4 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         SpriteCount = 0;
     }
 }  
+#endregion
