@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "34.1.2";
-const string DATE = "2022/06/10";
+const string VERSION = "34.2.1";
+const string DATE = "2022/07/14";
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
 
@@ -85,6 +85,10 @@ const string INI_FRIENDLY_ELEVATION = "Friendly elevation";
 
 const string INI_SECTION_TEXT_SURF_PROVIDER = "Radar - Text Surface Config";
 const string INI_TEXT_SURFACE_TEMPLATE = "Show on screen {0}";
+
+const string INI_SECTION_MULTISCREEN = "Radar - Multiscreen Config";
+const string INI_KEY_MULTISCREEN_ROWS = "Screen rows";
+const string INI_KEY_MULTISCREEN_COLS = "Screen cols";
 
 IMyBroadcastListener broadcastListener;
 
@@ -138,7 +142,7 @@ Dictionary<long, TargetData> targetDataDict = new Dictionary<long, TargetData>()
 Dictionary<long, TargetData> broadcastDict = new Dictionary<long, TargetData>();
 List<TurretInterface> turrets = new List<TurretInterface>();
 List<IMySensorBlock> sensors = new List<IMySensorBlock>();
-List<IMyTextSurface> textSurfaces = new List<IMyTextSurface>();
+List<ISpriteSurface> surfaces = new List<ISpriteSurface>();
 List<IMyShipController> taggedControllers = new List<IMyShipController>();
 List<IMyShipController> allControllers = new List<IMyShipController>();
 HashSet<long> myGridIds = new HashSet<long>();
@@ -276,12 +280,12 @@ void HandleArguments()
 
 void Draw(float startProportion, float endProportion)
 {
-    int start = (int)(startProportion * textSurfaces.Count);
-    int end = (int)(endProportion * textSurfaces.Count);
+    int start = (int)(startProportion * surfaces.Count);
+    int end = (int)(endProportion * surfaces.Count);
 
     for (int i = start; i < end; ++i)
     {
-        var textSurface = textSurfaces[i];
+        var textSurface = surfaces[i];
         radarSurface.DrawRadar(textSurface, _clearSpriteCache);
     }
 }
@@ -293,7 +297,7 @@ void PrintDetailedInfo()
     Echo($"Range: {MaxRange} m");
     Echo($"Turrets: {turrets.Count}");
     Echo($"Sensors: {sensors.Count}");
-    Echo($"Text surfaces: {textSurfaces.Count}");
+    Echo($"Text surfaces: {surfaces.Count}");
     Echo($"Ship radius: {_compositeBoundingSphere.Radius:n1} m");
     Echo($"Reference:\n    \"{(reference?.CustomName)}\"");
     Echo($"{lastSetupResult}");
@@ -685,13 +689,13 @@ class RadarSurface
         _quadrantLineDirection = new Vector2(0.25f * MathHelper.Sqrt2, 0.25f * MathHelper.Sqrt2 * _radarProjectionCos);
     }
 
-    public void DrawRadarLockWarning(MySpriteDrawFrame frame, IMyTextSurface surface, Vector2 screenCenter, Vector2 screenSize, float scale)
+    public void DrawRadarLockWarning(ISpriteSurface surf, Vector2 screenCenter, Vector2 screenSize, float scale)
     {
         if (!RadarLockWarning || !_showRadarWarning)
             return;
 
         float textSize = RADAR_WARNING_TEXT_SIZE * scale;
-        Vector2 textBoxSize = surface.MeasureStringInPixels(_textMeasuringSB, "Debug", textSize);
+        Vector2 textBoxSize = surf.MeasureStringInPixels(_textMeasuringSB, "Debug", textSize);
         Vector2 padding = new Vector2(48f, 24f) * scale;
         Vector2 position = screenCenter + new Vector2(0, screenSize.Y * 0.2f);
         Vector2 textPos = position;
@@ -700,17 +704,17 @@ class RadarSurface
         // Draw text box bg
         MySprite textBoxBg = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _textBoxBackgroundColor, size: textBoxSize + padding);
         textBoxBg.Position = position;
-        frame.Add(textBoxBg);
+        surf.Add(textBoxBg);
 
         // Draw text box
         MySprite textBox = new MySprite(SpriteType.TEXTURE, "AH_TextBox", color: _radarLockWarningColor, size: textBoxSize + padding);
         textBox.Position = position;
-        frame.Add(textBox);
+        surf.Add(textBox);
 
         // Draw text
         MySprite text = MySprite.CreateText(RADAR_WARNING_TEXT, "Debug", _radarLockWarningColor, scale: textSize);
         text.Position = textPos;
-        frame.Add(text);
+        surf.Add(text);
     }
 
     void GetSpriteType(TargetRelation type, out string spriteName, out Vector2 offset, out float scale)
@@ -842,7 +846,7 @@ class RadarSurface
 
     |__    __|
     */
-    static void DrawBoxCorners(MySpriteDrawFrame frame, Vector2 boxSize, Vector2 centerPos, float lineLength, float lineWidth, Color color)
+    static void DrawBoxCorners(ISpriteSurface surf, Vector2 boxSize, Vector2 centerPos, float lineLength, float lineWidth, Color color)
     {
         Vector2 horizontalSize = new Vector2(lineLength, lineWidth);
         Vector2 verticalSize = new Vector2(lineWidth, lineLength);
@@ -860,42 +864,40 @@ class RadarSurface
 
         // Top left
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: horizontalSize, position: boxTopLeft + horizontalOffset, rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: verticalSize, position: boxTopLeft + verticalOffset, rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         // Top right
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: horizontalSize, position: boxTopRight + new Vector2(-horizontalOffset.X, horizontalOffset.Y), rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: verticalSize, position: boxTopRight + new Vector2(-verticalOffset.X, verticalOffset.Y), rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         // Bottom left
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: horizontalSize, position: boxBottomLeft + new Vector2(horizontalOffset.X, -horizontalOffset.Y), rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: verticalSize, position: boxBottomLeft + new Vector2(verticalOffset.X, -verticalOffset.Y), rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         // Bottom right
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: horizontalSize, position: boxBottomRight - horizontalOffset, rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: verticalSize, position: boxBottomRight - verticalOffset, rotation: 0, color: color);
-        frame.Add(sprite);
+        surf.Add(sprite);
     }
 
-    public void DrawRadar(IMyTextSurface surface, bool clearSpriteCache)
+    public void DrawRadar(ISpriteSurface surf, bool clearSpriteCache)
     {
-        surface.ContentType = ContentType.SCRIPT;
-        surface.Script = "";
-        surface.ScriptBackgroundColor = _backColor;
+        surf.ScriptBackgroundColor = _backColor;
 
-        Vector2 surfaceSize = surface.TextureSize;
+        Vector2 surfaceSize = surf.TextureSize;
         Vector2 screenCenter = surfaceSize * 0.5f;
-        Vector2 viewportSize = surface.SurfaceSize;
+        Vector2 viewportSize = surf.SurfaceSize;
         Vector2 scale = viewportSize / 512f;
         float minScale = Math.Min(scale.X, scale.Y);
         Vector2 viewportCropped = viewportSize - (Vector2.UnitY * (TITLE_BAR_HEIGHT + RANGE_TEXT_SIZE * SIZE_TO_PX) + BORDER_PADDING) * minScale;
@@ -913,45 +915,45 @@ class RadarSurface
         Vector2 radarCenterPos = screenCenter + Vector2.UnitY * ((TITLE_BAR_HEIGHT - RANGE_TEXT_SIZE * SIZE_TO_PX) * 0.5f * minScale);
         Vector2 radarPlaneSize = new Vector2(sideLength, sideLength * _radarProjectionCos);
 
-        using (var frame = surface.DrawFrame())
+        if (clearSpriteCache)
         {
-            if (clearSpriteCache)
-            {
-                frame.Add(new MySprite());
-            }
-
-            DrawRadarPlaneBackground(frame, radarCenterPos, radarPlaneSize, minScale);
-
-            // Bottom Icons
-            foreach (var targetInfo in _targetsBelowPlane)
-            {
-                DrawTargetIcon(frame, radarCenterPos, radarPlaneSize, targetInfo, minScale);
-            }
-
-            // Radar plane
-            DrawRadarPlane(frame, viewportSize, screenCenter, radarCenterPos, radarPlaneSize, minScale);
-
-            // Top Icons
-            foreach (var targetInfo in _targetsAbovePlane)
-            {
-                DrawTargetIcon(frame, radarCenterPos, radarPlaneSize, targetInfo, minScale);
-            }
-
-            DrawRadarLockWarning(frame, surface, screenCenter, viewportSize, minScale);
+            surf.Add(new MySprite());
         }
+
+        DrawRadarPlaneBackground(surf, radarCenterPos, radarPlaneSize, minScale);
+
+        // Bottom Icons
+        foreach (var targetInfo in _targetsBelowPlane)
+        {
+            DrawTargetIcon(surf, radarCenterPos, radarPlaneSize, targetInfo, minScale);
+        }
+
+        // Radar plane
+        DrawRadarPlane(surf, viewportSize, screenCenter, radarCenterPos, radarPlaneSize, minScale);
+
+        // Top Icons
+        foreach (var targetInfo in _targetsAbovePlane)
+        {
+            DrawTargetIcon(surf, radarCenterPos, radarPlaneSize, targetInfo, minScale);
+        }
+
+        DrawRadarLockWarning(surf, screenCenter, viewportSize, minScale);
+
+
+        surf.Draw();
     }
 
-    void DrawLineQuadrantSymmetry(MySpriteDrawFrame frame, Vector2 center, Vector2 point1, Vector2 point2, float width, Color color)
+    void DrawLineQuadrantSymmetry(ISpriteSurface surf, Vector2 center, Vector2 point1, Vector2 point2, float width, Color color)
     {
-        DrawLine(frame, center + point1, center + point2, width, color);
-        DrawLine(frame, center - point1, center - point2, width, color);
+        DrawLine(surf, center + point1, center + point2, width, color);
+        DrawLine(surf, center - point1, center - point2, width, color);
         point1.X *= -1;
         point2.X *= -1;
-        DrawLine(frame, center + point1, center + point2, width, color);
-        DrawLine(frame, center - point1, center - point2, width, color);
+        DrawLine(surf, center + point1, center + point2, width, color);
+        DrawLine(surf, center - point1, center - point2, width, color);
     }
 
-    void DrawLine(MySpriteDrawFrame frame, Vector2 point1, Vector2 point2, float width, Color color)
+    void DrawLine(ISpriteSurface surf, Vector2 point1, Vector2 point2, float width, Color color)
     {
         Vector2 position = 0.5f * (point1 + point2);
         Vector2 diff = point1 - point2;
@@ -966,36 +968,36 @@ class RadarSurface
         MySprite sprite = MySprite.CreateSprite("SquareSimple", position, size);
         sprite.RotationOrScale = angle;
         sprite.Color = color;
-        frame.Add(sprite);
+        surf.Add(sprite);
     }
 
-    void DrawRadarPlaneBackground(MySpriteDrawFrame frame, Vector2 screenCenter, Vector2 radarPlaneSize, float scale)
+    void DrawRadarPlaneBackground(ISpriteSurface surf, Vector2 screenCenter, Vector2 radarPlaneSize, float scale)
     {
         float lineWidth = RADAR_RANGE_LINE_WIDTH * scale;
 
         MySprite sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize, color: _lineColor);
         sprite.Position = screenCenter;
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize - lineWidth * Vector2.One, color: _backColor);
         sprite.Position = screenCenter;
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize * 0.5f, color: _lineColor);
         sprite.Position = screenCenter;
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize * 0.5f - lineWidth * Vector2.One, color: _backColor);
         sprite.Position = screenCenter;
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         // Transparent plane circle
         sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize, color: _planeColor);
         sprite.Position = screenCenter;
-        frame.Add(sprite);
+        surf.Add(sprite);
     }
 
-    void DrawRadarPlane(MySpriteDrawFrame frame, Vector2 viewportSize, Vector2 screenCenter, Vector2 radarScreenCenter, Vector2 radarPlaneSize, float scale)
+    void DrawRadarPlane(ISpriteSurface surf, Vector2 viewportSize, Vector2 screenCenter, Vector2 radarScreenCenter, Vector2 radarPlaneSize, float scale)
     {
         MySprite sprite;
         Vector2 halfScreenSize = viewportSize * 0.5f;
@@ -1005,24 +1007,24 @@ class RadarSurface
             screenCenter + new Vector2(0f, -halfScreenSize.Y + titleBarHeight * 0.5f),
             new Vector2(viewportSize.X, titleBarHeight));
         sprite.Color = _titleBarColor;
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         sprite = MySprite.CreateText($"WMI Radar System", FONT, _textColor, scale * TITLE_TEXT_SIZE, TextAlignment.CENTER);
         sprite.Position = screenCenter + new Vector2(0, -halfScreenSize.Y + 4.25f * scale);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         // Ship location
         var iconSize = SHIP_ICON_SIZE * scale;
         sprite = new MySprite(SpriteType.TEXTURE, "Triangle", size: iconSize, color: _lineColor);
         sprite.Position = radarScreenCenter + new Vector2(0f, -0.2f * iconSize.Y);
-        frame.Add(sprite);
+        surf.Add(sprite);
 
         Vector2 quadrantLine = radarPlaneSize.X * _quadrantLineDirection;
         // Quadrant lines
         if (_drawQuadrants)
         {
             float lineWidth = QUADRANT_LINE_WIDTH * scale;
-            DrawLineQuadrantSymmetry(frame, radarScreenCenter, 0.2f * quadrantLine, 1.0f * quadrantLine, lineWidth, _quadrantLineColor);
+            DrawLineQuadrantSymmetry(surf, radarScreenCenter, 0.2f * quadrantLine, 1.0f * quadrantLine, lineWidth, _quadrantLineColor);
         }
 
         // Draw range text
@@ -1031,7 +1033,7 @@ class RadarSurface
 
         sprite = MySprite.CreateText($"Range: {_outerRange}", "Debug", rangeColors, textSize, TextAlignment.CENTER);
         sprite.Position = radarScreenCenter + new Vector2(0, radarPlaneSize.Y * 0.5f + scale * 4f /*+ textSize * 37f*/ );
-        frame.Add(sprite);
+        surf.Add(sprite);
     }
 
     Color ScaleColorAlpha(Color color, float scale)
@@ -1045,7 +1047,7 @@ class RadarSurface
         return color;
     }
 
-    void DrawTargetIcon(MySpriteDrawFrame frame, Vector2 screenCenter, Vector2 radarPlaneSize, TargetInfo targetInfo, float scale)
+    void DrawTargetIcon(ISpriteSurface surf, Vector2 screenCenter, Vector2 radarPlaneSize, TargetInfo targetInfo, float scale)
     {
         float alphaScale = _immediateFadeOut ? 1f : Math.Max(0f, 1f - (targetInfo.Age / FadeOutInterval));
 
@@ -1091,11 +1093,11 @@ class RadarSurface
 
             if (showProjectedElevation)
             {
-                frame.Add(projectedIconSprite);
-                frame.Add(elevationSprite);
+                surf.Add(projectedIconSprite);
+                surf.Add(elevationSprite);
             }
-            frame.Add(iconShadow);
-            frame.Add(iconSprite);
+            surf.Add(iconShadow);
+            surf.Add(iconSprite);
         }
         else
         {
@@ -1106,17 +1108,17 @@ class RadarSurface
             iconShadow.Position += iconSpriteOffset * iconShadow.Size.Value.X;
 
             if (showProjectedElevation)
-                frame.Add(elevationSprite);
-            frame.Add(iconShadow);
-            frame.Add(iconSprite);
+                surf.Add(elevationSprite);
+            surf.Add(iconShadow);
+            surf.Add(iconSprite);
             if (showProjectedElevation)
-                frame.Add(projectedIconSprite);
+                surf.Add(projectedIconSprite);
         }
 
         if (targetInfo.TargetLock && alphaScale > 0.999f)
         {
             Vector2 targetBoxSize = (TGT_ICON_SIZE + 20) * scale;
-            DrawBoxCorners(frame, targetBoxSize, screenCenter + iconPos, 12 * scale, 4 * scale, targetInfo.IconColor);
+            DrawBoxCorners(surf, targetBoxSize, screenCenter + iconPos, 12 * scale, 4 * scale, targetInfo.IconColor);
 
             if (targetInfo.MyTargetLock)
             {
@@ -1137,8 +1139,8 @@ class RadarSurface
                 lockTextShadow.Color = _backColor;
                 lockTextShadow.Position += DROP_SHADOW_OFFSET;
 
-                frame.Add(lockTextShadow);
-                frame.Add(lockText);
+                surf.Add(lockTextShadow);
+                surf.Add(lockText);
             }
         }
     }
@@ -1195,18 +1197,54 @@ class RadarSurface
             }
         }
 
-       return (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
+        return (prefix == "" ? num.ToString("n0") : num.ToString($"n{digits}")) + $" {prefix}{unit}";
     }
 }
 #endregion
 
 #region Ini stuff
-void AddTextSurfaces(IMyTerminalBlock block, List<IMyTextSurface> textSurfaces)
+void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
 {
-    var textSurface = block as IMyTextSurface;
+    bool parsed;
+    string output;
+    var textSurface = block as IMyTextPanel;
     if (textSurface != null)
     {
-        textSurfaces.Add(textSurface);
+        bool multiscreen = false;
+        int rows = 1;
+        int cols = 1;
+        textSurfaceIni.Clear();
+        parsed = textSurfaceIni.TryParse(block.CustomData);
+
+        if (parsed && textSurfaceIni.ContainsSection(INI_SECTION_MULTISCREEN))
+        {
+            Echo($"{parsed}");
+            multiscreen = true;
+            rows = textSurfaceIni.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS).ToInt32(rows);
+            cols = textSurfaceIni.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS).ToInt32(cols);
+            rows = Math.Max(rows, 1);
+            cols = Math.Max(cols, 1);
+            textSurfaceIni.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS, rows);
+            textSurfaceIni.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS, cols);
+        }
+
+        if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
+        {
+            textSurfaceIni.EndContent = block.CustomData;
+        }
+
+        output = textSurfaceIni.ToString();
+        if (!string.Equals(output, block.CustomData))
+            block.CustomData = output;
+
+        if (multiscreen)
+        {
+            surfaces.Add(new MultiScreenSpriteSurface(textSurface, rows, cols, this));
+        }
+        else
+        {
+            surfaces.Add(new SingleScreenSpriteSurface(textSurface));
+        }
         return;
     }
 
@@ -1215,7 +1253,7 @@ void AddTextSurfaces(IMyTerminalBlock block, List<IMyTextSurface> textSurfaces)
         return;
 
     textSurfaceIni.Clear();
-    bool parsed = textSurfaceIni.TryParse(block.CustomData);
+    parsed = textSurfaceIni.TryParse(block.CustomData);
 
     if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
     {
@@ -1229,13 +1267,13 @@ void AddTextSurfaces(IMyTerminalBlock block, List<IMyTextSurface> textSurfaces)
         bool display = textSurfaceIni.Get(INI_SECTION_TEXT_SURF_PROVIDER, iniKey).ToBoolean(i == 0 && !(block is IMyProgrammableBlock));
         if (display)
         {
-            textSurfaces.Add(surfaceProvider.GetSurface(i));
+            surfaces.Add(new SingleScreenSpriteSurface(surfaceProvider.GetSurface(i)));
         }
 
         textSurfaceIni.Set(INI_SECTION_TEXT_SURF_PROVIDER, iniKey, display);
     }
 
-    string output = textSurfaceIni.ToString();
+    output = textSurfaceIni.ToString();
     if (!string.Equals(output, block.CustomData))
         block.CustomData = output;
 }
@@ -1431,7 +1469,7 @@ bool PopulateLists(IMyTerminalBlock block)
 
     if (StringContains(block.CustomName, textPanelName))
     {
-        AddTextSurfaces(block, textSurfaces);
+        AddTextSurfaces(block, surfaces);
     }
 
     var turret = block as IMyLargeTurretBase;
@@ -1477,7 +1515,7 @@ void GrabBlocks()
     turrets.Clear();
     allControllers.Clear();
     taggedControllers.Clear();
-    textSurfaces.Clear();
+    surfaces.Clear();
 
     _compositeBoundingSphere.FetchCubeGrids();
     GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, PopulateLists);
@@ -1488,7 +1526,7 @@ void GrabBlocks()
     if (turrets.Count == 0)
         Log.Warning($"No turrets found. You will only be able to see targets that are broadcast by allies.");
 
-    if (textSurfaces.Count == 0)
+    if (surfaces.Count == 0)
         Log.Error($"No text panels or text surface providers with name tag '{textPanelName}' were found.");
 
     if (allControllers.Count == 0)
@@ -1503,7 +1541,7 @@ void GrabBlocks()
 
     lastSetupResult = Log.Write();
 
-    if (textSurfaces.Count == 0)
+    if (surfaces.Count == 0)
         isSetup = false;
     else
     {
@@ -2218,5 +2256,211 @@ public class TurretInterface
         }
     }
 }
+
+#region Multi-screen Sprite Surface
+public interface ISpriteSurface
+{
+    Vector2 TextureSize { get; }
+    Vector2 SurfaceSize { get; }
+    Color ScriptBackgroundColor { get; set; }
+    int SpriteCount { get; }
+    void Add(MySprite sprite);
+    void Draw();
+    Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale);
+}
+
+public class SingleScreenSpriteSurface : ISpriteSurface
+{
+    public bool IsValid
+    {
+        get
+        {
+            return Surface != null;
+        }
+    }
+
+    public Vector2 TextureSize { get { return IsValid ? Surface.TextureSize : Vector2.Zero; } }
+    public Vector2 SurfaceSize { get { return IsValid ? Surface.SurfaceSize : Vector2.Zero; } }
+    public Color ScriptBackgroundColor
+    {
+        get { return IsValid ? Surface.ScriptBackgroundColor : Color.Black; }
+        set { if (IsValid) { Surface.ScriptBackgroundColor = value; } }
+    }
+    public int SpriteCount { get; private set; } = 0;
+    public Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale)
+    {
+        return IsValid ? Surface.MeasureStringInPixels(text, font, scale) : Vector2.Zero;
+    }
+
+    public readonly IMyTextSurface Surface;
+    public MySpriteDrawFrame? Frame = null;
+    readonly List<MySprite> _sprites = new List<MySprite>(64);
+
+    public void Add(MySprite sprite)
+    {
+        if (!IsValid)
+        {
+            return;
+        }
+        if (Frame == null)
+        {
+            Frame = Surface.DrawFrame();
+        }
+        Frame.Value.Add(sprite);
+        SpriteCount++;
+    }
+
+    public void Draw()
+    {
+        Draw(Surface.ScriptBackgroundColor);
+        SpriteCount = 0;
+    }
+
+    public void Draw(Color scriptBackgroundColor)
+    {
+        if (!IsValid)
+        {
+            return;
+        }
+        Surface.ContentType = ContentType.SCRIPT;
+        Surface.Script = "";
+        Surface.ScriptBackgroundColor = scriptBackgroundColor;
+        if (Frame == null)
+        {
+            Surface.DrawFrame().Dispose();
+        }
+        else
+        {
+            Frame.Value.Dispose();
+            Frame = null;
+        }
+    }
+
+    public SingleScreenSpriteSurface(IMyTextSurface surf)
+    {
+        Surface = surf;
+    }
+
+    public SingleScreenSpriteSurface(IMyCubeGrid grid, Vector3I position)
+    {
+        var slim = grid.GetCubeBlock(position);
+        if (slim != null && slim.FatBlock != null)
+        {
+            var surf = slim.FatBlock as IMyTextSurface;
+            if (surf != null)
+            {
+                Surface = surf;
+            }
+        }
+    }
+}
+
+// Assumes that all text panels are the same size
+public class MultiScreenSpriteSurface : ISpriteSurface
+{
+    readonly SingleScreenSpriteSurface[,] _surfaces;
+
+    public bool Initialized { get; private set; } = false;
+
+    public Vector2 TextureSize { get; private set; }
+    public Vector2 SurfaceSize
+    {
+        get { return TextureSize; }
+    }
+    public int SpriteCount { get; private set; } = 0;
+    public Vector2 MeasureStringInPixels(StringBuilder text, string font, float scale)
+    {
+        return _anchor.MeasureStringInPixels(text, font, scale);
+    }
+    public readonly Vector2 BasePanelSize;
+    public readonly int Rows;
+    public readonly int Cols;
+
+    public Color ScriptBackgroundColor { get; set; } = Color.Black;
+    StringBuilder _stringBuilder = new StringBuilder(128);
+    Program _p;
+    IMyTextPanel _anchor;
+
+    public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
+    {
+        _anchor = anchor;
+        _p = p;
+        _surfaces = new SingleScreenSpriteSurface[rows, cols];
+        BasePanelSize = anchor.TextureSize;
+        TextureSize = anchor.TextureSize * new Vector2(cols, rows);
+        Rows = rows;
+        Cols = cols;
+
+        Vector3I anchorPos = anchor.Position;
+        Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
+        Vector3I anchorDown = -Base6Directions.GetIntVector(anchor.Orientation.Up);
+        Vector3I anchorBlockSize = anchor.Max - anchor.Min + Vector3I.One;
+        Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
+        Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
+        IMyCubeGrid grid = anchor.CubeGrid;
+        for (int r = 0; r < Rows; ++r)
+        {
+            for (int c = 0; c < Cols; ++c)
+            {
+                Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
+                _surfaces[r, c] = new SingleScreenSpriteSurface(grid, blockPosition);
+            }
+        }
+    }
+
+    public void Add(MySprite sprite)
+    {
+        Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
+        Vector2 spriteSize;
+        if (sprite.Size != null)
+        {
+            spriteSize = sprite.Size.Value;
+        }
+        else if (sprite.Type == SpriteType.TEXT)
+        {
+            _stringBuilder.Clear();
+            _stringBuilder.Append(sprite.Data);
+            spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+        }
+        else
+        {
+            spriteSize = TextureSize;
+        }
+        float rad = spriteSize.Length();
+
+        var lowerCoords = Vector2I.Floor((pos - rad) / BasePanelSize);
+        var upperCoords = Vector2I.Floor((pos + rad) / BasePanelSize);
+
+        int lowerCol = Math.Max(0, lowerCoords.X);
+        int upperCol = Math.Min(Cols - 1, upperCoords.X);
+
+        int lowerRow = Math.Max(0, lowerCoords.Y);
+        int upperRow = Math.Min(Rows - 1, upperCoords.Y);
+
+        for (int r = lowerRow; r <= upperRow; ++r)
+        {
+            for (int c = lowerCol; c <= upperCol; ++c)
+            {
+                Vector2 adjustedPos = pos - BasePanelSize * new Vector2(c, r);
+                sprite.Position = adjustedPos;
+                _surfaces[r, c].Add(sprite);
+                SpriteCount++;
+            }
+        }
+    }
+
+    public void Draw()
+    {
+        for (int r = 0; r < Rows; ++r)
+        {
+            for (int c = 0; c < Cols; ++c)
+            {
+                _surfaces[r, c].Draw(ScriptBackgroundColor);
+            }
+        }
+        SpriteCount = 0;
+    }
+}
+#endregion
 
 #endregion
