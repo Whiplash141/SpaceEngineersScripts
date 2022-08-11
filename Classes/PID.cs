@@ -3,7 +3,7 @@
 
 /// <summary>
 /// Discrete time PID controller class.
-/// (Whiplash141 - 11/22/2018)
+/// Last edited: 2022/08/11 - Whiplash141
 /// </summary>
 public class PID
 {
@@ -64,7 +64,7 @@ public class PID
         return Control(error);
     }
 
-    public void Reset()
+    public virtual void Reset()
     {
         _errorSum = 0;
         _lastError = 0;
@@ -74,53 +74,59 @@ public class PID
 
 public class DecayingIntegralPID : PID
 {
-    readonly double _decayRatio;
+    public double IntegralDecayRatio { get; set; }
 
     public DecayingIntegralPID(double kp, double ki, double kd, double timeStep, double decayRatio) : base(kp, ki, kd, timeStep)
     {
-        _decayRatio = decayRatio;
+        IntegralDecayRatio = decayRatio;
     }
 
     protected override double GetIntegral(double currentError, double errorSum, double timeStep)
     {
-        return errorSum * (1.0 - _decayRatio) + currentError * timeStep;
+        return errorSum * (1.0 - IntegralDecayRatio) + currentError * timeStep;
     }
 }
 
 public class ClampedIntegralPID : PID
 {
-    readonly double _upperBound;
-    readonly double _lowerBound;
+    public double IntegralUpperBound { get; set; }
+    public double IntegralLowerBound { get; set; }
 
     public ClampedIntegralPID(double kp, double ki, double kd, double timeStep, double lowerBound, double upperBound) : base(kp, ki, kd, timeStep)
     {
-        _upperBound = upperBound;
-        _lowerBound = lowerBound;
+        IntegralUpperBound = upperBound;
+        IntegralLowerBound = lowerBound;
     }
 
     protected override double GetIntegral(double currentError, double errorSum, double timeStep)
     {
         errorSum = errorSum + currentError * timeStep;
-        return Math.Min(_upperBound, Math.Max(errorSum, _lowerBound));
+        return Math.Min(IntegralUpperBound, Math.Max(errorSum, IntegralLowerBound));
     }
 }
 
 public class BufferedIntegralPID : PID
 {
     readonly Queue<double> _integralBuffer = new Queue<double>();
-    readonly int _bufferSize = 0;
+    public int IntegralBufferSize { get; set; } = 0;
 
     public BufferedIntegralPID(double kp, double ki, double kd, double timeStep, int bufferSize) : base(kp, ki, kd, timeStep)
     {
-        _bufferSize = bufferSize;
+        IntegralBufferSize = bufferSize;
     }
 
     protected override double GetIntegral(double currentError, double errorSum, double timeStep)
     {
-        if (_integralBuffer.Count == _bufferSize)
+        if (_integralBuffer.Count == IntegralBufferSize)
             _integralBuffer.Dequeue();
         _integralBuffer.Enqueue(currentError * timeStep);
         return _integralBuffer.Sum();
+    }
+
+    public override void Reset()
+    {
+        base.Reset();
+        _integralBuffer.Clear();
     }
 }
 
