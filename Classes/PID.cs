@@ -1,3 +1,4 @@
+
 #region PID Class
 
 /// <summary>
@@ -6,9 +7,10 @@
 /// </summary>
 public class PID
 {
-    readonly double _kP = 0;
-    readonly double _kI = 0;
-    readonly double _kD = 0;
+    public double Kp { get; set; } = 0;
+    public double Ki { get; set; } = 0;
+    public double Kd { get; set; } = 0;
+    public double Value { get; private set; }
 
     double _timeStep = 0;
     double _inverseTimeStep = 0;
@@ -16,13 +18,11 @@ public class PID
     double _lastError = 0;
     bool _firstRun = true;
 
-    public double Value { get; private set; }
-
-    public PID(double kP, double kI, double kD, double timeStep)
+    public PID(double kp, double ki, double kd, double timeStep)
     {
-        _kP = kP;
-        _kI = kI;
-        _kD = kD;
+        Kp = kp;
+        Ki = ki;
+        Kd = kd;
         _timeStep = timeStep;
         _inverseTimeStep = 1 / _timeStep;
     }
@@ -35,7 +35,7 @@ public class PID
     public double Control(double error)
     {
         //Compute derivative term
-        var errorDerivative = (error - _lastError) * _inverseTimeStep;
+        double errorDerivative = (error - _lastError) * _inverseTimeStep;
 
         if (_firstRun)
         {
@@ -50,8 +50,8 @@ public class PID
         _lastError = error;
 
         //Construct output
-        this.Value = _kP * error + _kI * _errorSum + _kD * errorDerivative;
-        return this.Value;
+        Value = Kp * error + Ki * _errorSum + Kd * errorDerivative;
+        return Value;
     }
 
     public double Control(double error, double timeStep)
@@ -76,7 +76,7 @@ public class DecayingIntegralPID : PID
 {
     readonly double _decayRatio;
 
-    public DecayingIntegralPID(double kP, double kI, double kD, double timeStep, double decayRatio) : base(kP, kI, kD, timeStep)
+    public DecayingIntegralPID(double kp, double ki, double kd, double timeStep, double decayRatio) : base(kp, ki, kd, timeStep)
     {
         _decayRatio = decayRatio;
     }
@@ -92,7 +92,7 @@ public class ClampedIntegralPID : PID
     readonly double _upperBound;
     readonly double _lowerBound;
 
-    public ClampedIntegralPID(double kP, double kI, double kD, double timeStep, double lowerBound, double upperBound) : base (kP, kI, kD, timeStep)
+    public ClampedIntegralPID(double kp, double ki, double kd, double timeStep, double lowerBound, double upperBound) : base(kp, ki, kd, timeStep)
     {
         _upperBound = upperBound;
         _lowerBound = lowerBound;
@@ -110,7 +110,7 @@ public class BufferedIntegralPID : PID
     readonly Queue<double> _integralBuffer = new Queue<double>();
     readonly int _bufferSize = 0;
 
-    public BufferedIntegralPID(double kP, double kI, double kD, double timeStep, int bufferSize) : base(kP, kI, kD, timeStep)
+    public BufferedIntegralPID(double kp, double ki, double kd, double timeStep, int bufferSize) : base(kp, ki, kd, timeStep)
     {
         _bufferSize = bufferSize;
     }
