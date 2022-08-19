@@ -23,13 +23,12 @@ ______________________________________________________________
 COMMANDS:
 
 set
-    Sets the rotor <angle> to the specified angle.
+    Sets the rotor angle to the specified <angle>.
 
 increment
     increments current rotor angle by the specified <angle>.
 
 ______________________________________________________________
-Examples:
 
 "Rotor 1" set 45
     Sets EVERY rotor with name "Rotor 1" to 45°.
@@ -39,9 +38,11 @@ Examples:
    
 */
 
-const string VERSION = "2.0.0";
-const string DATE = "2021/10/06";
-const float ROTATION_SPEED_GAIN = 15;
+const string Version = "2.1.0";
+const string Date = "2022/08/19";
+const float RotationSpeedGain = 15;
+bool _lockRotorAtDestination = true;
+bool _setRotorLimitsAtDestination = true;
 
 List<RotorController> activeRotorList = new List<RotorController>();
 List<IMyMotorStator> rotors = new List<IMyMotorStator>();
@@ -62,7 +63,7 @@ void Main(string arg, UpdateType updateType)
         ParseArguments(arg);
     }
     
-    Echo($"Whip's Rotor Controller\n(Version {VERSION} - {DATE})");
+    Echo($"Whip's Rotor Controller\n(Version {Version} - {Date})");
     if (activeRotorList.Count > 0)
     {
         Echo(">>Active<<");
@@ -152,7 +153,7 @@ void ParseArguments(string argument)
             }
             else
             {
-                var activeRotor = new RotorController(block, angle, false, ROTATION_SPEED_GAIN);
+                var activeRotor = new RotorController(block, angle, _lockRotorAtDestination, _setRotorLimitsAtDestination, false, RotationSpeedGain);
                 activeRotorList.Add(activeRotor);
             }
 
@@ -171,7 +172,7 @@ void ParseArguments(string argument)
             }
             else
             {
-                var activeRotor = new RotorController(block, angle, true);
+                var activeRotor = new RotorController(block, angle, _lockRotorAtDestination, _setRotorLimitsAtDestination, true);
                 activeRotorList.Add(activeRotor);
             }
         }
@@ -186,9 +187,11 @@ class RotorController
     float _targetAngle;
     float _epsilon;
     float _rotationSpeedGain;
+    bool _shouldLock;
+    bool _shouldLimit;
     public bool DoneMoving { get; private set; } = false;
 
-    public RotorController(IMyMotorStator rotor, float angle, bool increment = false, float rotationSpeedGain = 30f, float epsilonDeg = 0.1f)
+    public RotorController(IMyMotorStator rotor, float angle, bool shouldLock, bool shouldLimit, bool increment, float rotationSpeedGain = 30f, float epsilonDeg = 0.1f)
     {
         Rotor = rotor;
         _initialAngle = Rotor.Angle;
@@ -199,6 +202,8 @@ class RotorController
 
         _epsilon = MathHelper.ToRadians(epsilonDeg);
         _rotationSpeedGain = rotationSpeedGain;
+        _shouldLock = shouldLock;
+        _shouldLimit = shouldLimit;
     }
 
     public void IncrementAngle(float angle)
@@ -230,9 +235,15 @@ class RotorController
         if (Math.Abs(err) < _epsilon)
         {
             Rotor.TargetVelocityRPM = 0;
-            Rotor.LowerLimitRad = _targetAngle;
-            Rotor.UpperLimitRad = _targetAngle;
-            Rotor.RotorLock = true;
+            if (_shouldLimit)
+            {
+                Rotor.LowerLimitRad = _targetAngle;
+                Rotor.UpperLimitRad = _targetAngle;
+            }
+            if (_shouldLock)
+            {
+                Rotor.RotorLock = true;                
+            }
             this.DoneMoving = true;
         }
     }
@@ -256,6 +267,8 @@ class RotorController
     }
 }
 
+
+#region Argument Parser
 class ArgumentParser
 {
     public int ArgumentCount {
@@ -373,7 +386,7 @@ class ArgumentParser
 
                 if (isSwitch)
                 {
-                    if (!char.IsLetter(c))
+                    if (!char.IsLetter(c) && c != '_')
                     {
                         return ReturnCode.NonAlphaSwitch;
                     }
@@ -484,3 +497,4 @@ class ArgumentParser
         return true;
     }
 }
+#endregion
