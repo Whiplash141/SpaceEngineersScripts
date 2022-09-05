@@ -1,4 +1,5 @@
 
+#region Missile Status Screens
 /*
 / //// / Whip's Missile Status Screens / //// /
 
@@ -39,13 +40,10 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 =================================================
 */
 
-const string VERSION = "1.5.7";
-const string DATE = "2021/08/14";
+const string VERSION = "1.6.3";
+const string DATE = "2022/09/05";
 
 List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
-List<MySpriteContainer> _missileSprites = new List<MySpriteContainer>();
-List<MySpriteContainer> _missileShadowSprites = new List<MySpriteContainer>();
-List<MySpriteContainer> _titleSprites = new List<MySpriteContainer>();
 Dictionary<IMyTextSurface, StatusScreen> _statusScreens = new Dictionary<IMyTextSurface, StatusScreen>();
 List<string> _missileNames = new List<string>();
 List<IMyProgrammableBlock> _missilePrograms = new List<IMyProgrammableBlock>();
@@ -68,6 +66,7 @@ const string IniTitleScale = "Title scale";
 // Missile sprite config
 const string IniSpriteScale = "Sprite scale";
 const string IniSpriteLocation = "Sprite location";
+const string IniSpriteRotation = "Sprite rotation (deg)";
 const string IniSpriteScreen = "Screen index to display on";
 
 MyIni _ini = new MyIni();
@@ -78,10 +77,9 @@ Color _backgroundColor = new Color(0, 0, 0);
 Color _titleTextColor = new Color(150, 150, 150);
 Color _titleBarColor = new Color(25, 25, 25);
 Color _missileReadyColor = new Color(0, 75, 0);
-Color _missileFiredColor = new Color(75, 0, 0);
+Color _missileFiredColor = new Color(25, 25, 25);
 
 Scheduler _scheduler;
-CircularBuffer<Action> _actionBuffer;
 bool _showTitleBar = false;
 bool _clearSpriteCache = false;
 float _titleScale = 1f;
@@ -92,57 +90,24 @@ RuntimeTracker _runtimeTracker;
 
 Program()
 {
-    Runtime.UpdateFrequency = UpdateFrequency.Update1;
-
-    float step = 1f / 10f;
-    _actionBuffer = new CircularBuffer<Action>(10);
-    _actionBuffer.Add(() => DrawScreens(0f * step, 1f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(1f * step, 2f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(2f * step, 3f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(3f * step, 4f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(4f * step, 5f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(5f * step, 6f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(6f * step, 7f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(7f * step, 8f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(8f * step, 9f * step, _clearSpriteCache));
-    _actionBuffer.Add(() => DrawScreens(9f * step, 10f * step, _clearSpriteCache));
+    Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
     _scheduler = new Scheduler(this);
-    _scheduler.AddScheduledAction(GetStatuses, 4);
-    _scheduler.AddScheduledAction(DrawNextScreens, 60);
+    _scheduler.AddScheduledAction(GetStatuses, 3);
+    _scheduler.AddScheduledAction(DrawScreens, 6);
     _scheduler.AddScheduledAction(PrintDetailedInfo, 1);
     _scheduler.AddScheduledAction(() => _clearSpriteCache = !_clearSpriteCache, 0.1);
 
     _runtimeTracker = new RuntimeTracker(this);
 
-    GenerateMissileSprites();
     Setup();
 }
 
 void Main(string arg, UpdateType updateSource)
 {
     _runtimeTracker.AddRuntime();
-    ProcessArguments(arg);
     _scheduler.Update();
     _runtimeTracker.AddInstructions();
-}
-
-void ProcessArguments(string arg)
-{
-    /*
-    // TODO
-    switch (arg.ToUpperInvariant())
-    {
-        case "SETUP":
-            Setup();
-            break;
-    }
-    */
-}
-
-void DrawNextScreens()
-{
-    _actionBuffer.MoveNext().Invoke();
 }
 
 void PrintDetailedInfo()
@@ -150,56 +115,9 @@ void PrintDetailedInfo()
     Echo($"WMI Missile Status Online...\n(Version {VERSION} - {DATE})\n\nRecompile to process custom data changes");
     if (_screenGroup == null)
         Echo($"\nERROR: No block group named\n  '{_screenNameTag}'!");
-    Echo($"\nText Surfaces: {_textSurfaces.Count}");
+    Echo($"\nText Surfaces: {_textSurfaces.Count}\n");
     Echo(_runtimeTracker.Write());
 }
-
-public class MissileSpriteData
-{
-    public readonly Vector2 LocationRatio;
-    public readonly float Scale;
-    public bool Ready;
-
-    public MissileSpriteData(Vector2 locationRatio, float scale)
-    {
-        LocationRatio = locationRatio;
-        Scale = scale;
-        Ready = true;
-    }
-
-    public Vector2 GetLocationPx(Vector2 screenSize)
-    {
-        return LocationRatio * 0.5f * screenSize;
-    }
-}
-
-public class StatusScreen
-{
-    public int Index;
-    public IMyTextSurface Surface;
-    public Dictionary<string, MissileSpriteData> MissileSprites = new Dictionary<string, MissileSpriteData>();
-
-    public StatusScreen(IMyTextSurface surf, int idx)
-    {
-        Surface = surf;
-        Index = idx;
-    }
-
-    public void AddData(string name, MissileSpriteData data)
-    {
-        MissileSprites[name] = data;
-    }
-
-    public void Update(Dictionary<string, bool> missileStatuses)
-    {
-        foreach (var kvp in MissileSprites)
-        {
-            bool ready = false;
-            missileStatuses.TryGetValue(kvp.Key, out ready);
-            kvp.Value.Ready = ready;
-        }
-    }
-} 
 
 bool CollectBlocks(IMyTerminalBlock b)
 {
@@ -232,6 +150,7 @@ bool CollectBlocks(IMyTerminalBlock b)
         // Read ini
         Vector2 locationRatio = MyIniHelper.GetVector2(name, IniSpriteLocation, _ini);
         float scale = _ini.Get(name, IniSpriteScale).ToSingle(1f);
+        float rotation = MathHelper.ToRadians(_ini.Get(name, IniSpriteRotation).ToSingle(0f));
         int index = 0;
         if (!singleScreen)
         {
@@ -249,12 +168,13 @@ bool CollectBlocks(IMyTerminalBlock b)
             statusScreen = new StatusScreen(surf, index);
             _statusScreens[surf] = statusScreen;
         }
-        var data = new MissileSpriteData(locationRatio, scale);
+        var data = new MissileSpriteData(locationRatio, scale, rotation);
         statusScreen.AddData(name, data);
 
         // Write ini
         MyIniHelper.SetVector2(name, IniSpriteLocation, ref locationRatio, _ini);
         _ini.Set(name, IniSpriteScale, scale);
+        _ini.Set(name, IniSpriteRotation, MathHelper.ToDegrees(rotation));
         if (!singleScreen)
         {
             _ini.Set(name, IniSpriteScreen, index);
@@ -290,8 +210,6 @@ void Setup()
     {
         _missileNames.Add(kvp.Key);
     }
-
-    GenerateTitleSprites();
 }
 
 void ParseIni()
@@ -349,11 +267,16 @@ void GetStatuses()
     }
 }
 
-void DrawScreens(float startProportion, float endProportion, bool clearSpriteCache)
+// Default sizes
+const float TitleTextSize = 1.5f;
+const float BaseTextHeightPx = 37f;
+const float TitleBarHeight = 64;
+readonly Vector2 TitleBarSize = new Vector2(512, 64);
+const string TitleBarText = "WMI Missile Status";
+
+void DrawScreens()
 {
-    int start = (int)(startProportion * _textSurfaces.Count);
-    int end = (int)(endProportion * _textSurfaces.Count);
-    for (int i = start; i < end; ++i)
+    for (int i = 0; i < _textSurfaces.Count; ++i)
     {
         var surface = _textSurfaces[i];
         StatusScreen screen;
@@ -375,7 +298,7 @@ void DrawScreens(float startProportion, float endProportion, bool clearSpriteCac
 
         using (var frame = surface.DrawFrame())
         {
-            if (clearSpriteCache)
+            if (_clearSpriteCache)
             {
                 frame.Add(new MySprite());
             }
@@ -397,155 +320,150 @@ void DrawScreens(float startProportion, float endProportion, bool clearSpriteCac
             foreach (var missileSpriteData in screen.MissileSprites)
             {
                 Color colorOverride = missileSpriteData.Value.Ready ? _missileReadyColor : _missileFiredColor;
-                float spriteScale = missileSpriteData.Value.Scale;
                 Vector2 spriteOffset = missileSpriteData.Value.GetLocationPx(viewportSize);
-                foreach (var spriteContainer in _missileSprites)
-                {
-                    frame.Add(spriteContainer.CreateSprite(minScale * spriteScale, screenCenter + spriteOffset, colorOverride));
-                }
-                foreach (var spriteContainer in _missileShadowSprites)
-                {
-                    frame.Add(spriteContainer.CreateSprite(minScale * spriteScale, screenCenter + spriteOffset, _backgroundColor));
-                }
+                float spriteScale = 0.25f * missileSpriteData.Value.Scale;
+                float rotation = missileSpriteData.Value.Rotation;
+                DrawMissileSprites(frame, screenCenter + spriteOffset, colorOverride, _backgroundColor, spriteScale, rotation);
             }
         }
     }
 }
 
-// Default sizes
-const float TitleTextSize = 1.5f;
-const float BaseTextHeightPx = 37f;
-const float TitleTextOffset = 0.5f * BaseTextHeightPx * TitleTextSize;
-const float DefaultScreenSize = 512;
-const float DefaultScreenHalfSize = DefaultScreenSize * 0.5f;
-const float TitleBarHeight = 64;
-readonly Vector2 TitleBarSize = new Vector2(512, 64);
-
-// Default Positions
-readonly Vector2 TitleBarPos = new Vector2(0, -DefaultScreenHalfSize + 32); //TODO: compute in ctor
-readonly Vector2 TitleBarTextPos = new Vector2(0, -DefaultScreenHalfSize + 32 + TitleTextOffset);
-
-const string TitleBarText = "WMI Missile Status";
-
-void GenerateTitleSprites()
+// 4x larger than base image
+public void DrawMissileSprites(MySpriteDrawFrame frame, Vector2 centerPos, Color missileColor, Color backgroundColor, float scale, float rotation)
 {
-    _titleSprites.Clear();
-    MySpriteContainer spriteContainer;
-    spriteContainer = new MySpriteContainer("SquareSimple", TitleBarSize, TitleBarPos, 0f, _titleBarColor);
-    _titleSprites.Add(spriteContainer);
-
-    spriteContainer = new MySpriteContainer(TitleBarText, "DEBUG", TitleTextSize, TitleBarTextPos, _titleTextColor);
-    _titleSprites.Add(spriteContainer);
+    float sin = (float)Math.Sin(rotation);
+    float cos = (float)Math.Cos(rotation);
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-72f,cos*-72f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // topFin
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*48f,cos*48f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // bottomFin
+    frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-sin*-96f,cos*-96f)*scale+centerPos, new Vector2(48f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // noseCone
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*120f,cos*120f)*scale+centerPos, new Vector2(96f,48f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // bottomFinBase
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f,0f)*scale+centerPos, new Vector2(48f,192f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // tube
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-28f,sin*-28f)*scale+centerPos, new Vector2(8f,288f)*scale, backgroundColor, null, TextAlignment.CENTER, rotation)); // shadowLeft
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*28f,sin*28f)*scale+centerPos, new Vector2(8f,288f)*scale, backgroundColor, null, TextAlignment.CENTER, rotation)); // shadowRight
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*-48f,cos*-48f)*scale+centerPos, new Vector2(8f,48f)*scale, backgroundColor, null, TextAlignment.CENTER, rotation)); // shadowCenterFinTop
+    frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*96f,cos*96f)*scale+centerPos, new Vector2(8f,96f)*scale, backgroundColor, null, TextAlignment.CENTER, rotation)); // shadowCenterFinBottom
 }
 
-// Default Positions
-const float MissileBaseWidth = 12f;
-void GenerateMissileSprites()
+#region Classes
+public class MissileSpriteData
 {
-    _missileSprites.Clear();
+    public readonly Vector2 LocationRatio;
+    public readonly float Scale;
+    public readonly float Rotation;
+    public bool Ready;
 
-    MySpriteContainer container;
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(MissileBaseWidth, 4f * MissileBaseWidth), new Vector2(0, 0), 0f, _missileReadyColor);
-    _missileSprites.Add(container);
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(2f * MissileBaseWidth, MissileBaseWidth), new Vector2(0, 2.5f * MissileBaseWidth), 0f, _missileReadyColor);
-    _missileSprites.Add(container);
-
-    container = new MySpriteContainer("Circle", new Vector2(MissileBaseWidth, 2f * MissileBaseWidth), new Vector2(0, -2f * MissileBaseWidth), 0f, _missileReadyColor);
-    _missileSprites.Add(container);
-
-    container = new MySpriteContainer("Triangle", new Vector2(2f * MissileBaseWidth, 2f * MissileBaseWidth), new Vector2(0, -1.5f * MissileBaseWidth), 0f, _missileReadyColor);
-    _missileSprites.Add(container);
-
-    container = new MySpriteContainer("Triangle", new Vector2(2f * MissileBaseWidth, 2f * MissileBaseWidth), new Vector2(0, 1f * MissileBaseWidth), 0f, _missileReadyColor);
-    _missileSprites.Add(container);
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(1f / 6f * MissileBaseWidth, 2f * MissileBaseWidth), new Vector2(0, 2f * MissileBaseWidth), 0f, _backgroundColor);
-    _missileShadowSprites.Add(container);
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(1f / 6f * MissileBaseWidth, 1f * MissileBaseWidth), new Vector2(0, -1f * MissileBaseWidth), 0f, _backgroundColor);
-    _missileShadowSprites.Add(container);
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(1f / 6f * MissileBaseWidth, 6f * MissileBaseWidth), new Vector2((1f + 1f / 6f) * 0.5f * MissileBaseWidth, 0), 0f, _backgroundColor);
-    _missileShadowSprites.Add(container);
-
-    container = new MySpriteContainer("SquareSimple", new Vector2(1f / 6f * MissileBaseWidth, 6f * MissileBaseWidth), new Vector2((1f + 1f / 6f) * -0.5f * MissileBaseWidth, 0), 0f, _backgroundColor);
-    _missileShadowSprites.Add(container);
-
-}
-
-public struct MySpriteContainer
-{
-    readonly string _spriteName;
-    readonly Vector2 _size;
-    readonly Vector2 _positionFromCenter;
-    readonly float _rotationOrScale;
-    readonly Color _color;
-    readonly string _font;
-    readonly string _text;
-    readonly float _scale;
-    readonly bool _isText;
-    readonly TextAlignment _textAlign;
-
-    const float DEFAULT_SURFACE_WIDTH = 512f; //px
-
-    public MySpriteContainer(string spriteName, Vector2 size, Vector2 positionFromCenter, float rotation, Color color)
+    public MissileSpriteData(Vector2 locationRatio, float scale, float rotation)
     {
-        _spriteName = spriteName;
-        _size = size;
-        _positionFromCenter = positionFromCenter;
-        _rotationOrScale = rotation;
-        _color = color;
-        _isText = false;
-
-        _font = "";
-        _text = "";
-        _scale = 0f;
-
-        _textAlign = TextAlignment.CENTER;
+        LocationRatio = locationRatio;
+        Scale = scale;
+        Rotation = rotation;
+        Ready = true;
     }
 
-    public MySpriteContainer(string text, string font, float scale, Vector2 positionFromCenter, Color color, TextAlignment textAlign = TextAlignment.CENTER)
+    public Vector2 GetLocationPx(Vector2 screenSize)
     {
-        _text = text;
-        _font = font;
-        _scale = scale;
-        _positionFromCenter = positionFromCenter;
-        _rotationOrScale = scale;
-        _color = color;
-        _isText = true;
-        _textAlign = textAlign;
-
-        _spriteName = "";
-        _size = Vector2.Zero;
-    }
-
-    public MySprite CreateSprite(float scale, Vector2 center, Color? colorOverride = null)
-    {
-        return CreateSprite(scale, scale, center, colorOverride);
-    }
-
-    public MySprite CreateSprite(float widthScale, float heightScale, Vector2 center, Color? colorOverride = null)
-    {
-        Color color = _color;
-        if (colorOverride.HasValue)
-            color = colorOverride.Value;
-
-        Vector2 scaleVec = new Vector2(widthScale, heightScale);
-        Vector2 scaledPosition = scaleVec * _positionFromCenter;
-        Vector2 scaledSize = scaleVec * _size;
-
-        if (!_isText)
-            return new MySprite(SpriteType.TEXTURE, _spriteName, center + scaledPosition, scaledSize, color, rotation: _rotationOrScale);
-        else
-            return new MySprite(SpriteType.TEXT, _text, center + scaledPosition, null, color, _font, rotation: _rotationOrScale * heightScale, alignment: _textAlign);
+        return LocationRatio * 0.5f * screenSize;
     }
 }
 
+public class StatusScreen
+{
+    public int Index;
+    public IMyTextSurface Surface;
+    public Dictionary<string, MissileSpriteData> MissileSprites = new Dictionary<string, MissileSpriteData>();
+
+    public StatusScreen(IMyTextSurface surf, int idx)
+    {
+        Surface = surf;
+        Index = idx;
+    }
+
+    public void AddData(string name, MissileSpriteData data)
+    {
+        MissileSprites[name] = data;
+    }
+
+    public void Update(Dictionary<string, bool> missileStatuses)
+    {
+        foreach (var kvp in MissileSprites)
+        {
+            bool ready = false;
+            missileStatuses.TryGetValue(kvp.Key, out ready);
+            kvp.Value.Ready = ready;
+        }
+    }
+} 
+#endregion
+#endregion
+
+#region INCLUDES
 public static class MyIniHelper
 {
+    #region List<string>
     /// <summary>
+    /// Deserializes a List<string> from MyIni
+    /// </summary>
+    public static void GetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string raw = ini.Get(section, name).ToString(null);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            // Preserve contents
+            return;
+        }
+
+        list.Clear();
+        string[] split = raw.Split('\n');
+        foreach (var s in split)
+        {
+            list.Add(s);
+        }
+    }
+
+    /// <summary>
+    /// Serializes a List<string> to MyIni
+    /// </summary>
+    public static void SetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string output = string.Join($"\n", list);
+        ini.Set(section, name, output);
+    }
+    #endregion
+    
+    #region List<int>
+    const char LIST_DELIMITER = ',';
+
+    /// <summary>
+    /// Deserializes a List<int> from MyIni
+    /// </summary>
+    public static void GetListInt(string section, string name, MyIni ini, List<int> list)
+    {
+        list.Clear();
+        string raw = ini.Get(section, name).ToString();
+        string[] split = raw.Split(LIST_DELIMITER);
+        foreach (var s in split)
+        {
+            int i;
+            if (int.TryParse(s, out i))
+            {
+                list.Add(i);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Serializes a List<int> to MyIni
+    /// </summary>
+    public static void SetListInt(string section, string name, MyIni ini, List<int> list)
+    {
+        string output = string.Join($"{LIST_DELIMITER}", list);
+        ini.Set(section, name, output);
+    }
+    #endregion
+
+    #region Vector2
+        /// <summary>
     /// Adds a Vector3D to a MyIni object
     /// </summary>
     public static void SetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
@@ -576,29 +494,99 @@ public static class MyIniHelper
 
         return new Vector2(x, y);
     }
+    #endregion
 
+    #region Vector3D
+    /// <summary>
+    /// Adds a Vector3D to a MyIni object
+    /// </summary>
+    public static void SetVector3D(string sectionName, string vectorName, ref Vector3D vector, MyIni ini)
+    {
+        ini.Set(sectionName, vectorName, vector.ToString());
+    }
+
+    /// <summary>
+    /// Parses a MyIni object for a Vector3D
+    /// </summary>
+    public static Vector3D GetVector3D(string sectionName, string vectorName, MyIni ini, Vector3D? defaultVector = null)
+    {
+        var vector = Vector3D.Zero;
+        if (Vector3D.TryParse(ini.Get(sectionName, vectorName).ToString(), out vector))
+            return vector;
+        else if (defaultVector.HasValue)
+            return defaultVector.Value;
+        return default(Vector3D);
+    }
+    #endregion
+
+    #region ColorChar
+    /// <summary>
+    /// Adds a color character to a MyIni object
+    /// </summary>
+    public static void SetColorChar(string sectionName, string charName, char colorChar, MyIni ini)
+    {
+        int rgb = (int)colorChar - 0xe100;
+        int b = rgb & 7;
+        int g = rgb >> 3 & 7;
+        int r = rgb >> 6 & 7;
+        string colorString = $"{r}, {g}, {b}";
+
+        ini.Set(sectionName, charName, colorString);
+    }
+
+    /// <summary>
+    /// Parses a MyIni for a color character 
+    /// </summary>
+    public static char GetColorChar(string sectionName, string charName, MyIni ini, char defaultChar = (char)(0xe100))
+    {
+        string rgbString = ini.Get(sectionName, charName).ToString("null");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0;
+        if (rgbSplit.Length != 3)
+            return defaultChar;
+
+        int.TryParse(rgbSplit[0].Trim(), out r);
+        int.TryParse(rgbSplit[1].Trim(), out g);
+        int.TryParse(rgbSplit[2].Trim(), out b);
+
+        r = MathHelper.Clamp(r, 0, 7);
+        g = MathHelper.Clamp(g, 0, 7);
+        b = MathHelper.Clamp(b, 0, 7);
+
+        return (char)(0xe100 + (r << 6) + (g << 3) + b);
+    }
+    #endregion
+
+    #region Color
     /// <summary>
     /// Adds a Color to a MyIni object
     /// </summary>
-    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini)
+    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini, bool writeAlpha = true)
     {
-        string colorString = string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A);
-        ini.Set(sectionName, itemName, colorString);
+        if (writeAlpha)
+        {
+            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A));
+        }
+        else
+        {
+            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}", color.R, color.G, color.B));
+        }
     }
 
     /// <summary>
     /// Parses a MyIni for a Color
     /// </summary>
-    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultColor = null)
+    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultChar = null)
     {
         string rgbString = ini.Get(sectionName, itemName).ToString("null");
         string[] rgbSplit = rgbString.Split(',');
 
         int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length != 4)
+        if (rgbSplit.Length < 3)
         {
-            if (defaultColor.HasValue)
-                return defaultColor.Value;
+            if (defaultChar.HasValue)
+                return defaultChar.Value;
             else
                 return Color.Transparent;
         }
@@ -606,7 +594,7 @@ public static class MyIniHelper
         int.TryParse(rgbSplit[0].Trim(), out r);
         int.TryParse(rgbSplit[1].Trim(), out g);
         int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        bool hasAlpha = rgbSplit.Length >= 4 && int.TryParse(rgbSplit[3].Trim(), out a);
         if (!hasAlpha)
             a = 255;
 
@@ -617,8 +605,8 @@ public static class MyIniHelper
 
         return new Color(r, g, b, a);
     }
+    #endregion
 }
-
 public static class StringExtensions
 {
     public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
@@ -633,16 +621,23 @@ public static class StringExtensions
 /// </summary>
 public class Scheduler
 {
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
     ScheduledAction _currentlyQueuedAction = null;
     bool _firstRun = true;
+    bool _inUpdate = false;
 
     readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
     readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
     readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
     readonly Program _program;
 
-    const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
 
     /// <summary>
     /// Constructs a scheduler object with timing based on the runtime of the input program.
@@ -658,24 +653,34 @@ public class Scheduler
     /// </summary>
     public void Update()
     {
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * RUNTIME_TO_REALTIME);
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
 
-        if (_ignoreFirstRun && _firstRun)
-            deltaTime = 0;
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
 
-        _firstRun = false;
         _actionsToDispose.Clear();
         foreach (ScheduledAction action in _scheduledActions)
         {
-            action.Update(deltaTime);
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
             if (action.JustRan && action.DisposeAfterRun)
             {
                 _actionsToDispose.Add(action);
             }
         }
 
-        // Remove all actions that we should dispose
-        _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
 
         if (_currentlyQueuedAction == null)
         {
@@ -687,12 +692,19 @@ public class Scheduler
         // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
-            _currentlyQueuedAction.Update(deltaTime);
+            _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
         }
     }
 
@@ -702,7 +714,10 @@ public class Scheduler
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
@@ -710,7 +725,10 @@ public class Scheduler
     /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
@@ -722,27 +740,79 @@ public class Scheduler
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, true);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
         _queuedActions.Enqueue(scheduledAction);
     }
 
     /// <summary>
     /// Adds a ScheduledAction to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
+    public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
     }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval)
+        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    { }
 }
 
 public class ScheduledAction
 {
     public bool JustRan { get; private set; } = false;
     public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public readonly double RunInterval;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
 
-    readonly double _runFrequency;
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
     readonly Action _action;
 
     /// <summary>
@@ -753,20 +823,19 @@ public class ScheduledAction
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
-        _runFrequency = runFrequency;
-        RunInterval = 1.0 / _runFrequency;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
         DisposeAfterRun = removeAfterRun;
-        TimeSinceLastRun = timeOffset;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
     }
 
-    public void Update(double deltaTime)
+    public void Update(long deltaTicks)
     {
-        TimeSinceLastRun += deltaTime;
+        TicksSinceLastRun += deltaTicks;
 
-        if (TimeSinceLastRun >= RunInterval)
+        if (TicksSinceLastRun >= RunIntervalTicks)
         {
             _action.Invoke();
-            TimeSinceLastRun = 0;
+            TicksSinceLastRun = 0;
 
             JustRan = true;
         }
@@ -778,64 +847,6 @@ public class ScheduledAction
 }
 #endregion
 
-#region Circular Buffer
-/// <summary>
-/// A simple, generic circular buffer class with a fixed capacity.
-/// </summary>
-/// <typeparam name="T"></typeparam>
-public class CircularBuffer<T>
-{
-    public readonly int Capacity;
-
-    T[] _array = null;
-    int _setIndex = 0;
-    int _getIndex = 0;
-
-    /// <summary>
-    /// CircularBuffer ctor.
-    /// </summary>
-    /// <param name="capacity">Capacity of the CircularBuffer.</param>
-    public CircularBuffer(int capacity)
-    {
-        if (capacity < 1)
-            throw new Exception($"Capacity of CircularBuffer ({capacity}) can not be less than 1");
-        Capacity = capacity;
-        _array = new T[Capacity];
-    }
-
-    /// <summary>
-    /// Adds an item to the buffer. If the buffer is full, it will overwrite the oldest value.
-    /// </summary>
-    /// <param name="item"></param>
-    public void Add(T item)
-    {
-        _array[_setIndex] = item;
-        _setIndex = ++_setIndex % Capacity;
-    }
-
-    /// <summary>
-    /// Retrieves the current item in the buffer and increments the buffer index.
-    /// </summary>
-    /// <returns></returns>
-    public T MoveNext()
-    {
-        T val = _array[_getIndex];
-        _getIndex = ++_getIndex % Capacity;
-        return val;
-    }
-
-    /// <summary>
-    /// Retrieves the current item in the buffer without incrementing the buffer index.
-    /// </summary>
-    /// <returns></returns>
-    public T Peek()
-    {
-        return _array[_getIndex];
-    }
-}
-#endregion
-
-#region Runtime tracker
 /// <summary>
 /// Class that tracks runtime history.
 /// </summary>
@@ -843,17 +854,27 @@ public class RuntimeTracker
 {
     public int Capacity { get; set; }
     public double Sensitivity { get; set; }
-    public double MaxRuntime { get; private set; }
-    public double MaxInstructions { get; private set; }
-    public double AverageRuntime { get; private set; }
-    public double AverageInstructions { get; private set; }
-
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
+    
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
-    readonly StringBuilder _sb = new StringBuilder();
     readonly int _instructionLimit;
     readonly Program _program;
     const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
 
     public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
@@ -866,51 +887,53 @@ public class RuntimeTracker
     public void AddRuntime()
     {
         double runtime = _program.Runtime.LastRunTimeMs;
+        LastRuntime = runtime;
         AverageRuntime += (Sensitivity * runtime);
         int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
         if (roundedTicksSinceLastRuntime == 1)
         {
-            AverageRuntime *= (1 - Sensitivity);
+            AverageRuntime *= (1 - Sensitivity); 
         }
         else if (roundedTicksSinceLastRuntime > 1)
         {
             AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
         }
 
-
         _runtimes.Enqueue(runtime);
         if (_runtimes.Count == Capacity)
         {
             _runtimes.Dequeue();
         }
-
+        
         MaxRuntime = _runtimes.Max();
     }
 
     public void AddInstructions()
     {
         double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
         AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-
+        
         _instructions.Enqueue(instructions);
         if (_instructions.Count == Capacity)
         {
             _instructions.Dequeue();
         }
-
+        
         MaxInstructions = _instructions.Max();
     }
 
     public string Write()
     {
-        _sb.Clear();
-        _sb.AppendLine("\n_____________________________\nGeneral Runtime Info\n");
-        _sb.AppendLine($"Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"Max runtime: {MaxRuntime:n4} ms");
-        return _sb.ToString();
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
     }
 }
 #endregion
