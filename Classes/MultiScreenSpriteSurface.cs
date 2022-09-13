@@ -1,3 +1,4 @@
+//#exclude
 /*	
 / //// / 	
 DEMO INSTRUCTIONS	
@@ -35,10 +36,11 @@ public void DrawSprites(ISpriteSurface frame, Vector2 centerPos, float scale = 1
 
 void Main()
 {
-    
-}
 
+}
+//#endexclude
 #region Multi-screen Sprite Surface
+
 public interface ISpriteSurface
 {
     Vector2 TextureSize { get; }
@@ -73,6 +75,7 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         return IsValid ? Surface.MeasureStringInPixels(text, font, scale) : Vector2.Zero;
     }
 
+    public readonly IMyCubeBlock CubeBlock;
     public readonly IMyTextSurface Surface;
     public MySpriteDrawFrame? Frame = null;
     readonly List<MySprite> _sprites = new List<MySprite>(64);
@@ -127,7 +130,8 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         var slim = grid.GetCubeBlock(position);
         if (slim != null && slim.FatBlock != null)
         {
-            var surf = slim.FatBlock as IMyTextSurface;
+            CubeBlock = slim.FatBlock;
+            var surf = CubeBlock as IMyTextSurface;
             if (surf != null)
             {
                 Surface = surf;
@@ -139,11 +143,39 @@ public class SingleScreenSpriteSurface : ISpriteSurface
 // Assumes that all text panels are the same size
 public class MultiScreenSpriteSurface : ISpriteSurface
 {
-    readonly SingleScreenSpriteSurface[,] _surfaces;
-
     public bool Initialized { get; private set; } = false;
 
-    public Vector2 TextureSize { get; private set; }
+    float Rotation
+    {
+        get
+        {
+            return _rotationAngle;
+        }
+        set
+        {
+            _rotationAngle = value;
+            _spanVectorAbs = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
+            _spanVectorAbs *= Vector2.SignNonZero(_spanVectorAbs);
+        }
+    }
+    float RotationRads
+    {
+        get
+        {
+            return MathHelper.ToRadians(Rotation);
+        }
+    }
+    public Vector2 TextureSize
+    {
+        get
+        {
+            if (!_textureSize.HasValue)
+            {
+                _textureSize = BasePanelSize * _spanVectorAbs;
+            }
+            return _textureSize.Value;
+        }
+    }
     public Vector2 SurfaceSize
     {
         get { return TextureSize; }
@@ -153,7 +185,34 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     {
         return _anchor.MeasureStringInPixels(text, font, scale);
     }
-    public readonly Vector2 BasePanelSize;
+    Vector2 BasePanelSize
+    {
+        get { return _anchor.TextureSize; }
+    }
+    Vector2 BasePanelSizeNoRotation
+    {
+        get
+        {
+            if (!_basePanelSizeNoRotation.HasValue)
+            {
+                Vector2 size = RotateToBaseOrientation(BasePanelSize, RotationRads);
+                size *= Vector2.SignNonZero(size);
+                _basePanelSizeNoRotation = size;
+            }
+            return _basePanelSizeNoRotation.Value;
+        }
+    }
+    Vector2 TextureSizeNoRotation
+    {
+        get
+        {
+            if (!_textureSizeNoRotation.HasValue)
+            {
+                _textureSizeNoRotation = BasePanelSizeNoRotation * new Vector2(Cols, Rows);
+            }
+            return _textureSizeNoRotation.Value;
+        }
+    }
     public readonly int Rows;
     public readonly int Cols;
 
@@ -161,16 +220,27 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     StringBuilder _stringBuilder = new StringBuilder(128);
     Program _p;
     IMyTextPanel _anchor;
+    ITerminalProperty<float> _rotationProp;
+    float _rotationAngle = 0f;
+    Vector2? _textureSize;
+    Vector2? _basePanelSizeNoRotation;
+    Vector2? _textureSizeNoRotation;
+    Vector2 _spanVectorAbs;
+
+    readonly SingleScreenSpriteSurface[,] _surfaces;
+    readonly Vector2[,] _screenOrigins;
 
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
         _p = p;
         _surfaces = new SingleScreenSpriteSurface[rows, cols];
-        BasePanelSize = anchor.TextureSize;
-        TextureSize = anchor.TextureSize * new Vector2(cols, rows);
+        _screenOrigins = new Vector2[rows, cols];
         Rows = rows;
         Cols = cols;
+
+        _rotationProp = anchor.GetProperty("Rotate").Cast<float>();
+        Rotation = _rotationProp.GetValue(anchor);
 
         Vector3I anchorPos = anchor.Position;
         Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
@@ -184,8 +254,54 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             for (int c = 0; c < Cols; ++c)
             {
                 Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
-                _surfaces[r, c] = new SingleScreenSpriteSurface(grid, blockPosition);
+                var surf = new SingleScreenSpriteSurface(grid, blockPosition);
+                _surfaces[r, c] = surf;
+                if (surf.CubeBlock != null)
+                {
+                    _rotationProp.SetValue(surf.CubeBlock, Rotation);
+                }
+
+                // Calc screen coords
+                Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
+                Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
+                Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
+                Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
+                _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
             }
+        }
+    }
+
+    Vector2 RotateToDisplayOrientation(Vector2 vec, float angleRad)
+    {
+        int caseIdx = (int)Math.Round(angleRad / MathHelper.ToRadians(90));
+        switch (caseIdx)
+        {
+            default:
+            case 0:
+                return vec;
+            case 1: // 90 deg
+                return new Vector2(vec.Y, -vec.X);
+            case 2: // 180 deg
+                return -vec;
+            case 3: // 270 deg
+                return new Vector2(-vec.Y, vec.X);
+        }
+    }
+
+    Vector2 RotateToBaseOrientation(Vector2 vec, float angleRad)
+    {
+        int caseIdx = (int)Math.Round(angleRad / MathHelper.ToRadians(90));
+        switch (caseIdx)
+        {
+            default:
+            case 0:
+                return vec;
+            case 1: // 90 deg
+                return new Vector2(-vec.Y, vec.X);
+            case 2: // 180 deg
+                return -vec;
+            case 3: // 270 deg
+                return new Vector2(vec.Y, -vec.X);
         }
     }
 
@@ -207,10 +323,15 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             spriteSize = TextureSize;
         }
-        float rad = spriteSize.Length();
+        float rad = spriteSize.Length() * 0.5f;
 
-        var lowerCoords = Vector2I.Floor((pos - rad) / BasePanelSize);
-        var upperCoords = Vector2I.Floor((pos + rad) / BasePanelSize);
+
+        Vector2 fromCenter = pos - (TextureSize * 0.5f);
+        Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
+        Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
+
+        var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
+        var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
 
         int lowerCol = Math.Max(0, lowerCoords.X);
         int upperCol = Math.Min(Cols - 1, upperCoords.X);
@@ -222,8 +343,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             for (int c = lowerCol; c <= upperCol; ++c)
             {
-                Vector2 adjustedPos = pos - BasePanelSize * new Vector2(c, r);
-                sprite.Position = adjustedPos;
+                sprite.Position = pos - _screenOrigins[r, c];
                 _surfaces[r, c].Add(sprite);
                 SpriteCount++;
             }
