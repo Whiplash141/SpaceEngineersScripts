@@ -1,5 +1,5 @@
 
-#region In-game Script
+#region Turret Based Radar
 /*
 / //// / Whip's Turret Based Radar Systems / //// /
 
@@ -50,75 +50,58 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string VERSION = "34.2.1";
-const string DATE = "2022/07/14";
+const string Version = "34.3.3";
+const string Date = "2022/08/22";
+const string IgcTag = "IGC_IFF_MSG";
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
+readonly MyIni _ini = new MyIni();
+readonly MyIni _textSurfaceIni = new MyIni();
 
-const string IGC_TAG = "IGC_IFF_MSG";
+ConfigString
+    _textPanelName,
+    _referenceName;
+ConfigBool
+    _broadcastIFF,
+    _networkTargets,
+    _useRangeOverride,
+    _drawQuadrants,
+    _drawRunningScreen;
+ConfigFloat
+    _rangeOverride,
+    _projectionAngle,
+    _fadeOutInterval;
+ConfigColor
+    _titleBarColor,
+    _textColor,
+    _backColor,
+    _lineColor,
+    _planeColor,
+    _enemyIconColor,
+    _enemyElevationColor,
+    _neutralIconColor,
+    _neutralElevationColor,
+    _allyIconColor,
+    _allyElevationColor,
+    _missileLockWarningColor;
+ConfigInt
+    _rows,
+    _cols;
 
-const string INI_SECTION_GENERAL = "Radar - General";
-const string INI_RADAR_NAME = "Text surface name tag";
-const string INI_REF_NAME = "Optional reference block name";
-const string INI_BCAST = "Share own position";
-const string INI_NETWORK = "Share targets";
-const string INI_USE_RANGE_OVERRIDE = "Use radar range override";
-const string INI_RANGE_OVERRIDE = "Radar range override (m)";
-const string INI_PROJ_ANGLE = "Radar projection angle in degrees (0 is flat)";
-const string INI_DRAW_QUADRANTS = "Draw quadrants";
-const string INI_DRAW_RUNNING_SCREEN = "Draw animated title screen";
-const string INI_FADE_OUT_INTERVAL = "Target fadeout interval (s)";
+IConfigValue[] _generalConfig;
 
-const string INI_SECTION_COLORS = "Radar - Colors";
-const string INI_TITLE_BAR = "Title bar";
-const string INI_TEXT = "Text";
-const string INI_BACKGROUND = "Background";
-const string INI_MSL_LOCK = "Missile lock";
-const string INI_RADAR_LINES = "Radar lines";
-const string INI_PLANE = "Radar plane";
-const string INI_ENEMY = "Enemy icon";
-const string INI_ENEMY_ELEVATION = "Enemy elevation";
-const string INI_NEUTRAL = "Neutral icon";
-const string INI_NEUTRAL_ELEVATION = "Neutral elevation";
-const string INI_FRIENDLY = "Friendly icon";
-const string INI_FRIENDLY_ELEVATION = "Friendly elevation";
+const string IniSectionGeneral = "Radar - General";
+const string IniSectionColors = "Radar - Colors";
+const string IniSectionTextSurface = "Radar - Text Surface Config";
+const string IniTextSurfaceTemplate = "Show on screen {0}";
+const string IniSectionMultiscreen = "Radar - Multiscreen Config";
 
-const string INI_SECTION_TEXT_SURF_PROVIDER = "Radar - Text Surface Config";
-const string INI_TEXT_SURFACE_TEMPLATE = "Show on screen {0}";
-
-const string INI_SECTION_MULTISCREEN = "Radar - Multiscreen Config";
-const string INI_KEY_MULTISCREEN_ROWS = "Screen rows";
-const string INI_KEY_MULTISCREEN_COLS = "Screen cols";
-
-IMyBroadcastListener broadcastListener;
-
-string referenceName = "Reference";
-float defaultFadeoutInterval = 1;
-float rangeOverride = 1000;
-bool useRangeOverride = false;
-bool networkTargets = true;
-bool broadcastIFF = true;
-bool drawQuadrants = true;
-bool drawRunningScreen = true;
-
-Color titleBarColor = new Color(100, 30, 0, 5);
-Color backColor = new Color(0, 0, 0, 255);
-Color lineColor = new Color(255, 100, 0, 50);
-Color planeColor = new Color(100, 30, 0, 5);
-Color enemyIconColor = new Color(150, 0, 0, 255);
-Color enemyElevationColor = new Color(75, 0, 0, 255);
-Color neutralIconColor = new Color(150, 150, 0, 255);
-Color neutralElevationColor = new Color(75, 75, 0, 255);
-Color allyIconColor = new Color(0, 50, 150, 255);
-Color allyElevationColor = new Color(0, 25, 75, 255);
-Color textColor = new Color(255, 100, 0, 100);
-Color missileLockColor = new Color(255, 100, 0, 255);
+IMyBroadcastListener _broadcastListener;
 
 float MaxRange
 {
     get
     {
-        return Math.Max(1, useRangeOverride ? rangeOverride : (turrets.Count == 0 ? rangeOverride : turretMaxRange));
+        return Math.Max(1, _useRangeOverride ? _rangeOverride : (_turrets.Count == 0 ? _rangeOverride : _turretMaxRange));
     }
 }
 
@@ -126,38 +109,34 @@ List<IMyShipController> Controllers
 {
     get
     {
-        return taggedControllers.Count > 0 ? taggedControllers : allControllers;
+        return _taggedControllers.Count > 0 ? _taggedControllers : _allControllers;
     }
 }
 
-string textPanelName = "Radar";
-float projectionAngle = 55f;
-float turretMaxRange = 800f;
+float _turretMaxRange = 800f;
 
-Scheduler scheduler;
-RuntimeTracker runtimeTracker;
-ScheduledAction grabBlockAction;
+Scheduler _scheduler;
+RuntimeTracker _runtimeTracker;
+ScheduledAction _grabBlockAction;
 
-Dictionary<long, TargetData> targetDataDict = new Dictionary<long, TargetData>();
-Dictionary<long, TargetData> broadcastDict = new Dictionary<long, TargetData>();
-List<TurretInterface> turrets = new List<TurretInterface>();
-List<IMySensorBlock> sensors = new List<IMySensorBlock>();
-List<ISpriteSurface> surfaces = new List<ISpriteSurface>();
-List<IMyShipController> taggedControllers = new List<IMyShipController>();
-List<IMyShipController> allControllers = new List<IMyShipController>();
-HashSet<long> myGridIds = new HashSet<long>();
-IMyTerminalBlock reference;
-IMyShipController lastActiveShipController = null;
+Dictionary<long, TargetData> _targetDataDict = new Dictionary<long, TargetData>();
+Dictionary<long, TargetData> _broadcastDict = new Dictionary<long, TargetData>();
+List<TurretInterface> _turrets = new List<TurretInterface>();
+List<IMySensorBlock> _sensors = new List<IMySensorBlock>();
+List<ISpriteSurface> _surfaces = new List<ISpriteSurface>();
+List<IMyShipController> _taggedControllers = new List<IMyShipController>();
+List<IMyShipController> _allControllers = new List<IMyShipController>();
+HashSet<long> _myGridIds = new HashSet<long>();
+IMyTerminalBlock _reference;
+IMyShipController _lastActiveShipController = null;
 
-const double cycleTime = 1.0 / 60.0;
-string lastSetupResult = "";
-bool isSetup = false;
+const double _cycleTime = 1.0 / 60.0;
+string _lastSetupResult = "";
+bool _isSetup = false;
 bool _clearSpriteCache = false;
 
 readonly CompositeBoundingSphere _compositeBoundingSphere;
-readonly RadarSurface radarSurface;
-readonly MyIni generalIni = new MyIni();
-readonly MyIni textSurfaceIni = new MyIni();
+readonly RadarSurface _radarSurface;
 readonly MyCommandLine _commandLine = new MyCommandLine();
 readonly RadarRunningScreenManager _runningScreenManager;
 #endregion
@@ -165,67 +144,97 @@ readonly RadarRunningScreenManager _runningScreenManager;
 #region Main Routine
 Program()
 {
-    _runningScreenManager = new RadarRunningScreenManager(VERSION, this);
+    _generalConfig = new IConfigValue[]
+    {
+        _textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
+        _broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
+        _networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
+        _useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
+        _rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
+        _projectionAngle = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
+        _drawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
+        _referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
+        _drawRunningScreen = new ConfigBool(IniSectionGeneral, "Draw title screen", true),
+        _fadeOutInterval = new ConfigFloat(IniSectionGeneral, "Target fadeout interval (s)", 2f),
+
+        _titleBarColor = new ConfigColor(IniSectionColors, "Title bar", new Color(100, 30, 0, 5)),
+        _textColor = new ConfigColor(IniSectionColors, "Text", new Color(255, 100, 0, 100)),
+        _backColor = new ConfigColor(IniSectionColors, "Background", new Color(0, 0, 0, 255)),
+        _lineColor = new ConfigColor(IniSectionColors, "Radar lines", new Color(255, 100, 0, 50)),
+        _planeColor = new ConfigColor(IniSectionColors, "Radar plane", new Color(100, 30, 0, 5)),
+        _enemyIconColor = new ConfigColor(IniSectionColors, "Enemy icon", new Color(150, 0, 0, 255)),
+        _enemyElevationColor = new ConfigColor(IniSectionColors, "Enemy elevation", new Color(75, 0, 0, 255)),
+        _neutralIconColor = new ConfigColor(IniSectionColors, "Neutral icon", new Color(150, 150, 0, 255)),
+        _neutralElevationColor = new ConfigColor(IniSectionColors, "Neutral elevation", new Color(75, 75, 0, 255)),
+        _allyIconColor = new ConfigColor(IniSectionColors, "Friendly icon", new Color(0, 50, 150, 255)),
+        _allyElevationColor = new ConfigColor(IniSectionColors, "Friendly elevation", new Color(0, 25, 75, 255)),
+        _missileLockWarningColor = new ConfigColor(IniSectionColors, "Missile lock warning", new Color(255, 100, 0, 255)),
+    };
+
+    _rows = new ConfigInt(IniSectionMultiscreen, "Screen rows", 1);
+    _cols = new ConfigInt(IniSectionMultiscreen, "Screen cols", 1);
+
+    _runningScreenManager = new RadarRunningScreenManager(Version, this);
     _compositeBoundingSphere = new CompositeBoundingSphere(this);
-    radarSurface = new RadarSurface(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
+    _radarSurface = new RadarSurface(_titleBarColor, _backColor, _lineColor, _planeColor, _textColor, _missileLockWarningColor, _projectionAngle, MaxRange, _drawQuadrants);
 
     ParseCustomDataIni();
-    radarSurface.UpdateFields(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
+    _radarSurface.UpdateFields(_titleBarColor, _backColor, _lineColor, _planeColor, _textColor, _missileLockWarningColor, _projectionAngle, MaxRange, _drawQuadrants);
     // TODO: This is dumb, make fields public and in radar itself
 
     GrabBlocks();
 
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
-    runtimeTracker = new RuntimeTracker(this);
+    _runtimeTracker = new RuntimeTracker(this);
 
     // Scheduler creation
-    scheduler = new Scheduler(this);
-    grabBlockAction = new ScheduledAction(GrabBlocks, 0.1);
-    scheduler.AddScheduledAction(grabBlockAction);
-    scheduler.AddScheduledAction(UpdateRadarRange, 1);
-    scheduler.AddScheduledAction(PrintDetailedInfo, 1);
-    scheduler.AddScheduledAction(DrawRunningScreen, 6);
-    scheduler.AddScheduledAction(_runningScreenManager.RestartDraw, 1);
+    _scheduler = new Scheduler(this);
+    _grabBlockAction = new ScheduledAction(GrabBlocks, 0.1);
+    _scheduler.AddScheduledAction(_grabBlockAction);
+    _scheduler.AddScheduledAction(UpdateRadarRange, 1);
+    _scheduler.AddScheduledAction(PrintDetailedInfo, 1);
+    _scheduler.AddScheduledAction(DrawRunningScreen, 6);
+    _scheduler.AddScheduledAction(_runningScreenManager.RestartDraw, 1);
 
-    scheduler.AddQueuedAction(GetTurretTargets, cycleTime);               // cycle 1
-    scheduler.AddQueuedAction(radarSurface.SortContacts, cycleTime);      // cycle 2
+    _scheduler.AddQueuedAction(GetTurretTargets, _cycleTime);               // cycle 1
+    _scheduler.AddQueuedAction(_radarSurface.SortContacts, _cycleTime);      // cycle 2
 
     float step = 1f / 8f;
-    scheduler.AddQueuedAction(() => Draw(0 * step, 1 * step), cycleTime); // cycle 3
-    scheduler.AddQueuedAction(() => Draw(1 * step, 2 * step), cycleTime); // cycle 4
-    scheduler.AddQueuedAction(() => Draw(2 * step, 3 * step), cycleTime); // cycle 5
-    scheduler.AddQueuedAction(() => Draw(3 * step, 4 * step), cycleTime); // cycle 6
-    scheduler.AddQueuedAction(() => Draw(4 * step, 5 * step), cycleTime); // cycle 7
-    scheduler.AddQueuedAction(() => Draw(5 * step, 6 * step), cycleTime); // cycle 8
-    scheduler.AddQueuedAction(() => Draw(6 * step, 7 * step), cycleTime); // cycle 9
-    scheduler.AddQueuedAction(() => Draw(7 * step, 8 * step), cycleTime); // cycle 10
+    _scheduler.AddQueuedAction(() => Draw(0 * step, 1 * step), _cycleTime); // cycle 3
+    _scheduler.AddQueuedAction(() => Draw(1 * step, 2 * step), _cycleTime); // cycle 4
+    _scheduler.AddQueuedAction(() => Draw(2 * step, 3 * step), _cycleTime); // cycle 5
+    _scheduler.AddQueuedAction(() => Draw(3 * step, 4 * step), _cycleTime); // cycle 6
+    _scheduler.AddQueuedAction(() => Draw(4 * step, 5 * step), _cycleTime); // cycle 7
+    _scheduler.AddQueuedAction(() => Draw(5 * step, 6 * step), _cycleTime); // cycle 8
+    _scheduler.AddQueuedAction(() => Draw(6 * step, 7 * step), _cycleTime); // cycle 9
+    _scheduler.AddQueuedAction(() => Draw(7 * step, 8 * step), _cycleTime); // cycle 10
 
     // IGC Register
-    broadcastListener = IGC.RegisterBroadcastListener(IGC_TAG);
-    broadcastListener.SetMessageCallback(IGC_TAG);
+    _broadcastListener = IGC.RegisterBroadcastListener(IgcTag);
+    _broadcastListener.SetMessageCallback(IgcTag);
 }
 
 void Main(string arg, UpdateType updateSource)
 {
-    runtimeTracker.AddRuntime();
+    _runtimeTracker.AddRuntime();
 
     if (_commandLine.TryParse(arg))
         HandleArguments();
 
-    scheduler.Update();
+    _scheduler.Update();
 
-    if (arg.Equals(IGC_TAG))
+    if (arg.Equals(IgcTag))
     {
         ProcessNetworkMessage();
     }
 
-    runtimeTracker.AddInstructions();
+    _runtimeTracker.AddInstructions();
 }
 
 void DrawRunningScreen()
 {
-    if (drawRunningScreen)
+    if (_drawRunningScreen)
     {
         _runningScreenManager.Draw();
     }
@@ -249,27 +258,27 @@ void HandleArguments()
             float range = 0;
             if (float.TryParse(_commandLine.Argument(1), out range))
             {
-                useRangeOverride = true;
-                rangeOverride = range;
+                _useRangeOverride.Value = true;
+                _rangeOverride.Value = range;
 
                 UpdateRadarRange();
 
-                generalIni.Clear();
-                generalIni.TryParse(Me.CustomData);
-                generalIni.Set(INI_SECTION_GENERAL, INI_RANGE_OVERRIDE, rangeOverride);
-                generalIni.Set(INI_SECTION_GENERAL, INI_USE_RANGE_OVERRIDE, useRangeOverride);
-                Me.CustomData = generalIni.ToString();
+                _ini.Clear();
+                _ini.TryParse(Me.CustomData);
+                _useRangeOverride.WriteToIni(_ini);
+                _rangeOverride.WriteToIni(_ini);
+                Me.CustomData = _ini.ToString();
             }
             else if (string.Equals(_commandLine.Argument(1), "default"))
             {
-                useRangeOverride = false;
+                _useRangeOverride.Value = false;
 
                 UpdateRadarRange();
 
-                generalIni.Clear();
-                generalIni.TryParse(Me.CustomData);
-                generalIni.Set(INI_SECTION_GENERAL, INI_USE_RANGE_OVERRIDE, useRangeOverride);
-                Me.CustomData = generalIni.ToString();
+                _ini.Clear();
+                _ini.TryParse(Me.CustomData);
+                _useRangeOverride.WriteToIni(_ini);
+                Me.CustomData = _ini.ToString();
             }
             return;
 
@@ -280,48 +289,48 @@ void HandleArguments()
 
 void Draw(float startProportion, float endProportion)
 {
-    int start = (int)(startProportion * surfaces.Count);
-    int end = (int)(endProportion * surfaces.Count);
+    int start = (int)(startProportion * _surfaces.Count);
+    int end = (int)(endProportion * _surfaces.Count);
 
     for (int i = start; i < end; ++i)
     {
-        var textSurface = surfaces[i];
-        radarSurface.DrawRadar(textSurface, _clearSpriteCache);
+        var textSurface = _surfaces[i];
+        _radarSurface.DrawRadar(textSurface, _clearSpriteCache);
     }
 }
 
 void PrintDetailedInfo()
 {
-    Echo($"WMI Radar System Online{RunningSymbol()}\n(Version {VERSION} - {DATE})");
-    Echo($"\nNext refresh in {Math.Max(grabBlockAction.RunInterval - grabBlockAction.TimeSinceLastRun, 0):N0} seconds\n");
+    Echo($"WMI Radar System Online\n(Version {Version} - {Date})");
+    Echo($"\nNext refresh in {Math.Max(_grabBlockAction.RunInterval - _grabBlockAction.TimeSinceLastRun, 0):N0} seconds\n");
     Echo($"Range: {MaxRange} m");
-    Echo($"Turrets: {turrets.Count}");
-    Echo($"Sensors: {sensors.Count}");
-    Echo($"Text surfaces: {surfaces.Count}");
+    Echo($"Turrets: {_turrets.Count}");
+    Echo($"Sensors: {_sensors.Count}");
+    Echo($"Text surfaces: {_surfaces.Count}");
     Echo($"Ship radius: {_compositeBoundingSphere.Radius:n1} m");
-    Echo($"Reference:\n    \"{(reference?.CustomName)}\"");
-    Echo($"{lastSetupResult}");
-    Echo(runtimeTracker.Write());
+    Echo($"Reference:\n    \"{(_reference?.CustomName)}\"");
+    Echo($"{_lastSetupResult}");
+    Echo(_runtimeTracker.Write());
 }
 
 void UpdateRadarRange()
 {
-    turretMaxRange = GetMaxTurretRange(turrets);
-    radarSurface.Range = MaxRange;
+    _turretMaxRange = GetMaxTurretRange(_turrets);
+    _radarSurface.Range = MaxRange;
 }
 #endregion
 
 #region IGC Comms
 void ProcessNetworkMessage()
 {
-    while (broadcastListener.HasPendingMessage)
+    while (_broadcastListener.HasPendingMessage)
     {
-        var message = broadcastListener.AcceptMessage();
+        var message = _broadcastListener.AcceptMessage();
         object messageData = message.Data;
         byte relationship = 0;
         byte type = 0;
         long entityId = 0;
-        Vector3D position = default(Vector3D);
+        var position = default(Vector3D);
         bool targetLock = false;
 
         MyTuple<byte, long, Vector3D, double> myTuple;
@@ -347,11 +356,11 @@ void ProcessNetworkMessage()
         entityId = myTuple.Item2;
         position = myTuple.Item3;
 
-        if (myGridIds.Contains(entityId))
+        if (_myGridIds.Contains(entityId))
         {
             if (targetLock)
             {
-                radarSurface.RadarLockWarning = true;
+                _radarSurface.RadarLockWarning = true;
             }
             continue;
         }
@@ -363,7 +372,7 @@ void ProcessNetworkMessage()
         }
 
         TargetData targetData;
-        if (targetDataDict.TryGetValue(entityId, out targetData))
+        if (_targetDataDict.TryGetValue(entityId, out targetData))
         {
             targetData.TargetLock |= targetLock;
             targetData.MyLock |= myLock;
@@ -382,45 +391,45 @@ void ProcessNetworkMessage()
             targetData.Type = (TargetRelation)type;
         }
 
-        targetDataDict[entityId] = targetData;
+        _targetDataDict[entityId] = targetData;
 
     }
 }
 
 void NetworkTargets()
 {
-    if (broadcastIFF)
+    if (_broadcastIFF)
     {
         _compositeBoundingSphere.Compute();
         TargetRelation type = _compositeBoundingSphere.LargestGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid;
         var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(type | TargetRelation.Friendly), _compositeBoundingSphere.LargestGrid.EntityId, _compositeBoundingSphere.Center, _compositeBoundingSphere.Radius * _compositeBoundingSphere.Radius);
-        IGC.SendBroadcastMessage(IGC_TAG, myTuple);
+        IGC.SendBroadcastMessage(IgcTag, myTuple);
     }
 
-    if (networkTargets)
+    if (_networkTargets)
     {
-        foreach (var kvp in broadcastDict)
+        foreach (var kvp in _broadcastDict)
         {
             var targetData = kvp.Value;
             var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(targetData.Relation | targetData.Type), kvp.Key, targetData.Position, 0);
-            IGC.SendBroadcastMessage(IGC_TAG, myTuple);
+            IGC.SendBroadcastMessage(IgcTag, myTuple);
         }
     }
 }
 #endregion
 
 #region Sensor Detection
-List<MyDetectedEntityInfo> sensorEntities = new List<MyDetectedEntityInfo>();
+List<MyDetectedEntityInfo> _sensorEntities = new List<MyDetectedEntityInfo>();
 void GetSensorTargets()
 {
-    foreach (var sensor in sensors)
+    foreach (var sensor in _sensors)
     {
         if (sensor.Closed)
             continue;
 
-        sensorEntities.Clear();
-        sensor.DetectedEntities(sensorEntities);
-        foreach (var target in sensorEntities)
+        _sensorEntities.Clear();
+        sensor.DetectedEntities(_sensorEntities);
+        foreach (var target in _sensorEntities)
         {
             AddTargetData(target);
         }
@@ -432,7 +441,7 @@ void GetSensorTargets()
 void AddTargetData(MyDetectedEntityInfo targetInfo)
 {
     TargetData targetData;
-    targetDataDict.TryGetValue(targetInfo.EntityId, out targetData);
+    _targetDataDict.TryGetValue(targetInfo.EntityId, out targetData);
 
     switch (targetInfo.Relationship)
     {
@@ -463,23 +472,23 @@ void AddTargetData(MyDetectedEntityInfo targetInfo)
     }
     targetData.Position = targetInfo.Position;
 
-    targetDataDict[targetInfo.EntityId] = targetData;
-    broadcastDict[targetInfo.EntityId] = targetData;
+    _targetDataDict[targetInfo.EntityId] = targetData;
+    _broadcastDict[targetInfo.EntityId] = targetData;
 }
 #endregion
 
 #region Turret Detection
 void GetTurretTargets()
 {
-    if (!isSetup) //setup error
+    if (!_isSetup) //setup error
         return;
 
-    broadcastDict.Clear();
-    radarSurface.ClearContacts();
+    _broadcastDict.Clear();
+    _radarSurface.ClearContacts();
 
     GetSensorTargets();
 
-    foreach (var block in turrets)
+    foreach (var block in _turrets)
     {
         if (block.Closed)
             continue;
@@ -492,53 +501,50 @@ void GetTurretTargets()
     }
 
     // Define reference ship controller
-    reference = GetControlledShipController(Controllers); // Primary, get active controller
-    if (reference == null)
+    _reference = GetControlledShipController(Controllers, _lastActiveShipController); // Primary, get active controller
+    if (_reference == null)
     {
-        if (lastActiveShipController != null)
-        {
-            // Backup, use last active controller
-            reference = lastActiveShipController;
-        }
-        else if (reference == null && Controllers.Count != 0)
+        if (_reference == null && Controllers.Count != 0)
         {
             // Last case, resort to the first controller in the list
-            reference = Controllers[0];
+            _reference = Controllers[0];
         }
         else
         {
-            reference = Me;
+            _reference = Me;
         }
     }
 
-    if (reference is IMyShipController)
-        lastActiveShipController = (IMyShipController)reference;
+    if (_reference is IMyShipController)
+    {
+        _lastActiveShipController = (IMyShipController)_reference;
+    }
 
-    foreach (var kvp in targetDataDict)
+    foreach (var kvp in _targetDataDict)
     {
         if (kvp.Key == Me.CubeGrid.EntityId)
             continue;
 
         var targetData = kvp.Value;
 
-        Color targetIconColor = enemyIconColor;
-        Color targetElevationColor = enemyElevationColor;
+        Color targetIconColor = _enemyIconColor;
+        Color targetElevationColor = _enemyElevationColor;
         switch (targetData.Relation)
         {
             case TargetRelation.Friendly:
-                targetIconColor = allyIconColor;
-                targetElevationColor = allyElevationColor;
+                targetIconColor = _allyIconColor;
+                targetElevationColor = _allyElevationColor;
                 break;
 
             case TargetRelation.Neutral:
-                targetIconColor = neutralIconColor;
-                targetElevationColor = neutralElevationColor;
+                targetIconColor = _neutralIconColor;
+                targetElevationColor = _neutralElevationColor;
                 break;
         }
 
-        radarSurface.AddContact(
+        _radarSurface.AddContact(
             targetData.Position,
-            reference.WorldMatrix,
+            _reference.WorldMatrix,
             targetIconColor,
             targetElevationColor,
             targetData.Relation,
@@ -549,8 +555,8 @@ void GetTurretTargets()
     }
     NetworkTargets();
 
-    targetDataDict.Clear();
-    radarSurface.RadarLockWarning = false;
+    _targetDataDict.Clear();
+    _radarSurface.RadarLockWarning = false;
 }
 #endregion
 
@@ -602,19 +608,19 @@ class RadarSurface
 
     public readonly StringBuilder Debug = new StringBuilder();
 
-    const string FONT = "Debug";
-    const string RADAR_WARNING_TEXT = "MISSILE LOCK";
-    const string ICON_OUT_OF_RANGE = "AH_BoreSight";
-    const float TITLE_TEXT_SIZE = 1.5f;
-    const float HUD_TEXT_SIZE = 1.3f;
-    const float RANGE_TEXT_SIZE = 1.2f;
-    const float LOCK_TEXT_SIZE = 1f;
-    const float TGT_ELEVATION_LINE_WIDTH = 4f;
-    const float RADAR_RANGE_LINE_WIDTH = 8f;
-    const float QUADRANT_LINE_WIDTH = 4f;
-    const float TITLE_BAR_HEIGHT = 64;
-    const float RADAR_WARNING_TEXT_SIZE = 1.5f;
-    const float SIZE_TO_PX = 28.8f;
+    const string Font = "Debug";
+    const string RadarWarningText = "MISSILE LOCK";
+    const string IconOutOfRange = "AH_BoreSight";
+    const float TitleTextSize = 1.5f;
+    const float HudTextSize = 1.3f;
+    const float RangeTextSize = 1.2f;
+    const float LockTextSize = 1f;
+    const float TgtElevationLineWidth = 4f;
+    const float RadarRangeLineWidth = 8f;
+    const float QuadrantLineWidth = 4f;
+    const float TitleBarHeight = 64;
+    const float RadarWarningTextSize = 1.5f;
+    const float SizeToPx = 28.8f;
 
     Color _titleBarColor;
     Color _backColor;
@@ -635,11 +641,11 @@ class RadarSurface
     Color _textBoxBackgroundColor = new Color(0, 0, 0, 220);
 
     readonly StringBuilder _textMeasuringSB = new StringBuilder();
-    readonly Vector2 DROP_SHADOW_OFFSET = new Vector2(2, 2);
-    readonly Vector2 TGT_ICON_SIZE = new Vector2(20f, 20f);
-    readonly Vector2 SHIP_ICON_SIZE = new Vector2(32, 16);
-    readonly Vector2 TRIANGLE_OFFSET = new Vector2(0, (float)(0.5f - Math.Sqrt(3f) / 6f));
-    readonly Vector2 BORDER_PADDING = new Vector2(16f, 64f);
+    readonly Vector2 _dropShadowOffset = new Vector2(2, 2);
+    readonly Vector2 _tgtIconSize = new Vector2(20f, 20f);
+    readonly Vector2 _shipIconSize = new Vector2(32, 16);
+    readonly Vector2 _triangleOffset = new Vector2(0, (float)(0.5f - Math.Sqrt(3f) / 6f));
+    readonly Vector2 _borderPadding = new Vector2(16f, 64f);
     readonly List<TargetInfo> _targetList = new List<TargetInfo>();
     readonly List<TargetInfo> _targetsBelowPlane = new List<TargetInfo>();
     readonly List<TargetInfo> _targetsAbovePlane = new List<TargetInfo>();
@@ -664,7 +670,7 @@ class RadarSurface
     public RadarSurface(Color titleBarColor, Color backColor, Color lineColor, Color planeColor, Color textColor, Color targetLockColor, float projectionAngleDeg, float range, bool drawQuadrants)
     {
         UpdateFields(titleBarColor, backColor, lineColor, planeColor, textColor, targetLockColor, projectionAngleDeg, range, drawQuadrants);
-        _textMeasuringSB.Append(RADAR_WARNING_TEXT);
+        _textMeasuringSB.Append(RadarWarningText);
     }
 
     public void UpdateFields(Color titleBarColor, Color backColor, Color lineColor, Color planeColor, Color textColor, Color targetLockColor, float projectionAngleDeg, float range, bool drawQuadrants)
@@ -694,7 +700,7 @@ class RadarSurface
         if (!RadarLockWarning || !_showRadarWarning)
             return;
 
-        float textSize = RADAR_WARNING_TEXT_SIZE * scale;
+        float textSize = RadarWarningTextSize * scale;
         Vector2 textBoxSize = surf.MeasureStringInPixels(_textMeasuringSB, "Debug", textSize);
         Vector2 padding = new Vector2(48f, 24f) * scale;
         Vector2 position = screenCenter + new Vector2(0, screenSize.Y * 0.2f);
@@ -702,17 +708,17 @@ class RadarSurface
         textPos.Y -= textBoxSize.Y * 0.5f;
 
         // Draw text box bg
-        MySprite textBoxBg = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _textBoxBackgroundColor, size: textBoxSize + padding);
+        var textBoxBg = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _textBoxBackgroundColor, size: textBoxSize + padding);
         textBoxBg.Position = position;
         surf.Add(textBoxBg);
 
         // Draw text box
-        MySprite textBox = new MySprite(SpriteType.TEXTURE, "AH_TextBox", color: _radarLockWarningColor, size: textBoxSize + padding);
+        var textBox = new MySprite(SpriteType.TEXTURE, "AH_TextBox", color: _radarLockWarningColor, size: textBoxSize + padding);
         textBox.Position = position;
         surf.Add(textBox);
 
         // Draw text
-        MySprite text = MySprite.CreateText(RADAR_WARNING_TEXT, "Debug", _radarLockWarningColor, scale: textSize);
+        var text = MySprite.CreateText(RadarWarningText, "Debug", _radarLockWarningColor, scale: textSize);
         text.Position = textPos;
         surf.Add(text);
     }
@@ -728,7 +734,7 @@ class RadarSurface
         else if ((type & TargetRelation.SmallGrid) != 0)
         {
             spriteName = "Triangle";
-            offset = TRIANGLE_OFFSET;
+            offset = _triangleOffset;
             scale = 1.25f;
         }
         else
@@ -741,8 +747,8 @@ class RadarSurface
 
     public void AddContact(Vector3D worldPosition, MatrixD worldMatrix, Color iconColor, Color elevationLineColor, TargetRelation relation, TargetRelation type, bool targetLock, bool myTargetLock, long id)
     {
-        Vector3D transformedDirection = Vector3D.TransformNormal(worldPosition - worldMatrix.Translation, Matrix.Transpose(worldMatrix));
-        Vector3 position = new Vector3(transformedDirection.X, transformedDirection.Z, transformedDirection.Y);
+        var transformedDirection = Vector3D.TransformNormal(worldPosition - worldMatrix.Translation, Matrix.Transpose(worldMatrix));
+        var position = new Vector3(transformedDirection.X, transformedDirection.Z, transformedDirection.Y);
         bool inRange = position.X * position.X + position.Y * position.Y < Range * Range;
         float angle = 0f;
         string spriteName = "";
@@ -755,10 +761,10 @@ class RadarSurface
         }
         else
         {
-            spriteName = ICON_OUT_OF_RANGE;
+            spriteName = IconOutOfRange;
             offset = Vector2.Zero;
             scale = 4f;
-            var directionFlat = position;
+            Vector3 directionFlat = position;
             directionFlat.Z = 0;
             float angleOffset = position.Z > 0 ? MathHelper.Pi : 0f;
             position = Vector3.Normalize(directionFlat);
@@ -848,8 +854,8 @@ class RadarSurface
     */
     static void DrawBoxCorners(ISpriteSurface surf, Vector2 boxSize, Vector2 centerPos, float lineLength, float lineWidth, Color color)
     {
-        Vector2 horizontalSize = new Vector2(lineLength, lineWidth);
-        Vector2 verticalSize = new Vector2(lineWidth, lineLength);
+        var horizontalSize = new Vector2(lineLength, lineWidth);
+        var verticalSize = new Vector2(lineWidth, lineLength);
 
         Vector2 horizontalOffset = 0.5f * horizontalSize;
         Vector2 verticalOffset = 0.5f * verticalSize;
@@ -900,7 +906,7 @@ class RadarSurface
         Vector2 viewportSize = surf.SurfaceSize;
         Vector2 scale = viewportSize / 512f;
         float minScale = Math.Min(scale.X, scale.Y);
-        Vector2 viewportCropped = viewportSize - (Vector2.UnitY * (TITLE_BAR_HEIGHT + RANGE_TEXT_SIZE * SIZE_TO_PX) + BORDER_PADDING) * minScale;
+        Vector2 viewportCropped = viewportSize - (Vector2.UnitY * (TitleBarHeight + RangeTextSize * SizeToPx) + _borderPadding) * minScale;
         float sideLength;
         if (viewportCropped.X * _radarProjectionCos < viewportCropped.Y)
         {
@@ -912,8 +918,8 @@ class RadarSurface
         }
         //float sideLength = Math.Min(viewportSize.X, viewportSize.Y - TITLE_BAR_HEIGHT * minScale);
 
-        Vector2 radarCenterPos = screenCenter + Vector2.UnitY * ((TITLE_BAR_HEIGHT - RANGE_TEXT_SIZE * SIZE_TO_PX) * 0.5f * minScale);
-        Vector2 radarPlaneSize = new Vector2(sideLength, sideLength * _radarProjectionCos);
+        Vector2 radarCenterPos = screenCenter + Vector2.UnitY * ((TitleBarHeight - RangeTextSize * SizeToPx) * 0.5f * minScale);
+        var radarPlaneSize = new Vector2(sideLength, sideLength * _radarProjectionCos);
 
         if (clearSpriteCache)
         {
@@ -961,11 +967,11 @@ class RadarSurface
         if (length > 0)
             diff /= length;
 
-        Vector2 size = new Vector2(length, width);
+        var size = new Vector2(length, width);
         float angle = (float)Math.Acos(Vector2.Dot(diff, Vector2.UnitX));
         angle *= Math.Sign(Vector2.Dot(diff, Vector2.UnitY));
 
-        MySprite sprite = MySprite.CreateSprite("SquareSimple", position, size);
+        var sprite = MySprite.CreateSprite("SquareSimple", position, size);
         sprite.RotationOrScale = angle;
         sprite.Color = color;
         surf.Add(sprite);
@@ -973,7 +979,7 @@ class RadarSurface
 
     void DrawRadarPlaneBackground(ISpriteSurface surf, Vector2 screenCenter, Vector2 radarPlaneSize, float scale)
     {
-        float lineWidth = RADAR_RANGE_LINE_WIDTH * scale;
+        float lineWidth = RadarRangeLineWidth * scale;
 
         MySprite sprite = new MySprite(SpriteType.TEXTURE, "Circle", size: radarPlaneSize, color: _lineColor);
         sprite.Position = screenCenter;
@@ -1001,7 +1007,7 @@ class RadarSurface
     {
         MySprite sprite;
         Vector2 halfScreenSize = viewportSize * 0.5f;
-        float titleBarHeight = TITLE_BAR_HEIGHT * scale;
+        float titleBarHeight = TitleBarHeight * scale;
 
         sprite = MySprite.CreateSprite("SquareSimple",
             screenCenter + new Vector2(0f, -halfScreenSize.Y + titleBarHeight * 0.5f),
@@ -1009,12 +1015,12 @@ class RadarSurface
         sprite.Color = _titleBarColor;
         surf.Add(sprite);
 
-        sprite = MySprite.CreateText($"WMI Radar System", FONT, _textColor, scale * TITLE_TEXT_SIZE, TextAlignment.CENTER);
+        sprite = MySprite.CreateText($"WMI Radar System", Font, _textColor, scale * TitleTextSize, TextAlignment.CENTER);
         sprite.Position = screenCenter + new Vector2(0, -halfScreenSize.Y + 4.25f * scale);
         surf.Add(sprite);
 
         // Ship location
-        var iconSize = SHIP_ICON_SIZE * scale;
+        var iconSize = _shipIconSize * scale;
         sprite = new MySprite(SpriteType.TEXTURE, "Triangle", size: iconSize, color: _lineColor);
         sprite.Position = radarScreenCenter + new Vector2(0f, -0.2f * iconSize.Y);
         surf.Add(sprite);
@@ -1023,13 +1029,13 @@ class RadarSurface
         // Quadrant lines
         if (_drawQuadrants)
         {
-            float lineWidth = QUADRANT_LINE_WIDTH * scale;
+            float lineWidth = QuadrantLineWidth * scale;
             DrawLineQuadrantSymmetry(surf, radarScreenCenter, 0.2f * quadrantLine, 1.0f * quadrantLine, lineWidth, _quadrantLineColor);
         }
 
         // Draw range text
-        float textSize = RANGE_TEXT_SIZE * scale;
-        Color rangeColors = new Color(_textColor.R, _textColor.G, _textColor.B, _textColor.A / 2);
+        float textSize = RangeTextSize * scale;
+        var rangeColors = new Color(_textColor.R, _textColor.G, _textColor.B, _textColor.A / 2);
 
         sprite = MySprite.CreateText($"Range: {_outerRange}", "Debug", rangeColors, textSize, TextAlignment.CENTER);
         sprite.Position = radarScreenCenter + new Vector2(0, radarPlaneSize.Y * 0.5f + scale * 4f /*+ textSize * 37f*/ );
@@ -1053,30 +1059,30 @@ class RadarSurface
 
         Vector3 targetPosPixels = targetInfo.Position * new Vector3(1, _radarProjectionCos, _radarProjectionSin) * radarPlaneSize.X * 0.5f;
 
-        Vector2 targetPosPlane = new Vector2(targetPosPixels.X, targetPosPixels.Y);
+        var targetPosPlane = new Vector2(targetPosPixels.X, targetPosPixels.Y);
         Vector2 iconPos = targetPosPlane - targetPosPixels.Z * Vector2.UnitY;
 
         RoundVector2(ref iconPos);
         RoundVector2(ref targetPosPlane);
 
-        float elevationLineWidth = Math.Max(1f, TGT_ELEVATION_LINE_WIDTH * scale);
-        MySprite elevationSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: new Vector2(elevationLineWidth, targetPosPixels.Z));
+        float elevationLineWidth = Math.Max(1f, TgtElevationLineWidth * scale);
+        var elevationSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: new Vector2(elevationLineWidth, targetPosPixels.Z));
         elevationSprite.Position = screenCenter + (iconPos + targetPosPlane) * 0.5f;
         RoundVector2(ref elevationSprite.Position);
         RoundVector2(ref elevationSprite.Size);
 
-        Vector2 iconSize = TGT_ICON_SIZE * scale * targetInfo.Scale;
-        MySprite iconSprite = new MySprite(SpriteType.TEXTURE, targetInfo.Icon, color: ScaleColorAlpha(targetInfo.IconColor, alphaScale), size: iconSize, rotation: targetInfo.Rotation);
+        Vector2 iconSize = _tgtIconSize * scale * targetInfo.Scale;
+        var iconSprite = new MySprite(SpriteType.TEXTURE, targetInfo.Icon, color: ScaleColorAlpha(targetInfo.IconColor, alphaScale), size: iconSize, rotation: targetInfo.Rotation);
         iconSprite.Position = screenCenter + iconPos;
         RoundVector2(ref iconSprite.Position);
         RoundVector2(ref iconSprite.Size);
 
-        MySprite iconShadow = iconSprite;
+        var iconShadow = iconSprite;
         iconShadow.Color = ScaleColorAlpha(Color.Black, alphaScale);
         iconShadow.Size += Vector2.One * 2f * (float)Math.Max(1f, Math.Round(scale * 4f));
 
         iconSize.Y *= _radarProjectionCos;
-        MySprite projectedIconSprite = new MySprite(SpriteType.TEXTURE, "Circle", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: iconSize);
+        var projectedIconSprite = new MySprite(SpriteType.TEXTURE, "Circle", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: iconSize);
         projectedIconSprite.Position = screenCenter + targetPosPlane;
         RoundVector2(ref projectedIconSprite.Position);
         RoundVector2(ref projectedIconSprite.Size);
@@ -1117,27 +1123,27 @@ class RadarSurface
 
         if (targetInfo.TargetLock && alphaScale > 0.999f)
         {
-            Vector2 targetBoxSize = (TGT_ICON_SIZE + 20) * scale;
+            Vector2 targetBoxSize = (_tgtIconSize + 20) * scale;
             DrawBoxCorners(surf, targetBoxSize, screenCenter + iconPos, 12 * scale, 4 * scale, targetInfo.IconColor);
 
             if (targetInfo.MyTargetLock)
             {
-                float lockTextSizeScaled = LOCK_TEXT_SIZE * scale;
-                MySprite lockText = new MySprite()
+                float lockTextSizeScaled = LockTextSize * scale;
+                var lockText = new MySprite()
                 {
                     Type = SpriteType.TEXT,
                     Alignment = TextAlignment.CENTER,
                     Color = _textColor,
                     Data = "LOCK",
                     FontId = "Debug",
-                    Position = screenCenter + iconPos - new Vector2(0, targetBoxSize.X * 0.5f + lockTextSizeScaled * SIZE_TO_PX),
+                    Position = screenCenter + iconPos - new Vector2(0, targetBoxSize.X * 0.5f + lockTextSizeScaled * SizeToPx),
                     RotationOrScale = lockTextSizeScaled,
                     Size = null,
                 };
 
                 MySprite lockTextShadow = lockText;
                 lockTextShadow.Color = _backColor;
-                lockTextShadow.Position += DROP_SHADOW_OFFSET;
+                lockTextShadow.Position += _dropShadowOffset;
 
                 surf.Add(lockTextShadow);
                 surf.Add(lockText);
@@ -1211,35 +1217,36 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
     if (textSurface != null)
     {
         bool multiscreen = false;
-        int rows = 1;
-        int cols = 1;
-        textSurfaceIni.Clear();
-        parsed = textSurfaceIni.TryParse(block.CustomData);
+        
+        _rows.Value = 1;
+        _cols.Value = 1;
+        _textSurfaceIni.Clear();
+        parsed = _textSurfaceIni.TryParse(block.CustomData);
 
-        if (parsed && textSurfaceIni.ContainsSection(INI_SECTION_MULTISCREEN))
+        if (parsed && _textSurfaceIni.ContainsSection(IniSectionMultiscreen))
         {
             Echo($"{parsed}");
             multiscreen = true;
-            rows = textSurfaceIni.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS).ToInt32(rows);
-            cols = textSurfaceIni.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS).ToInt32(cols);
-            rows = Math.Max(rows, 1);
-            cols = Math.Max(cols, 1);
-            textSurfaceIni.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS, rows);
-            textSurfaceIni.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS, cols);
+            _rows.ReadFromIni(_textSurfaceIni);
+            _cols.ReadFromIni(_textSurfaceIni);
+            _rows.Value = Math.Max(_rows, 1);
+            _cols.Value = Math.Max(_cols, 1);
+            _rows.WriteToIni(_textSurfaceIni);
+            _cols.WriteToIni(_textSurfaceIni);
         }
 
         if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
         {
-            textSurfaceIni.EndContent = block.CustomData;
+            _textSurfaceIni.EndContent = block.CustomData;
         }
 
-        output = textSurfaceIni.ToString();
+        output = _textSurfaceIni.ToString();
         if (!string.Equals(output, block.CustomData))
             block.CustomData = output;
 
         if (multiscreen)
         {
-            surfaces.Add(new MultiScreenSpriteSurface(textSurface, rows, cols, this));
+            surfaces.Add(new MultiScreenSpriteSurface(textSurface, _rows, _cols, this));
         }
         else
         {
@@ -1252,187 +1259,69 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
     if (surfaceProvider == null)
         return;
 
-    textSurfaceIni.Clear();
-    parsed = textSurfaceIni.TryParse(block.CustomData);
+    _textSurfaceIni.Clear();
+    parsed = _textSurfaceIni.TryParse(block.CustomData);
 
     if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
     {
-        textSurfaceIni.EndContent = block.CustomData;
+        _textSurfaceIni.EndContent = block.CustomData;
     }
 
     int surfaceCount = surfaceProvider.SurfaceCount;
     for (int i = 0; i < surfaceCount; ++i)
     {
-        string iniKey = string.Format(INI_TEXT_SURFACE_TEMPLATE, i);
-        bool display = textSurfaceIni.Get(INI_SECTION_TEXT_SURF_PROVIDER, iniKey).ToBoolean(i == 0 && !(block is IMyProgrammableBlock));
+        string iniKey = string.Format(IniTextSurfaceTemplate, i);
+        bool display = _textSurfaceIni.Get(IniSectionTextSurface, iniKey).ToBoolean(i == 0 && !(block is IMyProgrammableBlock));
         if (display)
         {
             surfaces.Add(new SingleScreenSpriteSurface(surfaceProvider.GetSurface(i)));
         }
 
-        textSurfaceIni.Set(INI_SECTION_TEXT_SURF_PROVIDER, iniKey, display);
+        _textSurfaceIni.Set(IniSectionTextSurface, iniKey, display);
     }
 
-    output = textSurfaceIni.ToString();
+    output = _textSurfaceIni.ToString();
     if (!string.Equals(output, block.CustomData))
         block.CustomData = output;
 }
 
-void WriteCustomDataIni()
-{
-    generalIni.Set(INI_SECTION_GENERAL, INI_RADAR_NAME, textPanelName);
-    generalIni.Set(INI_SECTION_GENERAL, INI_BCAST, broadcastIFF);
-    generalIni.Set(INI_SECTION_GENERAL, INI_NETWORK, networkTargets);
-    generalIni.Set(INI_SECTION_GENERAL, INI_USE_RANGE_OVERRIDE, useRangeOverride);
-    generalIni.Set(INI_SECTION_GENERAL, INI_RANGE_OVERRIDE, rangeOverride);
-    generalIni.Set(INI_SECTION_GENERAL, INI_PROJ_ANGLE, projectionAngle);
-    generalIni.Set(INI_SECTION_GENERAL, INI_DRAW_QUADRANTS, drawQuadrants);
-    generalIni.Set(INI_SECTION_GENERAL, INI_REF_NAME, referenceName);
-    generalIni.Set(INI_SECTION_GENERAL, INI_DRAW_RUNNING_SCREEN, drawRunningScreen);
-    generalIni.Set(INI_SECTION_GENERAL, INI_FADE_OUT_INTERVAL, radarSurface.FadeOutInterval);
-
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_TITLE_BAR, titleBarColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_TEXT, textColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_BACKGROUND, backColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_RADAR_LINES, lineColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_PLANE, planeColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_ENEMY, enemyIconColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_ENEMY_ELEVATION, enemyElevationColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_NEUTRAL, neutralIconColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_NEUTRAL_ELEVATION, neutralElevationColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_FRIENDLY, allyIconColor, generalIni);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_FRIENDLY_ELEVATION, allyElevationColor, generalIni);
-    generalIni.SetSectionComment(INI_SECTION_COLORS, "Colors are defined with RGBAlpha color codes where\nvalues can range from 0,0,0,0 [transparent] to 255,255,255,255 [white].");
-
-    string output = generalIni.ToString();
-    if (!string.Equals(output, Me.CustomData))
-        Me.CustomData = output;
-}
-
 void ParseCustomDataIni()
 {
-    generalIni.Clear();
+    _ini.Clear();
 
-    if (generalIni.TryParse(Me.CustomData))
+    if (_ini.TryParse(Me.CustomData))
     {
-        textPanelName = generalIni.Get(INI_SECTION_GENERAL, INI_RADAR_NAME).ToString(textPanelName);
-        referenceName = generalIni.Get(INI_SECTION_GENERAL, INI_REF_NAME).ToString(referenceName);
-        broadcastIFF = generalIni.Get(INI_SECTION_GENERAL, INI_BCAST).ToBoolean(broadcastIFF);
-        networkTargets = generalIni.Get(INI_SECTION_GENERAL, INI_NETWORK).ToBoolean(networkTargets);
-        useRangeOverride = generalIni.Get(INI_SECTION_GENERAL, INI_USE_RANGE_OVERRIDE).ToBoolean(useRangeOverride);
-        rangeOverride = generalIni.Get(INI_SECTION_GENERAL, INI_RANGE_OVERRIDE).ToSingle(rangeOverride);
-        projectionAngle = generalIni.Get(INI_SECTION_GENERAL, INI_PROJ_ANGLE).ToSingle(projectionAngle);
-        drawQuadrants = generalIni.Get(INI_SECTION_GENERAL, INI_DRAW_QUADRANTS).ToBoolean(drawQuadrants);
-        drawRunningScreen = generalIni.Get(INI_SECTION_GENERAL, INI_DRAW_RUNNING_SCREEN).ToBoolean(drawRunningScreen);
-        radarSurface.FadeOutInterval = generalIni.Get(INI_SECTION_GENERAL, INI_FADE_OUT_INTERVAL).ToSingle(defaultFadeoutInterval);
-
-        titleBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_TITLE_BAR, generalIni, titleBarColor);
-        textColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_TEXT, generalIni, textColor);
-        backColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_BACKGROUND, generalIni, backColor);
-        lineColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_RADAR_LINES, generalIni, lineColor);
-        planeColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_PLANE, generalIni, planeColor);
-        enemyIconColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_ENEMY, generalIni, enemyIconColor);
-        enemyElevationColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_ENEMY_ELEVATION, generalIni, enemyElevationColor);
-        neutralIconColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_NEUTRAL, generalIni, neutralIconColor);
-        neutralElevationColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_NEUTRAL_ELEVATION, generalIni, neutralElevationColor);
-        allyIconColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_FRIENDLY, generalIni, allyIconColor);
-        allyElevationColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_FRIENDLY_ELEVATION, generalIni, allyElevationColor);
+        foreach (var c in _generalConfig)
+        {
+            c.ReadFromIni(_ini);
+        }
+        _radarSurface.FadeOutInterval = _fadeOutInterval;
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
-        generalIni.EndContent = Me.CustomData;
+        _ini.EndContent = Me.CustomData;
     }
 
-    WriteCustomDataIni();
-
-    if (radarSurface != null)
+    foreach (var c in _generalConfig)
     {
-        radarSurface.UpdateFields(titleBarColor, backColor, lineColor, planeColor, textColor, missileLockColor, projectionAngle, MaxRange, drawQuadrants);
+        c.WriteToIni(_ini);
     }
-}
+    _ini.SetSectionComment(IniSectionColors, "Colors are defined with RGBAlpha color codes where\nvalues can range from 0,0,0,0 [transparent] to 255,255,255,255 [white].");
 
-public static class MyIniHelper
-{
-    /// <summary>
-    /// Adds a color character to a MyIni object
-    /// </summary>
-    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini)
+    string output = _ini.ToString();
+    if (!string.Equals(output, Me.CustomData))
     {
-
-        string colorString = string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A);
-
-        ini.Set(sectionName, itemName, colorString);
+        Me.CustomData = output;
     }
 
-    /// <summary>
-    /// Parses a MyIni for a color character
-    /// </summary>
-    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultChar = null)
+    if (_radarSurface != null)
     {
-        string rgbString = ini.Get(sectionName, itemName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length != 4)
-        {
-            if (defaultChar.HasValue)
-                return defaultChar.Value;
-            else
-                return Color.Transparent;
-        }
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
-        if (!hasAlpha)
-            a = 255;
-
-        r = MathHelper.Clamp(r, 0, 255);
-        g = MathHelper.Clamp(g, 0, 255);
-        b = MathHelper.Clamp(b, 0, 255);
-        a = MathHelper.Clamp(a, 0, 255);
-
-        return new Color(r, g, b, a);
+        _radarSurface.UpdateFields(_titleBarColor, _backColor, _lineColor, _planeColor, _textColor, _missileLockWarningColor, _projectionAngle, MaxRange, _drawQuadrants);
     }
 }
 #endregion
 
 #region General Functions
-//Whip's Running Symbol Method v8
-//•
-int runningSymbolVariant = 0;
-int runningSymbolCount = 0;
-const int increment = 1;
-string[] runningSymbols = new string[] { ".", "..", "...", "....", "...", "..", ".", "" };
-
-string RunningSymbol()
-{
-    if (runningSymbolCount >= increment)
-    {
-        runningSymbolCount = 0;
-        runningSymbolVariant++;
-        if (runningSymbolVariant >= runningSymbols.Length)
-            runningSymbolVariant = 0;
-    }
-    runningSymbolCount++;
-    return runningSymbols[runningSymbolVariant];
-}
-
-IMyShipController GetControlledShipController(List<IMyShipController> SCs)
-{
-    foreach (IMyShipController thisController in SCs)
-    {
-        if (thisController.Closed)
-            continue;
-
-        if (thisController.IsUnderControl && thisController.CanControlShip)
-            return thisController;
-    }
-
-    return null;
-}
-
 float GetMaxTurretRange(List<TurretInterface> turrets)
 {
     float maxRange = 0;
@@ -1452,11 +1341,6 @@ float GetMaxTurretRange(List<TurretInterface> turrets)
     }
     return maxRange;
 }
-
-public static bool StringContains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
-{
-    return source?.IndexOf(toCheck, comp) >= 0;
-}
 #endregion
 
 #region Block Fetching
@@ -1465,40 +1349,40 @@ bool PopulateLists(IMyTerminalBlock block)
     if (!block.IsSameConstructAs(Me))
         return false;
 
-    myGridIds.Add(block.CubeGrid.EntityId);
+    _myGridIds.Add(block.CubeGrid.EntityId);
 
-    if (StringContains(block.CustomName, textPanelName))
+    if (StringExtensions.Contains(block.CustomName, _textPanelName))
     {
-        AddTextSurfaces(block, surfaces);
+        AddTextSurfaces(block, _surfaces);
     }
 
     var turret = block as IMyLargeTurretBase;
     if (turret != null)
     {
-        turrets.Add(new TurretInterface(turret));
+        _turrets.Add(new TurretInterface(turret));
         return false;
     }
 
     var tcb = block as IMyTurretControlBlock;
     if (tcb != null)
     {
-        turrets.Add(new TurretInterface(tcb));
+        _turrets.Add(new TurretInterface(tcb));
         return false;
     }
 
     var controller = block as IMyShipController;
     if (controller != null)
     {
-        allControllers.Add(controller);
-        if (StringContains(block.CustomName, referenceName))
-            taggedControllers.Add(controller);
+        _allControllers.Add(controller);
+        if (StringExtensions.Contains(block.CustomName, _referenceName))
+            _taggedControllers.Add(controller);
         return false;
     }
 
     var sensor = block as IMySensorBlock;
     if (sensor != null)
     {
-        sensors.Add(sensor);
+        _sensors.Add(sensor);
         return false;
     }
 
@@ -1510,203 +1394,47 @@ void GrabBlocks()
     // This forces sprites to redraw by clearing the cache
     _clearSpriteCache = !_clearSpriteCache;
 
-    myGridIds.Clear();
-    sensors.Clear();
-    turrets.Clear();
-    allControllers.Clear();
-    taggedControllers.Clear();
-    surfaces.Clear();
+    _myGridIds.Clear();
+    _sensors.Clear();
+    _turrets.Clear();
+    _allControllers.Clear();
+    _taggedControllers.Clear();
+    _surfaces.Clear();
 
     _compositeBoundingSphere.FetchCubeGrids();
     GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, PopulateLists);
 
-    if (sensors.Count == 0)
+    if (_sensors.Count == 0)
         Log.Info($"No sensors found (not an error).");
 
-    if (turrets.Count == 0)
+    if (_turrets.Count == 0)
         Log.Warning($"No turrets found. You will only be able to see targets that are broadcast by allies.");
 
-    if (surfaces.Count == 0)
-        Log.Error($"No text panels or text surface providers with name tag '{textPanelName}' were found.");
+    if (_surfaces.Count == 0)
+        Log.Error($"No text panels or text surface providers with name tag '{_textPanelName}' were found.");
 
-    if (allControllers.Count == 0)
+    if (_allControllers.Count == 0)
         Log.Warning($"No ship controllers were found. Using orientation of this block...");
     else
     {
-        if (taggedControllers.Count == 0)
-            Log.Info($"No ship controllers named \"{referenceName}\" were found. Using all available ship controllers. (This is NOT an error!)");
+        if (_taggedControllers.Count == 0)
+            Log.Info($"No ship controllers named \"{_referenceName}\" were found. Using all available ship controllers. (This is NOT an error!)");
         else
-            Log.Info($"One or more ship controllers with name tag \"{referenceName}\" were found. Using these to orient the radar.");
+            Log.Info($"One or more ship controllers with name tag \"{_referenceName}\" were found. Using these to orient the radar.");
     }
 
-    lastSetupResult = Log.Write();
+    _lastSetupResult = Log.Write();
 
-    if (surfaces.Count == 0)
-        isSetup = false;
+    if (_surfaces.Count == 0)
+        _isSetup = false;
     else
     {
-        isSetup = true;
+        _isSetup = true;
         ParseCustomDataIni();
     }
 }
 #endregion
 
-#region Scheduler
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
-public class Scheduler
-{
-    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
-    const double runtimeToRealtime = (1.0 / 60.0) / 0.0166666;
-    private readonly Program _program;
-    private ScheduledAction _currentlyQueuedAction = null;
-
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
-    /// <param name="program"></param>
-    public Scheduler(Program program)
-    {
-        _program = program;
-    }
-
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
-    public void Update()
-    {
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * runtimeToRealtime);
-
-        _actionsToDispose.Clear();
-        foreach (ScheduledAction action in _scheduledActions)
-        {
-            action.Update(deltaTime);
-            if (action.JustRan && action.DisposeAfterRun)
-            {
-                _actionsToDispose.Add(action);
-            }
-        }
-
-        // Remove all actions that we should dispose
-        _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
-
-        if (_currentlyQueuedAction == null)
-        {
-            // If queue is not empty, populate current queued action
-            if (_queuedActions.Count != 0)
-                _currentlyQueuedAction = _queuedActions.Dequeue();
-        }
-
-        // If queued action is populated
-        if (_currentlyQueuedAction != null)
-        {
-            _currentlyQueuedAction.Update(deltaTime);
-            if (_currentlyQueuedAction.JustRan)
-            {
-                // If we should recycle, add it to the end of the queue
-                if (!_currentlyQueuedAction.DisposeAfterRun)
-                    _queuedActions.Enqueue(_currentlyQueuedAction);
-
-                // Set the queued action to null for the next cycle
-                _currentlyQueuedAction = null;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
-    /// <param name="action"></param>
-    /// <param name="updateFrequency"></param>
-    /// <param name="disposeAfterRun"></param>
-    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false)
-    {
-        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun);
-        _scheduledActions.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
-    /// <param name="scheduledAction"></param>
-    public void AddScheduledAction(ScheduledAction scheduledAction)
-    {
-        _scheduledActions.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
-    /// <param name="action"></param>
-    /// <param name="updateInterval"></param>
-    /// <param name="disposeAfterRun"></param>
-    public void AddQueuedAction(Action action, double updateInterval, bool disposeAfterRun = false)
-    {
-        if (updateInterval <= 0)
-        {
-            updateInterval = 0.001; // avoids divide by zero
-        }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, disposeAfterRun);
-        _queuedActions.Enqueue(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
-    /// <param name="scheduledAction"></param>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
-    {
-        _queuedActions.Enqueue(scheduledAction);
-    }
-}
-
-public class ScheduledAction
-{
-    public bool JustRan { get; private set; } = false;
-    public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public readonly double RunInterval;
-
-    private readonly double _runFrequency;
-    private readonly Action _action;
-    protected bool _justRun = false;
-
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
-    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false)
-    {
-        _action = action;
-        _runFrequency = runFrequency;
-        RunInterval = 1.0 / _runFrequency;
-        DisposeAfterRun = removeAfterRun;
-    }
-
-    public virtual void Update(double deltaTime)
-    {
-        TimeSinceLastRun += deltaTime;
-
-        if (TimeSinceLastRun >= RunInterval)
-        {
-            _action.Invoke();
-            TimeSinceLastRun = 0;
-
-            JustRan = true;
-        }
-        else
-        {
-            JustRan = false;
-        }
-    }
-}
-#endregion
-
-#region Script Logging
 public static class Log
 {
     static StringBuilder _builder = new StringBuilder();
@@ -1802,207 +1530,7 @@ public static class Log
         _builder.Append(text).Append('\n');
     }
 }
-#endregion
 
-#region Runtime Tracking
-/// <summary>
-/// Class that tracks runtime history.
-/// </summary>
-public class RuntimeTracker
-{
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime { get; private set; }
-    public double MaxInstructions { get; private set; }
-    public double AverageRuntime { get; private set; }
-    public double AverageInstructions { get; private set; }
-    public double LastRuntime { get; private set; }
-    public double LastInstructions { get; private set; }
-
-    readonly Queue<double> _runtimes = new Queue<double>();
-    readonly Queue<double> _instructions = new Queue<double>();
-    readonly int _instructionLimit;
-    readonly Program _program;
-    const double MS_PER_TICK = 16.6666;
-
-    const string Format = "General Runtime Info\n"
-            + "- Avg runtime: {0:n4} ms\n"
-            + "- Last runtime: {1:n4} ms\n"
-            + "- Max runtime: {2:n4} ms\n"
-            + "- Avg instructions: {3:n2}\n"
-            + "- Last instructions: {4:n0}\n"
-            + "- Max instructions: {5:n0}\n"
-            + "- Avg complexity: {6:0.000}%";
-
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
-    {
-        _program = program;
-        Capacity = capacity;
-        Sensitivity = sensitivity;
-        _instructionLimit = _program.Runtime.MaxInstructionCount;
-    }
-
-    public void AddRuntime()
-    {
-        double runtime = _program.Runtime.LastRunTimeMs;
-        LastRuntime = runtime;
-        AverageRuntime += (Sensitivity * runtime);
-        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
-        if (roundedTicksSinceLastRuntime == 1)
-        {
-            AverageRuntime *= (1 - Sensitivity);
-        }
-        else if (roundedTicksSinceLastRuntime > 1)
-        {
-            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
-        }
-
-        _runtimes.Enqueue(runtime);
-        if (_runtimes.Count == Capacity)
-        {
-            _runtimes.Dequeue();
-        }
-
-        MaxRuntime = _runtimes.Max();
-    }
-
-    public void AddInstructions()
-    {
-        double instructions = _program.Runtime.CurrentInstructionCount;
-        LastInstructions = instructions;
-        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-
-        _instructions.Enqueue(instructions);
-        if (_instructions.Count == Capacity)
-        {
-            _instructions.Dequeue();
-        }
-
-        MaxInstructions = _instructions.Max();
-    }
-
-    public string Write()
-    {
-        return string.Format(
-            Format,
-            AverageRuntime,
-            LastRuntime,
-            MaxRuntime,
-            AverageInstructions,
-            LastInstructions,
-            MaxInstructions,
-            AverageInstructions / _instructionLimit);
-    }
-}
-#endregion
-
-
-public class CompositeBoundingSphere
-{
-    public double Radius
-    {
-        get
-        {
-            return _sphere.Radius;
-        }
-    }
-
-    public Vector3D Center
-    {
-        get
-        {
-            return _sphere.Center;
-        }
-    }
-
-    public IMyCubeGrid LargestGrid = null;
-
-    BoundingSphereD _sphere;
-
-    Program _program;
-    HashSet<IMyCubeGrid> _grids = new HashSet<IMyCubeGrid>();
-    Vector3D _compositePosLocal = Vector3D.Zero;
-    double _compositeRadius = 0;
-
-    public CompositeBoundingSphere(Program program)
-    {
-        _program = program;
-    }
-
-    public void FetchCubeGrids()
-    {
-        _grids.Clear();
-        _grids.Add(_program.Me.CubeGrid);
-        LargestGrid = _program.Me.CubeGrid;
-        _program.GridTerminalSystem.GetBlocksOfType<IMyMechanicalConnectionBlock>(null, CollectGrids);
-        RecomputeCompositeProperties();
-    }
-
-    public void Compute(bool fullCompute = false)
-    {
-        if (fullCompute)
-        {
-            RecomputeCompositeProperties();
-        }
-        Vector3D compositePosWorld = _program.Me.GetPosition() + Vector3D.TransformNormal(_compositePosLocal, _program.Me.WorldMatrix);
-        _sphere = new BoundingSphereD(compositePosWorld, _compositeRadius);
-    }
-
-    void RecomputeCompositeProperties()
-    {
-        bool first = true;
-        Vector3D compositeCenter = Vector3D.Zero;
-        double compositeRadius = 0;
-        foreach (var g in _grids)
-        {
-            Vector3D currentCenter = g.WorldVolume.Center;
-            double currentRadius = g.WorldVolume.Radius;
-            if (first)
-            {
-                compositeCenter = currentCenter;
-                compositeRadius = currentRadius;
-                first = false;
-                continue;
-            }
-            Vector3D diff = currentCenter - compositeCenter;
-            double diffLen = diff.Normalize();
-            double newDiameter = currentRadius + diffLen + compositeRadius;
-            double newRadius = 0.5 * newDiameter;
-            if (newRadius > compositeRadius)
-            {
-                double diffScale = (newRadius - compositeRadius);
-                compositeRadius = newRadius;
-                compositeCenter += diffScale * diff;
-            }
-        }
-        // Convert to local space
-        Vector3D directionToCompositeCenter = compositeCenter - _program.Me.GetPosition();
-        _compositePosLocal = Vector3D.TransformNormal(directionToCompositeCenter, MatrixD.Transpose(_program.Me.WorldMatrix));
-        _compositeRadius = compositeRadius;
-    }
-
-    bool CollectGrids(IMyTerminalBlock b)
-    {
-        if (!b.IsSameConstructAs(_program.Me))
-        {
-            return false;
-        }
-
-        var mech = (IMyMechanicalConnectionBlock)b;
-        if (mech.CubeGrid.WorldVolume.Radius > LargestGrid.WorldVolume.Radius)
-        {
-            LargestGrid = mech.CubeGrid;
-        }
-        _grids.Add(mech.CubeGrid);
-        if (mech.IsAttached)
-        {
-            _grids.Add(mech.TopGrid);
-        }
-        return false;
-    }
-}
-
-#region Running Screen Manager
 class RadarRunningScreenManager
 {
     readonly Color _topBarColor = new Color(25, 25, 25);
@@ -2120,7 +1648,7 @@ new AnimationParams(345f,   0,   0, 160),
     {
         float titleBarHeight = scale * TitleBarHeightPx;
         Vector2 topLeft = 0.5f * (surface.TextureSize - surface.SurfaceSize);
-        Vector2 titleBarSize = new Vector2(surface.TextureSize.X, titleBarHeight);
+        var titleBarSize = new Vector2(surface.TextureSize.X, titleBarHeight);
         Vector2 titleBarPos = topLeft + new Vector2(surface.TextureSize.X * 0.5f, titleBarHeight * 0.5f);
         Vector2 titleBarTextPos = topLeft + new Vector2(surface.TextureSize.X * 0.5f, 0.5f * (titleBarHeight - scale * BaseTextHeightPx));
 
@@ -2185,6 +1713,437 @@ new AnimationParams(345f,   0,   0, 160),
     #endregion
 }
 #endregion
+
+#region INCLUDES
+
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
+
+#region Scheduler
+/// <summary>
+/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
+/// </summary>
+public class Scheduler
+{
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
+    ScheduledAction _currentlyQueuedAction = null;
+    bool _firstRun = true;
+    bool _inUpdate = false;
+
+    readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
+    readonly Program _program;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
+
+    /// <summary>
+    /// Constructs a scheduler object with timing based on the runtime of the input program.
+    /// </summary>
+    public Scheduler(Program program, bool ignoreFirstRun = false)
+    {
+        _program = program;
+        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Updates all ScheduledAcions in the schedule and the queue.
+    /// </summary>
+    public void Update()
+    {
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
+
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
+        _actionsToDispose.Clear();
+        foreach (ScheduledAction action in _scheduledActions)
+        {
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
+            if (action.JustRan && action.DisposeAfterRun)
+            {
+                _actionsToDispose.Add(action);
+            }
+        }
+
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
+
+        if (_currentlyQueuedAction == null)
+        {
+            // If queue is not empty, populate current queued action
+            if (_queuedActions.Count != 0)
+                _currentlyQueuedAction = _queuedActions.Dequeue();
+        }
+
+        // If queued action is populated
+        if (_currentlyQueuedAction != null)
+        {
+            _currentlyQueuedAction.Update(deltaTicks);
+            if (_currentlyQueuedAction.JustRan)
+            {
+                // Set the queued action to null for the next cycle
+                _currentlyQueuedAction = null;
+            }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Adds an Action to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
+    {
+        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(ScheduledAction scheduledAction)
+    {
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds an Action to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(Action action, double updateInterval)
+    {
+        if (updateInterval <= 0)
+        {
+            updateInterval = 0.001; // avoids divide by zero
+        }
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        _queuedActions.Enqueue(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(QueuedAction scheduledAction)
+    {
+        _queuedActions.Enqueue(scheduledAction);
+    }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval)
+        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    { }
+}
+
+public class ScheduledAction
+{
+    public bool JustRan { get; private set; } = false;
+    public bool DisposeAfterRun { get; private set; } = false;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
+
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
+    readonly Action _action;
+
+    /// <summary>
+    /// Class for scheduling an action to occur at a specified frequency (in Hz).
+    /// </summary>
+    /// <param name="action">Action to run</param>
+    /// <param name="runFrequency">How often to run in Hz</param>
+    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
+    {
+        _action = action;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
+        DisposeAfterRun = removeAfterRun;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
+    }
+
+    public void Update(long deltaTicks)
+    {
+        TicksSinceLastRun += deltaTicks;
+
+        if (TicksSinceLastRun >= RunIntervalTicks)
+        {
+            _action.Invoke();
+            TicksSinceLastRun = 0;
+
+            JustRan = true;
+        }
+        else
+        {
+            JustRan = false;
+        }
+    }
+}
+#endregion
+
+/// <summary>
+/// Class that tracks runtime history.
+/// </summary>
+public class RuntimeTracker
+{
+    public int Capacity { get; set; }
+    public double Sensitivity { get; set; }
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
+    
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
+
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
+    {
+        _program = program;
+        Capacity = capacity;
+        Sensitivity = sensitivity;
+        _instructionLimit = _program.Runtime.MaxInstructionCount;
+    }
+
+    public void AddRuntime()
+    {
+        double runtime = _program.Runtime.LastRunTimeMs;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
+
+        _runtimes.Enqueue(runtime);
+        if (_runtimes.Count == Capacity)
+        {
+            _runtimes.Dequeue();
+        }
+        
+        MaxRuntime = _runtimes.Max();
+    }
+
+    public void AddInstructions()
+    {
+        double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
+        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
+        
+        _instructions.Enqueue(instructions);
+        if (_instructions.Count == Capacity)
+        {
+            _instructions.Dequeue();
+        }
+        
+        MaxInstructions = _instructions.Max();
+    }
+
+    public string Write()
+    {
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
+    }
+}
+
+public class CompositeBoundingSphere
+{
+    public double Radius
+    {
+        get
+        {
+            return _sphere.Radius;
+        }
+    }
+    
+    public Vector3D Center
+    {
+        get
+        {
+            return _sphere.Center;
+        }
+    }
+    
+    public IMyCubeGrid LargestGrid = null;
+    
+    BoundingSphereD _sphere;
+
+    Program _program;
+    HashSet<IMyCubeGrid> _grids = new HashSet<IMyCubeGrid>();
+    Vector3D _compositePosLocal = Vector3D.Zero;
+    double _compositeRadius = 0;
+
+    public CompositeBoundingSphere(Program program)
+    {
+        _program = program;
+    }
+
+    public void FetchCubeGrids()
+    {
+        _grids.Clear();
+        _grids.Add(_program.Me.CubeGrid);
+        LargestGrid = _program.Me.CubeGrid;
+        _program.GridTerminalSystem.GetBlocksOfType<IMyMechanicalConnectionBlock>(null, CollectGrids);
+        RecomputeCompositeProperties();
+    }
+
+    public void Compute(bool fullCompute = false)
+    {
+        if (fullCompute)
+        {
+            RecomputeCompositeProperties();
+        }
+        Vector3D compositePosWorld = _program.Me.GetPosition() + Vector3D.TransformNormal(_compositePosLocal, _program.Me.WorldMatrix);
+        _sphere = new BoundingSphereD(compositePosWorld, _compositeRadius);
+    }
+
+    void RecomputeCompositeProperties()
+    {
+        bool first = true;
+        Vector3D compositeCenter = Vector3D.Zero;
+        double compositeRadius = 0;
+        foreach (var g in _grids)
+        {
+            Vector3D currentCenter = g.WorldVolume.Center;
+            double currentRadius = g.WorldVolume.Radius;
+            if (first)
+            {
+                compositeCenter = currentCenter;
+                compositeRadius = currentRadius;
+                first = false;
+                continue;
+            }
+            Vector3D diff = currentCenter - compositeCenter;
+            double diffLen = diff.Normalize();
+            double newDiameter = currentRadius + diffLen + compositeRadius;
+            double newRadius = 0.5 * newDiameter;
+            if (newRadius > compositeRadius)
+            {
+                double diffScale = (newRadius - compositeRadius);
+                compositeRadius = newRadius;
+                compositeCenter += diffScale * diff;
+            }
+        }
+        // Convert to local space
+        Vector3D directionToCompositeCenter = compositeCenter - _program.Me.GetPosition();
+        _compositePosLocal = Vector3D.TransformNormal(directionToCompositeCenter, MatrixD.Transpose(_program.Me.WorldMatrix));
+        _compositeRadius = compositeRadius;
+    }
+
+    bool CollectGrids(IMyTerminalBlock b)
+    {
+        if (!b.IsSameConstructAs(_program.Me))
+        {
+            return false;
+        }
+        
+        var mech = (IMyMechanicalConnectionBlock)b;
+        if (mech.CubeGrid.WorldVolume.Radius > LargestGrid.WorldVolume.Radius)
+        {
+            LargestGrid = mech.CubeGrid;
+        }
+        _grids.Add(mech.CubeGrid);
+        if (mech.IsAttached)
+        {
+            _grids.Add(mech.TopGrid);
+        }
+        return false;
+    }
+}
 
 public class TurretInterface
 {
@@ -2258,6 +2217,7 @@ public class TurretInterface
 }
 
 #region Multi-screen Sprite Surface
+
 public interface ISpriteSurface
 {
     Vector2 TextureSize { get; }
@@ -2292,6 +2252,7 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         return IsValid ? Surface.MeasureStringInPixels(text, font, scale) : Vector2.Zero;
     }
 
+    public readonly IMyCubeBlock CubeBlock;
     public readonly IMyTextSurface Surface;
     public MySpriteDrawFrame? Frame = null;
     readonly List<MySprite> _sprites = new List<MySprite>(64);
@@ -2346,7 +2307,8 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         var slim = grid.GetCubeBlock(position);
         if (slim != null && slim.FatBlock != null)
         {
-            var surf = slim.FatBlock as IMyTextSurface;
+            CubeBlock = slim.FatBlock;
+            var surf = CubeBlock as IMyTextSurface;
             if (surf != null)
             {
                 Surface = surf;
@@ -2358,11 +2320,39 @@ public class SingleScreenSpriteSurface : ISpriteSurface
 // Assumes that all text panels are the same size
 public class MultiScreenSpriteSurface : ISpriteSurface
 {
-    readonly SingleScreenSpriteSurface[,] _surfaces;
-
     public bool Initialized { get; private set; } = false;
 
-    public Vector2 TextureSize { get; private set; }
+    float Rotation
+    {
+        get
+        {
+            return _rotationAngle;
+        }
+        set
+        {
+            _rotationAngle = value;
+            _spanVectorAbs = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
+            _spanVectorAbs *= Vector2.SignNonZero(_spanVectorAbs);
+        }
+    }
+    float RotationRads
+    {
+        get
+        {
+            return MathHelper.ToRadians(Rotation);
+        }
+    }
+    public Vector2 TextureSize
+    {
+        get
+        {
+            if (!_textureSize.HasValue)
+            {
+                _textureSize = BasePanelSize * _spanVectorAbs;
+            }
+            return _textureSize.Value;
+        }
+    }
     public Vector2 SurfaceSize
     {
         get { return TextureSize; }
@@ -2372,7 +2362,34 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     {
         return _anchor.MeasureStringInPixels(text, font, scale);
     }
-    public readonly Vector2 BasePanelSize;
+    Vector2 BasePanelSize
+    {
+        get { return _anchor.TextureSize; }
+    }
+    Vector2 BasePanelSizeNoRotation
+    {
+        get
+        {
+            if (!_basePanelSizeNoRotation.HasValue)
+            {
+                Vector2 size = RotateToBaseOrientation(BasePanelSize, RotationRads);
+                size *= Vector2.SignNonZero(size);
+                _basePanelSizeNoRotation = size;
+            }
+            return _basePanelSizeNoRotation.Value;
+        }
+    }
+    Vector2 TextureSizeNoRotation
+    {
+        get
+        {
+            if (!_textureSizeNoRotation.HasValue)
+            {
+                _textureSizeNoRotation = BasePanelSizeNoRotation * new Vector2(Cols, Rows);
+            }
+            return _textureSizeNoRotation.Value;
+        }
+    }
     public readonly int Rows;
     public readonly int Cols;
 
@@ -2380,16 +2397,27 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     StringBuilder _stringBuilder = new StringBuilder(128);
     Program _p;
     IMyTextPanel _anchor;
+    ITerminalProperty<float> _rotationProp;
+    float _rotationAngle = 0f;
+    Vector2? _textureSize;
+    Vector2? _basePanelSizeNoRotation;
+    Vector2? _textureSizeNoRotation;
+    Vector2 _spanVectorAbs;
+
+    readonly SingleScreenSpriteSurface[,] _surfaces;
+    readonly Vector2[,] _screenOrigins;
 
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
         _p = p;
         _surfaces = new SingleScreenSpriteSurface[rows, cols];
-        BasePanelSize = anchor.TextureSize;
-        TextureSize = anchor.TextureSize * new Vector2(cols, rows);
+        _screenOrigins = new Vector2[rows, cols];
         Rows = rows;
         Cols = cols;
+
+        _rotationProp = anchor.GetProperty("Rotate").Cast<float>();
+        Rotation = _rotationProp.GetValue(anchor);
 
         Vector3I anchorPos = anchor.Position;
         Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
@@ -2403,8 +2431,54 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             for (int c = 0; c < Cols; ++c)
             {
                 Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
-                _surfaces[r, c] = new SingleScreenSpriteSurface(grid, blockPosition);
+                var surf = new SingleScreenSpriteSurface(grid, blockPosition);
+                _surfaces[r, c] = surf;
+                if (surf.CubeBlock != null)
+                {
+                    _rotationProp.SetValue(surf.CubeBlock, Rotation);
+                }
+
+                // Calc screen coords
+                Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
+                Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
+                Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
+                Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
+                _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
             }
+        }
+    }
+
+    Vector2 RotateToDisplayOrientation(Vector2 vec, float angleRad)
+    {
+        int caseIdx = (int)Math.Round(angleRad / MathHelper.ToRadians(90));
+        switch (caseIdx)
+        {
+            default:
+            case 0:
+                return vec;
+            case 1: // 90 deg
+                return new Vector2(vec.Y, -vec.X);
+            case 2: // 180 deg
+                return -vec;
+            case 3: // 270 deg
+                return new Vector2(-vec.Y, vec.X);
+        }
+    }
+
+    Vector2 RotateToBaseOrientation(Vector2 vec, float angleRad)
+    {
+        int caseIdx = (int)Math.Round(angleRad / MathHelper.ToRadians(90));
+        switch (caseIdx)
+        {
+            default:
+            case 0:
+                return vec;
+            case 1: // 90 deg
+                return new Vector2(-vec.Y, vec.X);
+            case 2: // 180 deg
+                return -vec;
+            case 3: // 270 deg
+                return new Vector2(vec.Y, -vec.X);
         }
     }
 
@@ -2426,10 +2500,15 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             spriteSize = TextureSize;
         }
-        float rad = spriteSize.Length();
+        float rad = spriteSize.Length() * 0.5f;
 
-        var lowerCoords = Vector2I.Floor((pos - rad) / BasePanelSize);
-        var upperCoords = Vector2I.Floor((pos + rad) / BasePanelSize);
+
+        Vector2 fromCenter = pos - (TextureSize * 0.5f);
+        Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
+        Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
+
+        var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
+        var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
 
         int lowerCol = Math.Max(0, lowerCoords.X);
         int upperCol = Math.Min(Cols - 1, upperCoords.X);
@@ -2441,8 +2520,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             for (int c = lowerCol; c <= upperCol; ++c)
             {
-                Vector2 adjustedPos = pos - BasePanelSize * new Vector2(c, r);
-                sprite.Position = adjustedPos;
+                sprite.Position = pos - _screenOrigins[r, c];
                 _surfaces[r, c].Add(sprite);
                 SpriteCount++;
             }
@@ -2460,7 +2538,159 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
         SpriteCount = 0;
     }
-}
+}  
 #endregion
 
+interface IConfigValue
+{
+    void WriteToIni(MyIni ini);
+    void ReadFromIni(MyIni ini);
+}
+
+abstract class ConfigValue<T> : IConfigValue
+{
+    public T Value;
+    readonly string _section;
+    readonly string _name;
+    readonly string _comment;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string section, string name, T value = default(T), string comment = null)
+    {
+        _section = section;
+        _name = name;
+        Value = value;
+        _comment = comment;
+    }
+
+    protected virtual string GetIniString()
+    {
+        return Value.ToString();
+    }
+
+    public void WriteToIni(MyIni ini)
+    {
+        ini.Set(_section, _name, GetIniString());
+        if (!string.IsNullOrWhiteSpace(_comment))
+        {
+            ini.SetComment(_section, _name, _comment);
+        }
+    }
+
+    protected abstract void UpdateValue(ref MyIniValue val);
+
+    public void ReadFromIni(MyIni ini)
+    {
+        MyIniValue val = ini.Get(_section, _name);
+        UpdateValue(ref val);
+    }
+}
+
+class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
+    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToString(Value); }
+}
+
+class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
+    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToBoolean(Value); }
+}
+
+class ConfigFloat : ConfigValue<float>
+{
+    public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
+    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToSingle(Value); }
+}
+
+class ConfigColor : ConfigValue<Color>
+{
+    public ConfigColor(string section, string name, Color value = default(Color), string comment = null) : base(section, name, value, comment) { }
+    protected override string GetIniString()
+    {
+        return string.Format("{0}, {1}, {2}, {3}", Value.R, Value.G, Value.B, Value.A);
+    }
+    protected override void UpdateValue(ref MyIniValue val)
+    {
+        string rgbString = val.ToString("");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0, a = 0;
+        if (rgbSplit.Length != 4 ||
+            !int.TryParse(rgbSplit[0].Trim(), out r) ||
+            !int.TryParse(rgbSplit[1].Trim(), out g) ||
+            !int.TryParse(rgbSplit[2].Trim(), out b))
+        {
+            return;
+        }
+
+        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        if (!hasAlpha)
+        {
+            a = 255;
+        }
+
+        r = MathHelper.Clamp(r, 0, 255);
+        g = MathHelper.Clamp(g, 0, 255);
+        b = MathHelper.Clamp(b, 0, 255);
+        a = MathHelper.Clamp(a, 0, 255);
+        Value = new Color(r, g, b, a);
+    }
+}
+
+class ConfigInt : ConfigValue<int>
+{
+    public ConfigInt(string section, string name, int value = 0, string comment = null) : base(section, name, value, comment) { }
+    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToInt32(Value); }
+}
+
+public static class StringExtensions
+{
+    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
+    {
+        return source?.IndexOf(toCheck, comp) >= 0;
+    }
+}
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we 
+    // found that was controlled.
+    return currentlyControlled;
+}
 #endregion
