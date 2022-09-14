@@ -337,36 +337,46 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     public void Add(MySprite sprite)
     {
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
-        Vector2 spriteSize;
-        if (sprite.Size != null)
+        
+        int lowerCol, upperCol, lowerRow, upperRow;
+        if (sprite.Type == SpriteType.CLIP_RECT)
         {
-            spriteSize = sprite.Size.Value;
-        }
-        else if (sprite.Type == SpriteType.TEXT)
-        {
-            _stringBuilder.Clear();
-            _stringBuilder.Append(sprite.Data);
-            spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            lowerCol = lowerRow = 0;
+            upperCol = Cols - 1;
+            upperRow = Rows - 1;
         }
         else
         {
-            spriteSize = TextureSize;
+            Vector2 spriteSize;
+            if (sprite.Size != null)
+            {
+                spriteSize = sprite.Size.Value;
+            }
+            else if (sprite.Type == SpriteType.TEXT)
+            {
+                _stringBuilder.Clear();
+                _stringBuilder.Append(sprite.Data);
+                spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            }
+            else
+            {
+                spriteSize = TextureSize;
+                sprite.Size = spriteSize;
+            }
+            float rad = spriteSize.Length() * 0.5f;
+
+            Vector2 fromCenter = pos - (TextureSize * 0.5f);
+            Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
+            Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
+
+            var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
+            var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
+
+            lowerCol = Math.Max(0, lowerCoords.X);
+            upperCol = Math.Min(Cols - 1, upperCoords.X);
+            lowerRow = Math.Max(0, lowerCoords.Y);
+            upperRow = Math.Min(Rows - 1, upperCoords.Y);
         }
-        float rad = spriteSize.Length() * 0.5f;
-
-
-        Vector2 fromCenter = pos - (TextureSize * 0.5f);
-        Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
-        Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
-
-        var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
-        var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
-
-        int lowerCol = Math.Max(0, lowerCoords.X);
-        int upperCol = Math.Min(Cols - 1, upperCoords.X);
-
-        int lowerRow = Math.Max(0, lowerCoords.Y);
-        int upperRow = Math.Min(Rows - 1, upperCoords.Y);
 
         for (int r = lowerRow; r <= upperRow; ++r)
         {
