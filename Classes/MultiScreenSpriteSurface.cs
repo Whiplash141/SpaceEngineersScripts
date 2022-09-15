@@ -334,6 +334,22 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
     }
 
+    Vector2 GetRotatedSize(Vector2 size, float angleRad)
+    {
+        if (Math.Abs(angleRad) < 1e-3)
+        {
+            return size;
+        }
+
+        float cos = Math.Abs(MyMath.FastCos(angleRad));
+        float sin = Math.Abs(MyMath.FastSin(angleRad));
+        
+        Vector2 rotated = Vector2.Zero;
+        rotated.X = size.X * cos + size.Y * sin;
+        rotated.Y = size.X * sin + size.Y * cos;
+        return rotated;
+    }
+
     public void Add(MySprite sprite)
     {
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
@@ -363,14 +379,15 @@ public class MultiScreenSpriteSurface : ISpriteSurface
                 spriteSize = TextureSize;
                 sprite.Size = spriteSize;
             }
-            float rad = spriteSize.Length() * 0.5f;
+            
+            Vector2 rotatedHalfSize = 0.5f * (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
 
             Vector2 fromCenter = pos - (TextureSize * 0.5f);
             Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
             Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
 
-            var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
-            var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
+            var lowerCoords = Vector2I.Floor((basePos - rotatedHalfSize) / BasePanelSizeNoRotation);
+            var upperCoords = Vector2I.Floor((basePos + rotatedHalfSize) / BasePanelSizeNoRotation);
 
             lowerCol = Math.Max(0, lowerCoords.X);
             upperCol = Math.Min(Cols - 1, upperCoords.X);
