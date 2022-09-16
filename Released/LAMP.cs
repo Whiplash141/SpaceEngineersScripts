@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.4.0";
-const string DATE = "2022/06/28";
+const string VERSION = "95.6.0";
+const string DATE = "2022/09/16";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -77,9 +77,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
-*/
 
-/*
+
 ___________________________________________________________________
 
 ============= Don't touch anything below this :) ==================
@@ -122,7 +121,7 @@ bool
     
 int _autofireLimitPerTarget = 0;
 
-const string IGC_TAG_IFF = "IGC_IFF_MSG",
+const string IGC_TAG_IFF = "IGC_IFF_PKT",
     IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
     IGC_TAG_HOMING = "IGC_MSL_HOM_MSG",
     IGC_TAG_BEAM_RIDING = "IGC_MSL_OPT_MSG",
@@ -276,7 +275,6 @@ RuntimeTracker _runtimeTracker;
 RaycastHoming _raycastHoming;
 MissileStatusScreenHandler _screenHandler;
 SoundBlockManager _soundManager = new SoundBlockManager();
-StringBuilder _messageBuilder = new StringBuilder();
 MyIni _textSurfaceIni = new MyIni();
 MyIni _setupIni = new MyIni();
 Scheduler _scheduler;
@@ -287,6 +285,7 @@ IMyTerminalBlock _reference = null;
 
 IMyUnicastListener _unicastListener;
 IMyBroadcastListener _remoteFireNotificationListener;
+ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
 
 bool _clearSpriteCache = false;
 
@@ -446,10 +445,10 @@ void Main(string arg, UpdateType updateType)
     catch (Exception e)
     {
         string scriptName = "WMI Missile Fire Control";
-        PrintBsod(Me.GetSurface(0), scriptName, VERSION, 1f, e);
+        BlueScreenOfDeath.Show(Me.GetSurface(0), scriptName, VERSION, e);
         foreach (var surface in _textSurfaces)
         {
-            PrintBsod(surface, scriptName, VERSION, 1f, e);
+            BlueScreenOfDeath.Show(surface, scriptName, VERSION, e);
         }
         _showBSOD = true;
     }
@@ -931,18 +930,20 @@ void GetLargestGridRadius()
     });
 }
 
-
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
 void NetworkTargets()
 {
+    bool hasTarget = (DesignationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
+        || (DesignationMode == GuidanceMode.Turret && _turretLocked);
+    
+    int capacity = hasTarget ? 2 : 1;
+    _messageBuilder.Capacity = capacity;
+    
     // Broadcast own position
     TargetRelation myType = _biggestGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid;
     var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(TargetRelation.Friendly | myType), _biggestGrid.EntityId, _biggestGrid.WorldVolume.Center, _biggestGridRadius * _biggestGridRadius);
-    IGC.SendBroadcastMessage(IGC_TAG_IFF, myTuple);
-
-    // Broadcast target pos
-    if ((DesignationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
-        || (DesignationMode == GuidanceMode.Turret && _turretLocked))
+    _messageBuilder.Add(myTuple);
+  
+    if (hasTarget)
     {
         MyRelationsBetweenPlayerAndBlock relationBetweenPlayerAndBlock;
         MyDetectedEntityType type;
@@ -995,8 +996,10 @@ void NetworkTargets()
         }
 
         myTuple = new MyTuple<byte, long, Vector3D, double>((byte)relation, targetId, targetPos, 0);
-        IGC.SendBroadcastMessage(IGC_TAG_IFF, myTuple);
+        _messageBuilder.Add(myTuple);
     }
+    
+    IGC.SendBroadcastMessage(IGC_TAG_IFF, _messageBuilder.MoveToImmutable());
 }
 #endregion
 
@@ -1982,483 +1985,6 @@ void OpticalGuidance()
 }
 #endregion
 
-#region Raycast Homing
-class RaycastHoming
-{
-    public TargetingStatus Status { get; private set; } = TargetingStatus.NotLocked;
-    public Vector3D TargetPosition
-    {
-        get
-        {
-            return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
-        }
-    }
-    public double SearchScanSpread {get; set; } = 0;
-    public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
-    public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
-    public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
-    public Vector3D HitPosition { get; private set; } = Vector3D.Zero;
-    public Vector3D PreciseModeOffset { get; private set; } = Vector3D.Zero;
-    public bool OffsetTargeting = false;
-    public bool MissedLastScan { get; private set; } = false;
-    public bool LockLost { get; private set; } = false;
-    public bool IsScanning { get; private set; } = false;
-    public double TimeSinceLastLock { get; private set; } = 0;
-    public double TargetSize { get; private set; } = 0;
-    public double MaxRange { get; private set; }
-    public double MinRange { get; private set; }
-    public long TargetId { get; private set; } = 0;
-    public double AutoScanInterval { get; private set; } = 0;
-    public double MaxTimeForLockBreak { get; private set; }
-    public MyRelationsBetweenPlayerAndBlock TargetRelation { get; private set; }
-    public MyDetectedEntityType TargetType { get; private set; }
-
-    public enum TargetingStatus { NotLocked, Locked, TooClose };
-    enum AimMode { Center, Offset, OffsetRelative };
-
-    AimMode _currentAimMode = AimMode.Center;
-
-    readonly HashSet<MyDetectedEntityType> _targetFilter = new HashSet<MyDetectedEntityType>();
-    readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
-    readonly Random _rngeesus = new Random();
-
-    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
-    MatrixD _targetOrientation;
-    Vector3D _targetPositionOverride;
-    HashSet<long> _gridIDsToIgnore = new HashSet<long>();
-    double _timeSinceLastScan = 0;
-    bool _manualLockOverride = false;
-    bool _fudgeVectorSwitch = false;
-    
-    double AutoScanScaleFactor
-    {
-        get
-        {
-            return MissedLastScan ? 0.8 : 1.1;
-        }
-    }
-
-    public RaycastHoming(double maxRange, double maxTimeForLockBreak, double minRange = 0, long gridIDToIgnore = 0)
-    {
-        MinRange = minRange;
-        MaxRange = maxRange;
-        MaxTimeForLockBreak = maxTimeForLockBreak;
-        AddIgnoredGridID(gridIDToIgnore);
-    }
-
-    public void SetInitialLockParameters(Vector3D hitPosition, Vector3D targetVelocity, Vector3D offset, double timeSinceLastLock, long targetId)
-    {
-        _targetPositionOverride = hitPosition;
-        TargetCenter = hitPosition;
-        HitPosition = hitPosition;
-        OffsetTargetPosition = hitPosition;
-        PreciseModeOffset = offset;
-        TargetVelocity = targetVelocity;
-        TimeSinceLastLock = timeSinceLastLock;
-        _manualLockOverride = true;
-        IsScanning = true;
-        TargetId = targetId;
-    }
-
-    public void AddIgnoredGridID(long id)
-    {
-        _gridIDsToIgnore.Add(id);
-    }
-
-    public void ClearIgnoredGridIDs()
-    {
-        _gridIDsToIgnore.Clear();
-    }
-
-    public void AddEntityTypeToFilter(params MyDetectedEntityType[] types)
-    {
-        foreach (var type in types)
-        {
-            _targetFilter.Add(type);
-        }
-    }
-
-    public void AcknowledgeLockLost()
-    {
-        LockLost = false;
-    }
-
-    public void LockOn()
-    {
-        ClearLockInternal();
-        LockLost = false;
-        IsScanning = true;
-    }
-
-    public void ClearLock()
-    {
-        ClearLockInternal();
-        LockLost = false;
-    }
-
-    void ClearLockInternal()
-    {
-        _info = default(MyDetectedEntityInfo);
-        IsScanning = false;
-        Status = TargetingStatus.NotLocked;
-        MissedLastScan = false;
-        TimeSinceLastLock = 0;
-        TargetSize = 0;
-        HitPosition = Vector3D.Zero;
-        TargetId = 0;
-        _timeSinceLastScan = 141;
-        _currentAimMode = AimMode.Center;
-        TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
-        TargetType = MyDetectedEntityType.None;
-    }
-    
-    double RndDbl()
-    {
-        return 2 * _rngeesus.NextDouble() - 1;
-    }
-    
-    double GaussRnd()
-    {
-        return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
-    }
-
-    Vector3D CalculateFudgeVector(Vector3D targetDirection, double fudgeFactor = 5)
-    {
-        _fudgeVectorSwitch = !_fudgeVectorSwitch;
-
-        if (!_fudgeVectorSwitch)
-            return Vector3D.Zero;
-
-        var perpVector1 = Vector3D.CalculatePerpendicularVector(targetDirection);
-        var perpVector2 = Vector3D.Cross(perpVector1, targetDirection);
-        if (!Vector3D.IsUnit(ref perpVector2))
-            perpVector2.Normalize();
-
-        var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
-        return randomVector * fudgeFactor * TimeSinceLastLock;
-    }
-    
-    Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
-    {
-        Vector3D scanPos = origin + direction * MaxRange;
-        if (SearchScanSpread < 1e-2)
-        {
-            return scanPos;
-        }
-        return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
-    }
-
-    public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
-    {
-        _timeSinceLastScan += timeStep;
-
-        if (!IsScanning)
-            return;
-
-        TimeSinceLastLock += timeStep;
-
-        _info = default(MyDetectedEntityInfo);
-        _availableCameras.Clear();
-
-        //Check for lock lost
-        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && Status == TargetingStatus.Locked)
-        {
-            LockLost = true;
-            ClearLockInternal();
-            return;
-        }
-
-        // Determine where to scan next
-        var scanPosition = Vector3D.Zero;
-        switch (_currentAimMode)
-        {
-            case AimMode.Offset:
-                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            case AimMode.OffsetRelative:
-                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            default:
-                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
-                break;
-        }
-
-        if (MissedLastScan && cameraList.Count > 0)
-        {
-            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
-        }
-
-        // Trim out cameras that cant see our next scan position
-        Vector3D testDirection = Vector3D.Zero;
-        IMyTerminalBlock reference = null;
-        if (Status == TargetingStatus.Locked || _manualLockOverride)
-        {
-            GetAvailableCameras(cameraList, _availableCameras, scanPosition, true);
-        }
-        else
-        {
-            /*
-             * The following prioritizes references in the following hierarchy:
-             * 1. Currently used camera
-             * 2. Reference block
-             * 3. Currently used control seat
-             */
-            if (reference == null)
-                reference = GetControlledCamera(cameraList);
-            
-            if (reference == null)
-                reference = referenceBlock;
-
-            if (reference == null)
-                reference = GetControlledShipController(shipControllers);
-
-            if (reference != null)
-            {
-                testDirection = reference.WorldMatrix.Forward;
-                GetAvailableCameras(cameraList, _availableCameras, testDirection);
-            }
-            else
-            {
-                _availableCameras.AddRange(cameraList);
-            }
-        }
-
-        // Check for transition between faces
-        if (_availableCameras.Count == 0)
-        {
-            _timeSinceLastScan = 100000;
-            MissedLastScan = true;
-            return;
-        }
-
-        var camera = GetCameraWithMaxRange(_availableCameras);
-        var cameraMatrix = camera.WorldMatrix;
-
-        double scanRange;
-        Vector3D adjustedTargetPos = Vector3D.Zero;
-        if (Status == TargetingStatus.Locked || _manualLockOverride)
-        {
-            // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
-            adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - cameraMatrix.Translation) * 2 * TargetSize;
-            scanRange = (adjustedTargetPos - cameraMatrix.Translation).Length();
-        }
-        else
-        {
-            scanRange = MaxRange;
-        }
-
-        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
-
-        //Attempt to scan adjusted target position
-        if (camera.AvailableScanRange >= scanRange &&
-            _timeSinceLastScan >= AutoScanInterval)
-        {
-            if (Status == TargetingStatus.Locked || _manualLockOverride)
-                _info = camera.Raycast(adjustedTargetPos);
-            else if (!Vector3D.IsZero(testDirection))
-                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
-            else
-                _info = camera.Raycast(MaxRange);
-
-            _timeSinceLastScan = 0;
-        }
-        else // Not enough charge stored up yet
-        {
-            return;
-        }
-
-        // Validate target and assign values
-        if (!_info.IsEmpty() &&
-            !_targetFilter.Contains(_info.Type) &&
-            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
-        {
-            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
-            {
-                Status = TargetingStatus.TooClose;
-                return;
-            }
-            else if (Status == TargetingStatus.Locked) // Target already locked
-            {
-                if (_info.EntityId == TargetId)
-                {
-                    TargetCenter = _info.Position;
-                    HitPosition = _info.HitPosition.Value;
-
-                    _targetOrientation = _info.Orientation;
-                    OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
-
-                    TargetVelocity = _info.Velocity;
-                    TargetSize = _info.BoundingBox.Size.Length();
-                    TimeSinceLastLock = 0;
-
-                    _manualLockOverride = false;
-                    
-                    MissedLastScan = false;
-                    TargetRelation = _info.Relationship;
-                    TargetType = _info.Type;
-                }
-                else
-                {
-                    MissedLastScan = true;
-                }
-            }
-            else // Target not yet locked: initial lockon
-            {
-                if (_manualLockOverride && TargetId != _info.EntityId)
-                    return;
-
-                Status = TargetingStatus.Locked;
-                TargetId = _info.EntityId;
-                TargetCenter = _info.Position;
-                HitPosition = _info.HitPosition.Value;
-                TargetVelocity = _info.Velocity;
-                TargetSize = _info.BoundingBox.Size.Length();
-                TimeSinceLastLock = 0;
-
-                var aimingCamera = GetControlledCamera(_availableCameras);
-                Vector3D hitPosOffset = Vector3D.Zero;
-                if (aimingCamera != null)
-                {
-                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
-                }
-                else if (reference != null)
-                {
-                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
-                }
-                if (!Vector3D.IsZero(hitPosOffset))
-                {
-                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
-                }
-
-                var hitPos = _info.HitPosition.Value + hitPosOffset;
-                _targetOrientation = _info.Orientation;
-
-                if (_manualLockOverride)
-                {
-                    _manualLockOverride = false;
-                }
-                else
-                {
-                    PreciseModeOffset = Vector3D.TransformNormal(hitPos - TargetCenter, MatrixD.Transpose(_targetOrientation));
-                    OffsetTargetPosition = hitPos;
-                }
-
-                MissedLastScan = false;
-                TargetRelation = _info.Relationship;
-                TargetType = _info.Type;
-            }
-        }
-        else
-        {
-            MissedLastScan = true;
-        }
-
-        if (MissedLastScan)
-        {
-            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
-        }
-    }
-
-    void GetAvailableCameras(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
-    {
-        availableCameras.Clear();
-
-        foreach (var c in allCameras)
-        {
-            if (c.Closed)
-                continue;
-
-            if (TestCameraAngles(c, vectorIsPosition ? testVector - c.GetPosition() : testVector))
-                availableCameras.Add(c);
-        }
-    }
-
-    bool TestCameraAngles(IMyCameraBlock camera, Vector3D direction)
-    {
-        Vector3D local = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
-
-        if (local.Z > 0)
-            return false;
-
-        var yawTan = Math.Abs(local.X / local.Z);
-        var localSq = local * local;
-        var pitchTanSq = localSq.Y / (localSq.X + localSq.Z);
-
-        return yawTan <= 1 && pitchTanSq <= 1;
-    }
-
-    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameras)
-    {
-        double maxRange = 0;
-        IMyCameraBlock maxRangeCamera = null;
-        foreach (var c in cameras)
-        {
-            if (c.AvailableScanRange > maxRange)
-            {
-                maxRangeCamera = c;
-                maxRange = maxRangeCamera.AvailableScanRange;
-            }
-        }
-
-        return maxRangeCamera;
-    }
-
-    IMyCameraBlock GetControlledCamera(List<IMyCameraBlock> cameras)
-    {
-        foreach (var c in cameras)
-        {
-            if (c.Closed)
-                continue;
-
-            if (c.IsActive)
-                return c;
-        }
-        return null;
-    }
-
-    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
-    {
-        if (controllers.Count == 0)
-            return null;
-
-        IMyShipController mainController = null;
-        IMyShipController controlled = null;
-
-        foreach (var sc in controllers)
-        {
-            if (sc.IsUnderControl && sc.CanControlShip)
-            {
-                if (controlled == null)
-                {
-                    controlled = sc;
-                }
-
-                if (sc.IsMainCockpit)
-                {
-                    mainController = sc; // Only one per grid so no null check needed
-                }
-            }
-        }
-
-        if (mainController != null)
-            return mainController;
-
-        if (controlled != null)
-            return controlled;
-
-        return controllers[0];
-    }
-
-    public static Vector3D VectorRejection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
-}
-#endregion
-
 #region Turret Guidance
 List<MyDetectedEntityInfo> _targetInfoList = new List<MyDetectedEntityInfo>();
 MyDetectedEntityInfo _targetInfo = new MyDetectedEntityInfo();
@@ -3096,68 +2622,6 @@ public class MissileStatusScreenHandler
     }
 }
 
-public struct MySpriteContainer
-{
-    readonly string _spriteName;
-    readonly Vector2 _size;
-    readonly Vector2 _positionFromCenter;
-    readonly float _rotationOrScale;
-    readonly Color _color;
-    readonly string _font;
-    readonly string _text;
-    readonly float _scale;
-    readonly bool _isText;
-    readonly TextAlignment _textAlign;
-    readonly bool _fillWidth;
-
-    public MySpriteContainer(string spriteName, Vector2 size, Vector2 positionFromCenter, float rotation, Color color, bool fillWidth = false)
-    {
-        _spriteName = spriteName;
-        _size = size;
-        _positionFromCenter = positionFromCenter;
-        _rotationOrScale = rotation;
-        _color = color;
-        _isText = false;
-
-        _font = "";
-        _text = "";
-        _scale = 0f;
-
-        _textAlign = TextAlignment.CENTER;
-        _fillWidth = fillWidth;
-    }
-
-    public MySpriteContainer(string text, string font, float scale, Vector2 positionFromCenter, Color color, TextAlignment textAlign = TextAlignment.CENTER)
-    {
-        _text = text;
-        _font = font;
-        _scale = scale;
-        _positionFromCenter = positionFromCenter;
-        _rotationOrScale = scale;
-        _color = color;
-        _isText = true;
-        _textAlign = textAlign;
-
-        _spriteName = "";
-        _size = Vector2.Zero;
-        _fillWidth = false;
-    }
-
-    public MySprite CreateSprite(float scale, ref Vector2 center, ref Vector2 viewportSize)
-    {
-        if (!_isText)
-        {
-            if (_fillWidth)
-            {
-                Vector2 sizeAdjusted = new Vector2(viewportSize.X, _size.Y * scale);
-                return new MySprite(SpriteType.TEXTURE, _spriteName, center + _positionFromCenter * scale, sizeAdjusted, _color, rotation: _rotationOrScale);
-            }
-            return new MySprite(SpriteType.TEXTURE, _spriteName, center + _positionFromCenter * scale, _size * scale, _color, rotation: _rotationOrScale);
-        }
-        else
-            return new MySprite(SpriteType.TEXT, _text, center + _positionFromCenter * scale, null, _color, _font, rotation: _rotationOrScale * scale, alignment: _textAlign);
-    }
-}
 #endregion
 
 #region Antenna Broadcasting
@@ -3245,14 +2709,6 @@ long GetBroadcastKey()
 #endregion
 
 #region General Functions
-public static class StringExtensions
-{
-    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
-    {
-        return source?.IndexOf(toCheck, comp) >= 0;
-    }
-}
-
 Vector3D GetAverageBlockPosition<T>(List<T> blocks) where T : class, IMyTerminalBlock
 {
     Vector3D sum = Vector3D.Zero;
@@ -3283,39 +2739,6 @@ IMyLargeTurretBase GetControlledTurret(List<IMyLargeTurretBase> turrets)
     return null;
 }
 
-IMyShipController GetControlledShipController(List<IMyShipController> shipControllers)
-{
-    if (shipControllers.Count == 0)
-        return null;
-
-    IMyShipController mainControlled = null;
-    IMyShipController controlled = null;
-
-    foreach (IMyShipController thisController in shipControllers)
-    {
-        if (thisController.IsUnderControl && thisController.CanControlShip)
-        {
-            if (controlled == null)
-            {
-                controlled = thisController;
-            }
-
-            if (thisController.IsMainCockpit)
-            {
-                mainControlled = thisController; // Only one per grid so no null check needed
-            }
-        }
-    }
-
-    if (mainControlled != null)
-        return mainControlled;
-
-    if (controlled != null)
-        return controlled;
-
-    return null; //shipControllers[0];
-}
-
 void ScaleAntennaRange(double dist)
 {
     foreach (IMyRadioAntenna thisAntenna in _broadcastList)
@@ -3323,73 +2746,6 @@ void ScaleAntennaRange(double dist)
         thisAntenna.EnableBroadcasting = true;
 
         thisAntenna.Radius = (float)dist;
-    }
-}
-#endregion
-
-#region Runtime Tracking
-// Class that tracks runtime history.
-public class RuntimeTracker
-{
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime { get; private set; }
-    public double MaxInstructions { get; private set; }
-    public double AverageRuntime { get; private set; }
-    public double AverageInstructions { get; private set; }
-
-    private readonly Queue<double> _runtimes = new Queue<double>();
-    private readonly Queue<double> _instructions = new Queue<double>();
-    private readonly StringBuilder _sb = new StringBuilder();
-    private readonly int _instructionLimit;
-    private readonly Program _program;
-
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.01)
-    {
-        _program = program;
-        Capacity = capacity;
-        Sensitivity = sensitivity;
-        _instructionLimit = _program.Runtime.MaxInstructionCount;
-    }
-
-    public void AddRuntime()
-    {
-        double runtime = _program.Runtime.LastRunTimeMs;
-        AverageRuntime = Sensitivity * (runtime - AverageRuntime) + AverageRuntime;
-
-        _runtimes.Enqueue(runtime);
-        if (_runtimes.Count == Capacity)
-        {
-            _runtimes.Dequeue();
-        }
-
-        MaxRuntime = _runtimes.Max();
-    }
-
-    public void AddInstructions()
-    {
-        double instructions = _program.Runtime.CurrentInstructionCount;
-        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-
-        _instructions.Enqueue(instructions);
-        if (_instructions.Count == Capacity)
-        {
-            _instructions.Dequeue();
-        }
-
-        MaxInstructions = _instructions.Max();
-    }
-
-    public string Write()
-    {
-        _sb.Clear();
-        _sb.AppendLine("General Runtime Info");
-        _sb.AppendLine($"- Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"- Max runtime: {MaxRuntime:n4} ms");
-        _sb.AppendLine($"- Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"- Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"- Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        return _sb.ToString();
     }
 }
 #endregion
@@ -3446,13 +2802,587 @@ public static class MyIniHelper
 }
 #endregion
 
+#region INCLUDES
+
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
+
+#region Raycast Homing
+class RaycastHoming
+{
+    public TargetingStatus Status { get; private set; } = TargetingStatus.NotLocked;
+    public Vector3D TargetPosition
+    {
+        get
+        {
+            return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
+        }
+    }
+    public double SearchScanSpread {get; set; } = 0;
+    public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
+    public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
+    public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
+    public Vector3D HitPosition { get; private set; } = Vector3D.Zero;
+    public Vector3D PreciseModeOffset { get; private set; } = Vector3D.Zero;
+    public bool OffsetTargeting = false;
+    public bool MissedLastScan { get; private set; } = false;
+    public bool LockLost { get; private set; } = false;
+    public bool IsScanning { get; private set; } = false;
+    public double TimeSinceLastLock { get; private set; } = 0;
+    public double TargetSize { get; private set; } = 0;
+    public double MaxRange { get; private set; }
+    public double MinRange { get; private set; }
+    public long TargetId { get; private set; } = 0;
+    public double AutoScanInterval { get; private set; } = 0;
+    public double MaxTimeForLockBreak { get; private set; }
+    public MyRelationsBetweenPlayerAndBlock TargetRelation { get; private set; }
+    public MyDetectedEntityType TargetType { get; private set; }
+
+    public enum TargetingStatus { NotLocked, Locked, TooClose };
+    enum AimMode { Center, Offset, OffsetRelative };
+
+    AimMode _currentAimMode = AimMode.Center;
+
+    readonly HashSet<MyDetectedEntityType> _targetFilter = new HashSet<MyDetectedEntityType>();
+    readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
+    readonly Random _rngeesus = new Random();
+
+    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
+    MatrixD _targetOrientation;
+    Vector3D _targetPositionOverride;
+    HashSet<long> _gridIDsToIgnore = new HashSet<long>();
+    double _timeSinceLastScan = 0;
+    bool _manualLockOverride = false;
+    bool _fudgeVectorSwitch = false;
+    
+    double AutoScanScaleFactor
+    {
+        get
+        {
+            return MissedLastScan ? 0.8 : 1.1;
+        }
+    }
+
+    public RaycastHoming(double maxRange, double maxTimeForLockBreak, double minRange = 0, long gridIDToIgnore = 0)
+    {
+        MinRange = minRange;
+        MaxRange = maxRange;
+        MaxTimeForLockBreak = maxTimeForLockBreak;
+        AddIgnoredGridID(gridIDToIgnore);
+    }
+
+    public void SetInitialLockParameters(Vector3D hitPosition, Vector3D targetVelocity, Vector3D offset, double timeSinceLastLock, long targetId)
+    {
+        _targetPositionOverride = hitPosition;
+        TargetCenter = hitPosition;
+        HitPosition = hitPosition;
+        OffsetTargetPosition = hitPosition;
+        PreciseModeOffset = offset;
+        TargetVelocity = targetVelocity;
+        TimeSinceLastLock = timeSinceLastLock;
+        _manualLockOverride = true;
+        IsScanning = true;
+        TargetId = targetId;
+    }
+
+    public void AddIgnoredGridID(long id)
+    {
+        _gridIDsToIgnore.Add(id);
+    }
+
+    public void ClearIgnoredGridIDs()
+    {
+        _gridIDsToIgnore.Clear();
+    }
+
+    public void AddEntityTypeToFilter(params MyDetectedEntityType[] types)
+    {
+        foreach (var type in types)
+        {
+            _targetFilter.Add(type);
+        }
+    }
+
+    public void AcknowledgeLockLost()
+    {
+        LockLost = false;
+    }
+
+    public void LockOn()
+    {
+        ClearLockInternal();
+        LockLost = false;
+        IsScanning = true;
+    }
+
+    public void ClearLock()
+    {
+        ClearLockInternal();
+        LockLost = false;
+    }
+
+    void ClearLockInternal()
+    {
+        _info = default(MyDetectedEntityInfo);
+        IsScanning = false;
+        Status = TargetingStatus.NotLocked;
+        MissedLastScan = false;
+        TimeSinceLastLock = 0;
+        TargetSize = 0;
+        HitPosition = Vector3D.Zero;
+        TargetId = 0;
+        _timeSinceLastScan = 141;
+        _currentAimMode = AimMode.Center;
+        TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
+        TargetType = MyDetectedEntityType.None;
+    }
+    
+    double RndDbl()
+    {
+        return 2 * _rngeesus.NextDouble() - 1;
+    }
+    
+    double GaussRnd()
+    {
+        return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
+    }
+
+    Vector3D CalculateFudgeVector(Vector3D targetDirection, double fudgeFactor = 5)
+    {
+        _fudgeVectorSwitch = !_fudgeVectorSwitch;
+
+        if (!_fudgeVectorSwitch)
+            return Vector3D.Zero;
+
+        var perpVector1 = Vector3D.CalculatePerpendicularVector(targetDirection);
+        var perpVector2 = Vector3D.Cross(perpVector1, targetDirection);
+        if (!Vector3D.IsUnit(ref perpVector2))
+            perpVector2.Normalize();
+
+        var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
+        return randomVector * fudgeFactor * TimeSinceLastLock;
+    }
+    
+    Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
+    {
+        Vector3D scanPos = origin + direction * MaxRange;
+        if (SearchScanSpread < 1e-2)
+        {
+            return scanPos;
+        }
+        return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
+    }
+
+    public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
+    {
+        _timeSinceLastScan += timeStep;
+
+        if (!IsScanning)
+            return;
+
+        TimeSinceLastLock += timeStep;
+
+        _info = default(MyDetectedEntityInfo);
+        _availableCameras.Clear();
+
+        //Check for lock lost
+        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && Status == TargetingStatus.Locked)
+        {
+            LockLost = true;
+            ClearLockInternal();
+            return;
+        }
+
+        // Determine where to scan next
+        var scanPosition = Vector3D.Zero;
+        switch (_currentAimMode)
+        {
+            case AimMode.Offset:
+                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            case AimMode.OffsetRelative:
+                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
+                break;
+            default:
+                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
+                break;
+        }
+
+        if (MissedLastScan && cameraList.Count > 0)
+        {
+            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
+        }
+
+        // Trim out cameras that cant see our next scan position
+        Vector3D testDirection = Vector3D.Zero;
+        IMyTerminalBlock reference = null;
+        if (Status == TargetingStatus.Locked || _manualLockOverride)
+        {
+            GetAvailableCameras(cameraList, _availableCameras, scanPosition, true);
+        }
+        else
+        {
+            /*
+             * The following prioritizes references in the following hierarchy:
+             * 1. Currently used camera
+             * 2. Reference block
+             * 3. Currently used control seat
+             */
+            if (reference == null)
+                reference = GetControlledCamera(cameraList);
+            
+            if (reference == null)
+                reference = referenceBlock;
+
+            if (reference == null)
+                reference = GetControlledShipController(shipControllers);
+
+            if (reference != null)
+            {
+                testDirection = reference.WorldMatrix.Forward;
+                GetAvailableCameras(cameraList, _availableCameras, testDirection);
+            }
+            else
+            {
+                _availableCameras.AddRange(cameraList);
+            }
+        }
+
+        // Check for transition between faces
+        if (_availableCameras.Count == 0)
+        {
+            _timeSinceLastScan = 100000;
+            MissedLastScan = true;
+            return;
+        }
+
+        var camera = GetCameraWithMaxRange(_availableCameras);
+        var cameraMatrix = camera.WorldMatrix;
+
+        double scanRange;
+        Vector3D adjustedTargetPos = Vector3D.Zero;
+        if (Status == TargetingStatus.Locked || _manualLockOverride)
+        {
+            // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
+            adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - cameraMatrix.Translation) * 2 * TargetSize;
+            scanRange = (adjustedTargetPos - cameraMatrix.Translation).Length();
+        }
+        else
+        {
+            scanRange = MaxRange;
+        }
+
+        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
+
+        //Attempt to scan adjusted target position
+        if (camera.AvailableScanRange >= scanRange &&
+            _timeSinceLastScan >= AutoScanInterval)
+        {
+            if (Status == TargetingStatus.Locked || _manualLockOverride)
+                _info = camera.Raycast(adjustedTargetPos);
+            else if (!Vector3D.IsZero(testDirection))
+                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
+            else
+                _info = camera.Raycast(MaxRange);
+
+            _timeSinceLastScan = 0;
+        }
+        else // Not enough charge stored up yet
+        {
+            return;
+        }
+
+        // Validate target and assign values
+        if (!_info.IsEmpty() &&
+            !_targetFilter.Contains(_info.Type) &&
+            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
+        {
+            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
+            {
+                Status = TargetingStatus.TooClose;
+                return;
+            }
+            else if (Status == TargetingStatus.Locked) // Target already locked
+            {
+                if (_info.EntityId == TargetId)
+                {
+                    TargetCenter = _info.Position;
+                    HitPosition = _info.HitPosition.Value;
+
+                    _targetOrientation = _info.Orientation;
+                    OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
+
+                    TargetVelocity = _info.Velocity;
+                    TargetSize = _info.BoundingBox.Size.Length();
+                    TimeSinceLastLock = 0;
+
+                    _manualLockOverride = false;
+                    
+                    MissedLastScan = false;
+                    TargetRelation = _info.Relationship;
+                    TargetType = _info.Type;
+                }
+                else
+                {
+                    MissedLastScan = true;
+                }
+            }
+            else // Target not yet locked: initial lockon
+            {
+                if (_manualLockOverride && TargetId != _info.EntityId)
+                    return;
+
+                Status = TargetingStatus.Locked;
+                TargetId = _info.EntityId;
+                TargetCenter = _info.Position;
+                HitPosition = _info.HitPosition.Value;
+                TargetVelocity = _info.Velocity;
+                TargetSize = _info.BoundingBox.Size.Length();
+                TimeSinceLastLock = 0;
+
+                var aimingCamera = GetControlledCamera(_availableCameras);
+                Vector3D hitPosOffset = Vector3D.Zero;
+                if (aimingCamera != null)
+                {
+                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
+                }
+                else if (reference != null)
+                {
+                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
+                }
+                if (!Vector3D.IsZero(hitPosOffset))
+                {
+                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
+                }
+
+                var hitPos = _info.HitPosition.Value + hitPosOffset;
+                _targetOrientation = _info.Orientation;
+
+                if (_manualLockOverride)
+                {
+                    _manualLockOverride = false;
+                }
+                else
+                {
+                    PreciseModeOffset = Vector3D.TransformNormal(hitPos - TargetCenter, MatrixD.Transpose(_targetOrientation));
+                    OffsetTargetPosition = hitPos;
+                }
+
+                MissedLastScan = false;
+                TargetRelation = _info.Relationship;
+                TargetType = _info.Type;
+            }
+        }
+        else
+        {
+            MissedLastScan = true;
+        }
+
+        if (MissedLastScan)
+        {
+            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
+        }
+    }
+
+    void GetAvailableCameras(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
+    {
+        availableCameras.Clear();
+
+        foreach (var c in allCameras)
+        {
+            if (c.Closed)
+                continue;
+
+            if (TestCameraAngles(c, vectorIsPosition ? testVector - c.GetPosition() : testVector))
+                availableCameras.Add(c);
+        }
+    }
+
+    bool TestCameraAngles(IMyCameraBlock camera, Vector3D direction)
+    {
+        Vector3D local = Vector3D.Rotate(direction, MatrixD.Transpose(camera.WorldMatrix));
+
+        if (local.Z > 0)
+            return false;
+
+        var yawTan = Math.Abs(local.X / local.Z);
+        var localSq = local * local;
+        var pitchTanSq = localSq.Y / (localSq.X + localSq.Z);
+
+        return yawTan <= 1 && pitchTanSq <= 1;
+    }
+
+    IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameras)
+    {
+        double maxRange = 0;
+        IMyCameraBlock maxRangeCamera = null;
+        foreach (var c in cameras)
+        {
+            if (c.AvailableScanRange > maxRange)
+            {
+                maxRangeCamera = c;
+                maxRange = maxRangeCamera.AvailableScanRange;
+            }
+        }
+
+        return maxRangeCamera;
+    }
+
+    IMyCameraBlock GetControlledCamera(List<IMyCameraBlock> cameras)
+    {
+        foreach (var c in cameras)
+        {
+            if (c.Closed)
+                continue;
+
+            if (c.IsActive)
+                return c;
+        }
+        return null;
+    }
+
+    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
+    {
+        if (controllers.Count == 0)
+            return null;
+
+        IMyShipController mainController = null;
+        IMyShipController controlled = null;
+
+        foreach (var sc in controllers)
+        {
+            if (sc.IsUnderControl && sc.CanControlShip)
+            {
+                if (controlled == null)
+                {
+                    controlled = sc;
+                }
+
+                if (sc.IsMainCockpit)
+                {
+                    mainController = sc; // Only one per grid so no null check needed
+                }
+            }
+        }
+
+        if (mainController != null)
+            return mainController;
+
+        if (controlled != null)
+            return controlled;
+
+        return controllers[0];
+    }
+
+    public static Vector3D VectorRejection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+}
+#endregion
+
+/// <summary>
+/// Class that tracks runtime history.
+/// </summary>
+public class RuntimeTracker
+{
+    public int Capacity { get; set; }
+    public double Sensitivity { get; set; }
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
+    
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
+
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
+    {
+        _program = program;
+        Capacity = capacity;
+        Sensitivity = sensitivity;
+        _instructionLimit = _program.Runtime.MaxInstructionCount;
+    }
+
+    public void AddRuntime()
+    {
+        double runtime = _program.Runtime.LastRunTimeMs;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
+
+        _runtimes.Enqueue(runtime);
+        if (_runtimes.Count == Capacity)
+        {
+            _runtimes.Dequeue();
+        }
+        
+        MaxRuntime = _runtimes.Max();
+    }
+
+    public void AddInstructions()
+    {
+        double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
+        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
+        
+        _instructions.Enqueue(instructions);
+        if (_instructions.Count == Capacity)
+        {
+            _instructions.Dequeue();
+        }
+        
+        MaxInstructions = _instructions.Max();
+    }
+
+    public string Write()
+    {
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
+    }
+}
+
 #region Scheduler
+/// <summary>
+/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
+/// </summary>
 public class Scheduler
 {
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    ScheduledAction _currentlyQueuedAction = null;
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
     bool _inUpdate = false;
 
@@ -3467,12 +3397,18 @@ public class Scheduler
     public const double TickDurationSeconds = 1.0 / TicksPerSecond;
     const long ClockTicksPerGameTick = 166666L;
 
+    /// <summary>
+    /// Constructs a scheduler object with timing based on the runtime of the input program.
+    /// </summary>
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
         _ignoreFirstRun = ignoreFirstRun;
     }
 
+    /// <summary>
+    /// Updates all ScheduledAcions in the schedule and the queue.
+    /// </summary>
     public void Update()
     {
         _inUpdate = true;
@@ -3506,15 +3442,22 @@ public class Scheduler
 
         if (_currentlyQueuedAction == null)
         {
+            // If queue is not empty, populate current queued action
             if (_queuedActions.Count != 0)
                 _currentlyQueuedAction = _queuedActions.Dequeue();
         }
 
+        // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
             _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
+                // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
         }
@@ -3527,6 +3470,9 @@ public class Scheduler
         }
     }
 
+    /// <summary>
+    /// Adds an Action to the schedule. All actions are updated each update call.
+    /// </summary>
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
@@ -3536,6 +3482,9 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
+    /// <summary>
+    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
+    /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
         if (!_inUpdate)
@@ -3544,16 +3493,22 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    public void AddQueuedAction(Action action, double updateInterval)
+    /// <summary>
+    /// Adds an Action to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
-            updateInterval = 0.001;
+            updateInterval = 0.001; // avoids divide by zero
         }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
+    /// <summary>
+    /// Adds a ScheduledAction to the queue. Queue is FIFO.
+    /// </summary>
     public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
@@ -3562,8 +3517,8 @@ public class Scheduler
 
 public class QueuedAction : ScheduledAction
 {
-    public QueuedAction(Action action, double runInterval)
-        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
     { }
 }
 
@@ -3596,7 +3551,7 @@ public class ScheduledAction
                 return;
 
             _runIntervalTicks = value < 0 ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : 1.0 / _runIntervalTicks;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
         }
     }
 
@@ -3622,6 +3577,11 @@ public class ScheduledAction
     double _runFrequency;
     readonly Action _action;
 
+    /// <summary>
+    /// Class for scheduling an action to occur at a specified frequency (in Hz).
+    /// </summary>
+    /// <param name="action">Action to run</param>
+    /// <param name="runFrequency">How often to run in Hz</param>
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
@@ -3649,7 +3609,10 @@ public class ScheduledAction
 }
 #endregion
 
-#region Circular Buffer
+/// <summary>
+/// A simple, generic circular buffer class with a fixed capacity.
+/// </summary>
+/// <typeparam name="T"></typeparam>
 public class CircularBuffer<T>
 {
     public readonly int Capacity;
@@ -3658,6 +3621,10 @@ public class CircularBuffer<T>
     int _setIndex = 0;
     int _getIndex = 0;
 
+    /// <summary>
+    /// CircularBuffer ctor.
+    /// </summary>
+    /// <param name="capacity">Capacity of the CircularBuffer.</param>
     public CircularBuffer(int capacity)
     {
         if (capacity < 1)
@@ -3666,12 +3633,20 @@ public class CircularBuffer<T>
         _array = new T[Capacity];
     }
 
+    /// <summary>
+    /// Adds an item to the buffer. If the buffer is full, it will overwrite the oldest value.
+    /// </summary>
+    /// <param name="item"></param>
     public void Add(T item)
     {
         _array[_setIndex] = item;
         _setIndex = ++_setIndex % Capacity;
     }
 
+    /// <summary>
+    /// Retrieves the current item in the buffer and increments the buffer index.
+    /// </summary>
+    /// <returns></returns>
     public T MoveNext()
     {
         T val = _array[_getIndex];
@@ -3679,18 +3654,20 @@ public class CircularBuffer<T>
         return val;
     }
 
+    /// <summary>
+    /// Retrieves the current item in the buffer without incrementing the buffer index.
+    /// </summary>
+    /// <returns></returns>
     public T Peek()
     {
         return _array[_getIndex];
     }
 }
-#endregion
 
 #region Argument Parser
 class ArgumentParser
 {
-    public int ArgumentCount
-    {
+    public int ArgumentCount {
         get;
         private set;
     } = 0;
@@ -3766,7 +3743,7 @@ class ArgumentParser
                     idx = i + 1;
                     return ReturnCode.Nominal;
                 }
-                if (c == '-' && i + 1 < _raw.Length && _raw[i + 1] == '-')
+                if (c == '-' && i + 1 < _raw.Length && _raw[i+1] == '-')
                 {
                     isSwitch = true;
                     idx = i + 2;
@@ -3805,11 +3782,11 @@ class ArgumentParser
 
                 if (isSwitch)
                 {
-                    if (!char.IsLetter(c))
+                    if (!char.IsLetter(c) && c != '_')
                     {
                         return ReturnCode.NonAlphaSwitch;
                     }
-                }
+                } 
             }
             length++;
         }
@@ -3918,65 +3895,181 @@ class ArgumentParser
 }
 #endregion
 
-#region Print BSOD
-const int MAX_BSOD_WIDTH = 40;
-const string BSOD_TEMPLATE =
-"\n" +
-"{0} - v{1}\n" +
-"A fatal exception has occured at\n" +
-"{2}. The current\n" +
-"program will be terminated.\n" +
-"\n" +
-"EXCEPTION:\n" +
-"{3}\n" +
-"\n" +
-"* Please REPORT this crash message to\n" +
-"the Bug Reports discussion of this script\n" +
-"\n" +
-"* Press RECOMPILE to restart the program";
-
-StringBuilder bsodBuilder = new StringBuilder();
-void PrintBsod(IMyTextSurface surface, string scriptName, string version, float fontSize, Exception e)
+#region BSOD
+static class BlueScreenOfDeath 
 {
-    surface.ContentType = ContentType.TEXT_AND_IMAGE;
-    surface.Alignment = TextAlignment.LEFT;
-    surface.FontSize = fontSize;
-    surface.FontColor = Color.White;
-    surface.BackgroundColor = Color.Blue;
-    string exceptionStr = e.ToString();
-    string[] exceptionLines = exceptionStr.Split('\n');
-    bsodBuilder.Clear();
-    Echo(exceptionLines.Length.ToString());
-    foreach (string line in exceptionLines)
+    const int MAX_BSOD_WIDTH = 35;
+    const string BSOD_TEMPLATE =
+    "{0} - v{1}\n\n"+ 
+    "A fatal exception has occured at\n"+
+    "{2}. The current\n"+
+    "program will be terminated.\n"+
+    "\n"+ 
+    "EXCEPTION:\n"+
+    "{3}\n"+
+    "\n"+
+    "* Please REPORT this crash message to\n"+ 
+    "  the Bug Reports discussion of this script\n"+ 
+    "\n"+
+    "* Press RECOMPILE to restart the program";
+
+    static StringBuilder bsodBuilder = new StringBuilder(256);
+    
+    public static void Show(IMyTextSurface surface, string scriptName, string version, Exception e)
     {
-        if (line.Length <= MAX_BSOD_WIDTH)
+        if (surface == null) 
+        { 
+            return;
+        }
+        surface.ContentType = ContentType.TEXT_AND_IMAGE;
+        surface.Alignment = TextAlignment.LEFT;
+        float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (26f * MAX_BSOD_WIDTH);
+        surface.FontColor = Color.White;
+        surface.BackgroundColor = Color.Blue;
+        surface.Font = "Monospace";
+        string exceptionStr = e.ToString();
+        string[] exceptionLines = exceptionStr.Split('\n');
+        bsodBuilder.Clear();
+        foreach (string line in exceptionLines)
         {
-            bsodBuilder.Append(line).Append("\n");
+            if (line.Length <= MAX_BSOD_WIDTH)
+            {
+                bsodBuilder.Append(line).Append("\n");
+            }
+            else
+            {
+                string[] words = line.Split(' ');
+                int lineLength = 0;
+                foreach (string word in words)
+                {
+                    lineLength += word.Length;
+                    if (lineLength >= MAX_BSOD_WIDTH)
+                    {
+                        lineLength = 0;
+                        bsodBuilder.Append("\n");
+                    }
+                    bsodBuilder.Append(word).Append(" ");
+                }
+                bsodBuilder.Append("\n");
+            }
+        }
+
+        surface.WriteText(string.Format(BSOD_TEMPLATE, 
+                                        scriptName.ToUpperInvariant(),
+                                        version,
+                                        DateTime.Now, 
+                                        bsodBuilder));
+    }
+}
+#endregion
+
+public static class StringExtensions
+{
+    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
+    {
+        return source?.IndexOf(toCheck, comp) >= 0;
+    }
+}
+
+public struct MySpriteContainer
+{
+    readonly string _spriteName;
+    readonly Vector2 _size;
+    readonly Vector2 _positionFromCenter;
+    readonly float _rotationOrScale;
+    readonly Color _color;
+    readonly string _font;
+    readonly string _text;
+    readonly float _scale;
+    readonly bool _isText;
+    readonly TextAlignment _textAlign;
+    readonly bool _fillWidth;
+
+    public MySpriteContainer(string spriteName, Vector2 size, Vector2 positionFromCenter, float rotation, Color color, bool fillWidth = false)
+    {
+        _spriteName = spriteName;
+        _size = size;
+        _positionFromCenter = positionFromCenter;
+        _rotationOrScale = rotation;
+        _color = color;
+        _isText = false;
+
+        _font = "";
+        _text = "";
+        _scale = 0f;
+
+        _textAlign = TextAlignment.CENTER;
+        _fillWidth = fillWidth;
+    }
+
+    public MySpriteContainer(string text, string font, float scale, Vector2 positionFromCenter, Color color, TextAlignment textAlign = TextAlignment.CENTER)
+    {
+        _text = text;
+        _font = font;
+        _scale = scale;
+        _positionFromCenter = positionFromCenter;
+        _rotationOrScale = scale;
+        _color = color;
+        _isText = true;
+        _textAlign = textAlign;
+
+        _spriteName = "";
+        _size = Vector2.Zero;
+        _fillWidth = false;
+    }
+
+    public MySprite CreateSprite(float scale, ref Vector2 center, ref Vector2 viewportSize)
+    {
+        if (!_isText)
+        {
+            if (_fillWidth)
+            {
+                Vector2 sizeAdjusted = new Vector2(viewportSize.X, _size.Y * scale);
+                return new MySprite(SpriteType.TEXTURE, _spriteName, center + _positionFromCenter * scale, sizeAdjusted, _color, rotation: _rotationOrScale);
+            }
+            return new MySprite(SpriteType.TEXTURE, _spriteName, center + _positionFromCenter * scale, _size * scale, _color, rotation: _rotationOrScale);
         }
         else
-        {
-            string[] words = line.Split(' ');
-            int lineLength = 0;
-            foreach (string word in words)
-            {
+            return new MySprite(SpriteType.TEXT, _text, center + _positionFromCenter * scale, null, _color, _font, rotation: _rotationOrScale * scale, alignment: _textAlign);
+    }
+}
 
-                lineLength += word.Length;
-                if (lineLength >= MAX_BSOD_WIDTH)
-                {
-                    lineLength = 0;
-                    bsodBuilder.Append("\n");
-                }
-                bsodBuilder.Append(word).Append(" ");
-            }
-            bsodBuilder.Append("\n");
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
         }
     }
 
-    surface.WriteText(string.Format(BSOD_TEMPLATE,
-                                    scriptName.ToUpperInvariant(),
-                                    version,
-                                    DateTime.Now,
-                                    bsodBuilder));
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we 
+    // found that was controlled.
+    return currentlyControlled;
 }
 #endregion
 
