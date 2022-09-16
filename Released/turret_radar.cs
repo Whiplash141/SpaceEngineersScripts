@@ -50,9 +50,10 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "34.3.3";
-const string Date = "2022/08/22";
+const string Version = "35.1.0";
+const string Date = "2022/09/16";
 const string IgcTag = "IGC_IFF_MSG";
+const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
 readonly MyIni _ini = new MyIni();
 readonly MyIni _textSurfaceIni = new MyIni();
@@ -96,6 +97,7 @@ const string IniTextSurfaceTemplate = "Show on screen {0}";
 const string IniSectionMultiscreen = "Radar - Multiscreen Config";
 
 IMyBroadcastListener _broadcastListener;
+IMyBroadcastListener _broadcastListenerPacket;
 
 float MaxRange
 {
@@ -197,22 +199,24 @@ Program()
     _scheduler.AddScheduledAction(DrawRunningScreen, 6);
     _scheduler.AddScheduledAction(_runningScreenManager.RestartDraw, 1);
 
-    _scheduler.AddQueuedAction(GetTurretTargets, _cycleTime);               // cycle 1
-    _scheduler.AddQueuedAction(_radarSurface.SortContacts, _cycleTime);      // cycle 2
+    _scheduler.AddQueuedAction(GetTurretTargets, _cycleTime, false);               // cycle 1
+    _scheduler.AddQueuedAction(_radarSurface.SortContacts, _cycleTime, false);     // cycle 2
 
     float step = 1f / 8f;
-    _scheduler.AddQueuedAction(() => Draw(0 * step, 1 * step), _cycleTime); // cycle 3
-    _scheduler.AddQueuedAction(() => Draw(1 * step, 2 * step), _cycleTime); // cycle 4
-    _scheduler.AddQueuedAction(() => Draw(2 * step, 3 * step), _cycleTime); // cycle 5
-    _scheduler.AddQueuedAction(() => Draw(3 * step, 4 * step), _cycleTime); // cycle 6
-    _scheduler.AddQueuedAction(() => Draw(4 * step, 5 * step), _cycleTime); // cycle 7
-    _scheduler.AddQueuedAction(() => Draw(5 * step, 6 * step), _cycleTime); // cycle 8
-    _scheduler.AddQueuedAction(() => Draw(6 * step, 7 * step), _cycleTime); // cycle 9
-    _scheduler.AddQueuedAction(() => Draw(7 * step, 8 * step), _cycleTime); // cycle 10
+    _scheduler.AddQueuedAction(() => Draw(0 * step, 1 * step), _cycleTime, false); // cycle 3
+    _scheduler.AddQueuedAction(() => Draw(1 * step, 2 * step), _cycleTime, false); // cycle 4
+    _scheduler.AddQueuedAction(() => Draw(2 * step, 3 * step), _cycleTime, false); // cycle 5
+    _scheduler.AddQueuedAction(() => Draw(3 * step, 4 * step), _cycleTime, false); // cycle 6
+    _scheduler.AddQueuedAction(() => Draw(4 * step, 5 * step), _cycleTime, false); // cycle 7
+    _scheduler.AddQueuedAction(() => Draw(5 * step, 6 * step), _cycleTime, false); // cycle 8
+    _scheduler.AddQueuedAction(() => Draw(6 * step, 7 * step), _cycleTime, false); // cycle 9
+    _scheduler.AddQueuedAction(() => Draw(7 * step, 8 * step), _cycleTime, false); // cycle 10
 
     // IGC Register
     _broadcastListener = IGC.RegisterBroadcastListener(IgcTag);
     _broadcastListener.SetMessageCallback(IgcTag);
+    _broadcastListenerPacket = IGC.RegisterBroadcastListener(IgcPacketTag);
+    _broadcastListenerPacket.SetMessageCallback(IgcPacketTag);
 }
 
 void Main(string arg, UpdateType updateSource)
@@ -224,7 +228,7 @@ void Main(string arg, UpdateType updateSource)
 
     _scheduler.Update();
 
-    if (arg.Equals(IgcTag))
+    if (arg.Equals(IgcTag) || arg.Equals(IgcPacketTag))
     {
         ProcessNetworkMessage();
     }
@@ -321,100 +325,114 @@ void UpdateRadarRange()
 #endregion
 
 #region IGC Comms
+void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entityId, Vector3D position)
+{
+    TargetRelation relationship = (targetRelation & TargetRelation.RelationMask);
+    TargetRelation type = (targetRelation & TargetRelation.TypeMask);
+    bool targetLock = (targetRelation & TargetRelation.Locked) != 0;
+
+    if (_myGridIds.Contains(entityId))
+    {
+        if (targetLock)
+        {
+            _radarSurface.RadarLockWarning = true;
+        }
+        return;
+    }
+
+    bool myLock = false;
+    if (targetLock && GridTerminalSystem.GetBlockWithId(sourceId) != null)
+    {
+        myLock = true;
+    }
+
+    TargetData targetData;
+    if (_targetDataDict.TryGetValue(entityId, out targetData))
+    {
+        targetData.TargetLock |= targetLock;
+        targetData.MyLock |= myLock;
+        targetData.Type |= type;
+        if (targetData.Relation < relationship)
+        {
+            targetData.Relation = relationship;
+        }
+    }
+    else
+    {
+        targetData.Position = position;
+        targetData.TargetLock = targetLock;
+        targetData.MyLock = myLock;
+        targetData.Relation = relationship;
+        targetData.Type = type;
+    }
+
+    _targetDataDict[entityId] = targetData;
+}
+
 void ProcessNetworkMessage()
 {
     while (_broadcastListener.HasPendingMessage)
     {
         var message = _broadcastListener.AcceptMessage();
         object messageData = message.Data;
-        byte relationship = 0;
-        byte type = 0;
-        long entityId = 0;
-        var position = default(Vector3D);
-        bool targetLock = false;
 
-        MyTuple<byte, long, Vector3D, double> myTuple;
         if (messageData is MyTuple<byte, long, Vector3D, byte>) // For backwards compat.
         {
             var payload = (MyTuple<byte, long, Vector3D, byte>)messageData;
-            myTuple.Item1 = payload.Item1;
-            myTuple.Item2 = payload.Item2;
-            myTuple.Item3 = payload.Item3;
+            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
         }
         else if (messageData is MyTuple<byte, long, Vector3D, double>) // Item4 is ignored on ingest, it is grid radius
         {
-            myTuple = (MyTuple<byte, long, Vector3D, double>)messageData;
+            var payload = (MyTuple<byte, long, Vector3D, double>)messageData;
+            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
         }
-        else
-        {
-            continue;
-        }
+    }
 
-        relationship = (byte)(myTuple.Item1 & (byte)TargetRelation.RelationMask);
-        type = (byte)(myTuple.Item1 & (byte)TargetRelation.TypeMask);
-        targetLock = (myTuple.Item1 & (byte)TargetRelation.Locked) != 0;
-        entityId = myTuple.Item2;
-        position = myTuple.Item3;
+    while (_broadcastListenerPacket.HasPendingMessage)
+    {
+        var message = _broadcastListenerPacket.AcceptMessage();
+        object messageData = message.Data;
 
-        if (_myGridIds.Contains(entityId))
+        if (messageData is ImmutableArray<MyTuple<byte, long, Vector3D, double>>)
         {
-            if (targetLock)
+            var payloadArray = (ImmutableArray<MyTuple<byte, long, Vector3D, double>>)messageData;
+            foreach (var payload in payloadArray)
             {
-                _radarSurface.RadarLockWarning = true;
-            }
-            continue;
-        }
-
-        bool myLock = false;
-        if (targetLock && GridTerminalSystem.GetBlockWithId(message.Source) != null)
-        {
-            myLock = true;
-        }
-
-        TargetData targetData;
-        if (_targetDataDict.TryGetValue(entityId, out targetData))
-        {
-            targetData.TargetLock |= targetLock;
-            targetData.MyLock |= myLock;
-            targetData.Type |= (TargetRelation)type;
-            if ((byte)targetData.Relation < relationship)
-            {
-                targetData.Relation = (TargetRelation)relationship;
+                ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
             }
         }
-        else
-        {
-            targetData.Position = position;
-            targetData.TargetLock = targetLock;
-            targetData.MyLock = myLock;
-            targetData.Relation = (TargetRelation)relationship;
-            targetData.Type = (TargetRelation)type;
-        }
-
-        _targetDataDict[entityId] = targetData;
-
     }
 }
 
+ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
 void NetworkTargets()
 {
+    int capacity = (_broadcastIFF ? 1 : 0) + (_networkTargets ? _broadcastDict.Count : 0);
+    if (capacity == 0)
+    {
+        return;
+    }
+
+    _messageBuilder.Capacity = capacity;
     if (_broadcastIFF)
     {
         _compositeBoundingSphere.Compute();
         TargetRelation type = _compositeBoundingSphere.LargestGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid;
         var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(type | TargetRelation.Friendly), _compositeBoundingSphere.LargestGrid.EntityId, _compositeBoundingSphere.Center, _compositeBoundingSphere.Radius * _compositeBoundingSphere.Radius);
-        IGC.SendBroadcastMessage(IgcTag, myTuple);
+        _messageBuilder.Add(myTuple);
     }
 
     if (_networkTargets)
     {
         foreach (var kvp in _broadcastDict)
         {
-            var targetData = kvp.Value;
+            TargetData targetData = kvp.Value;
             var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(targetData.Relation | targetData.Type), kvp.Key, targetData.Position, 0);
-            IGC.SendBroadcastMessage(IgcTag, myTuple);
+            _messageBuilder.Add(myTuple);
         }
     }
+
+    IGC.SendBroadcastMessage(IgcPacketTag, _messageBuilder.MoveToImmutable());
 }
 #endregion
 
@@ -839,7 +857,7 @@ class RadarSurface
                 }
                 else
                 {
-                    _targetDict[id] = info; // Update age  
+                    _targetDict[id] = info;
                 }
             }
         }
@@ -1217,7 +1235,7 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
     if (textSurface != null)
     {
         bool multiscreen = false;
-        
+
         _rows.Value = 1;
         _cols.Value = 1;
         _textSurfaceIni.Clear();
@@ -1418,9 +1436,9 @@ void GrabBlocks()
     else
     {
         if (_taggedControllers.Count == 0)
-            Log.Info($"No ship controllers named \"{_referenceName}\" were found. Using all available ship controllers. (This is NOT an error!)");
+            Log.Info($"No ship controllers named \"{_referenceName.Value}\" were found. Using all available ship controllers. (This is NOT an error!)");
         else
-            Log.Info($"One or more ship controllers with name tag \"{_referenceName}\" were found. Using these to orient the radar.");
+            Log.Info($"One or more ship controllers with name tag \"{_referenceName.Value}\" were found. Using these to orient the radar.");
     }
 
     _lastSetupResult = Log.Write();
@@ -1727,7 +1745,7 @@ public class Scheduler
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    ScheduledAction _currentlyQueuedAction = null;
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
     bool _inUpdate = false;
 
@@ -1798,6 +1816,10 @@ public class Scheduler
             _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
@@ -1837,13 +1859,13 @@ public class Scheduler
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
@@ -1858,8 +1880,8 @@ public class Scheduler
 
 public class QueuedAction : ScheduledAction
 {
-    public QueuedAction(Action action, double runInterval)
-        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
     { }
 }
 
@@ -2326,13 +2348,29 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     {
         get
         {
-            return _rotationAngle;
+            return _rotationAngle.HasValue ? _rotationAngle.Value : 0f;
         }
         set
         {
+            bool newAngle = !_rotationAngle.HasValue || _rotationAngle.Value != value;
             _rotationAngle = value;
-            _spanVectorAbs = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
-            _spanVectorAbs *= Vector2.SignNonZero(_spanVectorAbs);
+            if (!newAngle)
+            {
+                return;
+            }
+
+            _spanVector = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
+            _spanVector *= Vector2.SignNonZero(_spanVector);
+            _textureSize = null;
+            _basePanelSizeNoRotation = null;
+            _textureSizeNoRotation = null;
+            for (int r = 0; r < Rows; ++r)
+            {
+                for (int c = 0; c < Cols; ++c)
+                {
+                    UpdateSurfaceRotation(r, c);
+                }
+            }
         }
     }
     float RotationRads
@@ -2348,7 +2386,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             if (!_textureSize.HasValue)
             {
-                _textureSize = BasePanelSize * _spanVectorAbs;
+                _textureSize = BasePanelSize * _spanVector;
             }
             return _textureSize.Value;
         }
@@ -2398,11 +2436,11 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     Program _p;
     IMyTextPanel _anchor;
     ITerminalProperty<float> _rotationProp;
-    float _rotationAngle = 0f;
+    float? _rotationAngle;
     Vector2? _textureSize;
     Vector2? _basePanelSizeNoRotation;
     Vector2? _textureSizeNoRotation;
-    Vector2 _spanVectorAbs;
+    Vector2 _spanVector;
 
     readonly SingleScreenSpriteSurface[,] _surfaces;
     readonly Vector2[,] _screenOrigins;
@@ -2416,16 +2454,15 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         Rows = rows;
         Cols = cols;
 
-        _rotationProp = anchor.GetProperty("Rotate").Cast<float>();
-        Rotation = _rotationProp.GetValue(anchor);
+        _rotationProp = _anchor.GetProperty("Rotate").Cast<float>();
 
-        Vector3I anchorPos = anchor.Position;
-        Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
-        Vector3I anchorDown = -Base6Directions.GetIntVector(anchor.Orientation.Up);
-        Vector3I anchorBlockSize = anchor.Max - anchor.Min + Vector3I.One;
+        Vector3I anchorPos = _anchor.Position;
+        Vector3I anchorRight = -Base6Directions.GetIntVector(_anchor.Orientation.Left);
+        Vector3I anchorDown = -Base6Directions.GetIntVector(_anchor.Orientation.Up);
+        Vector3I anchorBlockSize = _anchor.Max - _anchor.Min + Vector3I.One;
         Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
         Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
-        IMyCubeGrid grid = anchor.CubeGrid;
+        IMyCubeGrid grid = _anchor.CubeGrid;
         for (int r = 0; r < Rows; ++r)
         {
             for (int c = 0; c < Cols; ++c)
@@ -2433,19 +2470,31 @@ public class MultiScreenSpriteSurface : ISpriteSurface
                 Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
                 var surf = new SingleScreenSpriteSurface(grid, blockPosition);
                 _surfaces[r, c] = surf;
-                if (surf.CubeBlock != null)
-                {
-                    _rotationProp.SetValue(surf.CubeBlock, Rotation);
-                }
-
-                // Calc screen coords
-                Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
-                Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
-                Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
-                Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
-                _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
             }
         }
+
+        UpdateRotation();
+    }
+
+    public void UpdateRotation()
+    {
+        Rotation = _rotationProp.GetValue(_anchor);
+    }
+
+    void UpdateSurfaceRotation(int r, int c)
+    {
+        SingleScreenSpriteSurface surf = _surfaces[r, c];
+        if (surf.CubeBlock != null)
+        {
+            _rotationProp.SetValue(surf.CubeBlock, Rotation);
+        }
+
+        // Calc screen coords
+        Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
+        Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
+        Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
+        Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
+        _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
     }
 
     Vector2 RotateToDisplayOrientation(Vector2 vec, float angleRad)
@@ -2482,39 +2531,66 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
     }
 
+    Vector2 GetRotatedSize(Vector2 size, float angleRad)
+    {
+        if (Math.Abs(angleRad) < 1e-3)
+        {
+            return size;
+        }
+
+        float cos = Math.Abs(MyMath.FastCos(angleRad));
+        float sin = Math.Abs(MyMath.FastSin(angleRad));
+        
+        Vector2 rotated = Vector2.Zero;
+        rotated.X = size.X * cos + size.Y * sin;
+        rotated.Y = size.X * sin + size.Y * cos;
+        return rotated;
+    }
+
     public void Add(MySprite sprite)
     {
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
-        Vector2 spriteSize;
-        if (sprite.Size != null)
+        
+        int lowerCol, upperCol, lowerRow, upperRow;
+        if (sprite.Type == SpriteType.CLIP_RECT)
         {
-            spriteSize = sprite.Size.Value;
-        }
-        else if (sprite.Type == SpriteType.TEXT)
-        {
-            _stringBuilder.Clear();
-            _stringBuilder.Append(sprite.Data);
-            spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            lowerCol = lowerRow = 0;
+            upperCol = Cols - 1;
+            upperRow = Rows - 1;
         }
         else
         {
-            spriteSize = TextureSize;
+            Vector2 spriteSize;
+            if (sprite.Size != null)
+            {
+                spriteSize = sprite.Size.Value;
+            }
+            else if (sprite.Type == SpriteType.TEXT)
+            {
+                _stringBuilder.Clear();
+                _stringBuilder.Append(sprite.Data);
+                spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            }
+            else
+            {
+                spriteSize = TextureSize;
+                sprite.Size = spriteSize;
+            }
+            
+            Vector2 rotatedHalfSize = 0.5f * (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
+
+            Vector2 fromCenter = pos - (TextureSize * 0.5f);
+            Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
+            Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
+
+            var lowerCoords = Vector2I.Floor((basePos - rotatedHalfSize) / BasePanelSizeNoRotation);
+            var upperCoords = Vector2I.Floor((basePos + rotatedHalfSize) / BasePanelSizeNoRotation);
+
+            lowerCol = Math.Max(0, lowerCoords.X);
+            upperCol = Math.Min(Cols - 1, upperCoords.X);
+            lowerRow = Math.Max(0, lowerCoords.Y);
+            upperRow = Math.Min(Rows - 1, upperCoords.Y);
         }
-        float rad = spriteSize.Length() * 0.5f;
-
-
-        Vector2 fromCenter = pos - (TextureSize * 0.5f);
-        Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
-        Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
-
-        var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
-        var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
-
-        int lowerCol = Math.Max(0, lowerCoords.X);
-        int upperCol = Math.Min(Cols - 1, upperCoords.X);
-
-        int lowerRow = Math.Max(0, lowerCoords.Y);
-        int upperRow = Math.Min(Rows - 1, upperCoords.Y);
 
         for (int r = lowerRow; r <= upperRow; ++r)
         {
@@ -2538,7 +2614,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
         SpriteCount = 0;
     }
-}  
+}
 #endregion
 
 interface IConfigValue
