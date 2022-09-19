@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.1.0";
-const string Date = "2022/09/16";
+const string Version = "35.2.4";
+const string Date = "2022/09/18";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -148,29 +148,29 @@ Program()
 {
     _generalConfig = new IConfigValue[]
     {
-        _textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
-        _broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
-        _networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
-        _useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
-        _rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
-        _projectionAngle = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
-        _drawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
-        _referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
-        _drawRunningScreen = new ConfigBool(IniSectionGeneral, "Draw title screen", true),
-        _fadeOutInterval = new ConfigFloat(IniSectionGeneral, "Target fadeout interval (s)", 2f),
+_textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
+_broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
+_networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
+_useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
+_rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
+_projectionAngle = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
+_drawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
+_referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
+_drawRunningScreen = new ConfigBool(IniSectionGeneral, "Draw title screen", true),
+_fadeOutInterval = new ConfigFloat(IniSectionGeneral, "Target fadeout interval (s)", 2f),
 
-        _titleBarColor = new ConfigColor(IniSectionColors, "Title bar", new Color(100, 30, 0, 5)),
-        _textColor = new ConfigColor(IniSectionColors, "Text", new Color(255, 100, 0, 100)),
-        _backColor = new ConfigColor(IniSectionColors, "Background", new Color(0, 0, 0, 255)),
-        _lineColor = new ConfigColor(IniSectionColors, "Radar lines", new Color(255, 100, 0, 50)),
-        _planeColor = new ConfigColor(IniSectionColors, "Radar plane", new Color(100, 30, 0, 5)),
-        _enemyIconColor = new ConfigColor(IniSectionColors, "Enemy icon", new Color(150, 0, 0, 255)),
-        _enemyElevationColor = new ConfigColor(IniSectionColors, "Enemy elevation", new Color(75, 0, 0, 255)),
-        _neutralIconColor = new ConfigColor(IniSectionColors, "Neutral icon", new Color(150, 150, 0, 255)),
-        _neutralElevationColor = new ConfigColor(IniSectionColors, "Neutral elevation", new Color(75, 75, 0, 255)),
-        _allyIconColor = new ConfigColor(IniSectionColors, "Friendly icon", new Color(0, 50, 150, 255)),
-        _allyElevationColor = new ConfigColor(IniSectionColors, "Friendly elevation", new Color(0, 25, 75, 255)),
-        _missileLockWarningColor = new ConfigColor(IniSectionColors, "Missile lock warning", new Color(255, 100, 0, 255)),
+_titleBarColor = new ConfigColor(IniSectionColors, "Title bar", new Color(100, 30, 0, 5)),
+_textColor = new ConfigColor(IniSectionColors, "Text", new Color(255, 100, 0, 100)),
+_backColor = new ConfigColor(IniSectionColors, "Background", new Color(0, 0, 0, 255)),
+_lineColor = new ConfigColor(IniSectionColors, "Radar lines", new Color(255, 100, 0, 50)),
+_planeColor = new ConfigColor(IniSectionColors, "Radar plane", new Color(100, 30, 0, 5)),
+_enemyIconColor = new ConfigColor(IniSectionColors, "Enemy icon", new Color(150, 0, 0, 255)),
+_enemyElevationColor = new ConfigColor(IniSectionColors, "Enemy elevation", new Color(75, 0, 0, 255)),
+_neutralIconColor = new ConfigColor(IniSectionColors, "Neutral icon", new Color(150, 150, 0, 255)),
+_neutralElevationColor = new ConfigColor(IniSectionColors, "Neutral elevation", new Color(75, 75, 0, 255)),
+_allyIconColor = new ConfigColor(IniSectionColors, "Friendly icon", new Color(0, 50, 150, 255)),
+_allyElevationColor = new ConfigColor(IniSectionColors, "Friendly elevation", new Color(0, 25, 75, 255)),
+_missileLockWarningColor = new ConfigColor(IniSectionColors, "Missile lock warning", new Color(255, 100, 0, 255)),
     };
 
     _rows = new ConfigInt(IniSectionMultiscreen, "Screen rows", 1);
@@ -628,7 +628,6 @@ class RadarSurface
 
     const string Font = "Debug";
     const string RadarWarningText = "MISSILE LOCK";
-    const string IconOutOfRange = "AH_BoreSight";
     const float TitleTextSize = 1.5f;
     const float HudTextSize = 1.3f;
     const float RangeTextSize = 1.2f;
@@ -662,7 +661,6 @@ class RadarSurface
     readonly Vector2 _dropShadowOffset = new Vector2(2, 2);
     readonly Vector2 _tgtIconSize = new Vector2(20f, 20f);
     readonly Vector2 _shipIconSize = new Vector2(32, 16);
-    readonly Vector2 _triangleOffset = new Vector2(0, (float)(0.5f - Math.Sqrt(3f) / 6f));
     readonly Vector2 _borderPadding = new Vector2(16f, 64f);
     readonly List<TargetInfo> _targetList = new List<TargetInfo>();
     readonly List<TargetInfo> _targetsBelowPlane = new List<TargetInfo>();
@@ -670,19 +668,20 @@ class RadarSurface
 
     List<long> _targetDictKeys = new List<long>();
     Dictionary<long, TargetInfo> _targetDict = new Dictionary<long, TargetInfo>();
+    
+    bool _amogus = false;
 
     struct TargetInfo
     {
         public Vector3 Position;
-        public Vector2 Offset;
         public Color IconColor;
         public Color ElevationColor;
-        public string Icon;
         public bool TargetLock;
         public bool MyTargetLock;
+        public bool AbovePlane;
         public float Rotation;
-        public float Scale;
         public float Age;
+        public Action<ISpriteSurface, Vector2, Color, Color, float, float> DrawFunction;
     }
 
     public RadarSurface(Color titleBarColor, Color backColor, Color lineColor, Color planeColor, Color textColor, Color targetLockColor, float projectionAngleDeg, float range, bool drawQuadrants)
@@ -741,66 +740,60 @@ class RadarSurface
         surf.Add(text);
     }
 
-    void GetSpriteType(TargetRelation type, out string spriteName, out Vector2 offset, out float scale)
-    {
-        if ((type & TargetRelation.LargeGrid) != 0)
-        {
-            spriteName = "SquareSimple";
-            offset = Vector2.Zero;
-            scale = 1f;
-        }
-        else if ((type & TargetRelation.SmallGrid) != 0)
-        {
-            spriteName = "Triangle";
-            offset = _triangleOffset;
-            scale = 1.25f;
-        }
-        else
-        {
-            spriteName = "Circle";
-            offset = Vector2.Zero;
-            scale = 1f;
-        }
-    }
-
     public void AddContact(Vector3D worldPosition, MatrixD worldMatrix, Color iconColor, Color elevationLineColor, TargetRelation relation, TargetRelation type, bool targetLock, bool myTargetLock, long id)
     {
         var transformedDirection = Vector3D.TransformNormal(worldPosition - worldMatrix.Translation, Matrix.Transpose(worldMatrix));
         var position = new Vector3(transformedDirection.X, transformedDirection.Z, transformedDirection.Y);
         bool inRange = position.X * position.X + position.Y * position.Y < Range * Range;
         float angle = 0f;
-        string spriteName = "";
-        Vector2 offset;
-        float scale;
+        bool above = position.Z > 0;
+
+        Action<ISpriteSurface, Vector2, Color, Color, float, float> drawFunction;
         if (inRange)
         {
-            GetSpriteType(type, out spriteName, out offset, out scale);
+            if (_amogus)
+            {
+                drawFunction = DrawAmogus;
+            }
+            else if ((type & TargetRelation.Missile) != 0)
+            {
+                drawFunction = DrawMissile;
+            }
+            else if ((type & TargetRelation.LargeGrid) != 0)
+            {
+                drawFunction = DrawSquare;
+            }
+            else if ((type & TargetRelation.SmallGrid) != 0)
+            {
+                drawFunction = DrawTriangle;
+            }
+            else
+            {
+                drawFunction = DrawCircle;
+            }
             position /= Range;
         }
         else
         {
-            spriteName = IconOutOfRange;
-            offset = Vector2.Zero;
-            scale = 4f;
             Vector3 directionFlat = position;
             directionFlat.Z = 0;
             float angleOffset = position.Z > 0 ? MathHelper.Pi : 0f;
             position = Vector3.Normalize(directionFlat);
             angle = angleOffset + MathHelper.PiOver2;
+            drawFunction = DrawOutOfRangeIcon;
         }
 
         var targetInfo = new TargetInfo()
         {
             Position = position,
-            Offset = offset,
             ElevationColor = elevationLineColor,
             IconColor = iconColor,
-            Icon = spriteName,
             TargetLock = targetLock,
             MyTargetLock = myTargetLock,
             Rotation = angle,
-            Scale = scale,
             Age = 0f,
+            DrawFunction = drawFunction,
+            AbovePlane = above,
         };
 
         _targetDict[id] = targetInfo;
@@ -821,7 +814,7 @@ class RadarSurface
 
         foreach (var target in _targetList)
         {
-            if (target.Position.Z >= 0)
+            if (target.AbovePlane)
                 _targetsAbovePlane.Add(target);
             else
                 _targetsBelowPlane.Add(target);
@@ -1071,6 +1064,81 @@ class RadarSurface
         return color;
     }
 
+    #region Icons
+    void DrawSquare(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f,0f)*scale+centerPos, new Vector2(300f,300f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // square shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f,0f)*scale+centerPos, new Vector2(200f,200f)*scale, color, null, TextAlignment.CENTER, rotation)); // square
+    }
+    
+    void DrawCircle(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f,0f)*scale+centerPos, new Vector2(300f,300f)*scale, shadowColor, null, TextAlignment.CENTER, 0f)); // circle shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f,0f)*scale+centerPos, new Vector2(200f,200f)*scale, color, null, TextAlignment.CENTER, 0f)); // circle
+    }
+
+    void DrawTriangle(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-105f,cos*-105f)*scale+centerPos, new Vector2(400f,400f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // triangle shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-63f,cos*-63f)*scale+centerPos, new Vector2(200f,200f)*scale, color, null, TextAlignment.CENTER, rotation)); // triangle
+    }
+    
+    void DrawOutOfRangeIcon(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*61f-sin*-12f,sin*61f+cos*-12f)*scale+centerPos, new Vector2(180f,350f)*scale, shadowColor, null, TextAlignment.CENTER, -0.7854f+rotation)); // chevron rightCopy
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-61f-sin*-12f,sin*-61f+cos*-12f)*scale+centerPos, new Vector2(180f,350f)*scale, shadowColor, null, TextAlignment.CENTER, 0.7854f+rotation)); // chevron leftCopy
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*61f-sin*-12f,sin*61f+cos*-12f)*scale+centerPos, new Vector2(80f,250f)*scale, color, null, TextAlignment.CENTER, -0.7854f+rotation)); // chevron right
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-61f-sin*-12f,sin*-61f+cos*-12f)*scale+centerPos, new Vector2(80f,250f)*scale, color, null, TextAlignment.CENTER, 0.7854f+rotation)); // chevron left
+    }
+
+    void DrawMissile(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*65f,cos*65f)*scale+centerPos, new Vector2(180f,270f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // tube shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SemiCircle", new Vector2(-sin*-70f,cos*-70f)*scale+centerPos, new Vector2(180f,260f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // nose shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*125f,cos*125f)*scale+centerPos, new Vector2(240f,120f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // bottom fins base shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-20f,cos*-20f)*scale+centerPos, new Vector2(240f,170f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // bottom fins shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f,0f)*scale+centerPos, new Vector2(240f,60f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // top fins shadow base
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-115f,cos*-115f)*scale+centerPos, new Vector2(240f,170f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // top fins shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*40f,cos*40f)*scale+centerPos, new Vector2(80f,220f)*scale, color, null, TextAlignment.CENTER, rotation)); // tube
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SemiCircle", new Vector2(-sin*-70f,cos*-70f)*scale+centerPos, new Vector2(80f,160f)*scale, color, null, TextAlignment.CENTER, rotation)); // nose
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*110f,cos*110f)*scale+centerPos, new Vector2(140f,50f)*scale, color, null, TextAlignment.CENTER, rotation)); // bottom fins base
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*35f,cos*35f)*scale+centerPos, new Vector2(140f,100f)*scale, color, null, TextAlignment.CENTER, rotation)); // bottom fins
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-70f,cos*-70f)*scale+centerPos, new Vector2(140f,100f)*scale, color, null, TextAlignment.CENTER, rotation)); // top fins
+    }
+    
+    void DrawAmogus(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*55f-sin*-50f,sin*55f+cos*-50f)*scale+centerPos, new Vector2(150f,150f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // visor right edge shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-sin*85f,cos*85f)*scale+centerPos, new Vector2(220f,130f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // leg l shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-120f-sin*-75f,sin*-120f+cos*-75f)*scale+centerPos, new Vector2(60f,50f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // backpack shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-20f-sin*15f,sin*-20f+cos*15f)*scale+centerPos, new Vector2(260f,130f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // body shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-sin*-50f,cos*-50f)*scale+centerPos, new Vector2(220f,220f)*scale, shadowColor, null, TextAlignment.CENTER, rotation)); // head shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*35f-sin*70f,sin*35f+cos*70f)*scale+centerPos, new Vector2(50f,80f)*scale, color, null, TextAlignment.CENTER, rotation)); // leg r
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-35f-sin*70f,sin*-35f+cos*70f)*scale+centerPos, new Vector2(50f,80f)*scale, color, null, TextAlignment.CENTER, rotation)); // leg l
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*-20f-sin*-10f,sin*-20f+cos*-10f)*scale+centerPos, new Vector2(160f,80f)*scale, color, null, TextAlignment.CENTER, rotation)); // body
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-sin*-50f,cos*-50f)*scale+centerPos, new Vector2(120f,120f)*scale, color, null, TextAlignment.CENTER, rotation)); // head
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*55f-sin*-50f,sin*55f+cos*-50f)*scale+centerPos, new Vector2(50f,50f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, rotation)); // visor right edge
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(cos*15f-sin*-50f,sin*15f+cos*-50f)*scale+centerPos, new Vector2(50f,50f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, rotation)); // visor left edge
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos*35f-sin*-50f,sin*35f+cos*-50f)*scale+centerPos, new Vector2(40f,50f)*scale, new Color(128,128,128,255), null, TextAlignment.CENTER, rotation)); // visor center
+    }
+    #endregion
+
     void DrawTargetIcon(ISpriteSurface surf, Vector2 screenCenter, Vector2 radarPlaneSize, TargetInfo targetInfo, float scale)
     {
         float alphaScale = _immediateFadeOut ? 1f : Math.Max(0f, 1f - (targetInfo.Age / FadeOutInterval));
@@ -1089,60 +1157,48 @@ class RadarSurface
         RoundVector2(ref elevationSprite.Position);
         RoundVector2(ref elevationSprite.Size);
 
-        Vector2 iconSize = _tgtIconSize * scale * targetInfo.Scale;
-        var iconSprite = new MySprite(SpriteType.TEXTURE, targetInfo.Icon, color: ScaleColorAlpha(targetInfo.IconColor, alphaScale), size: iconSize, rotation: targetInfo.Rotation);
-        iconSprite.Position = screenCenter + iconPos;
-        RoundVector2(ref iconSprite.Position);
-        RoundVector2(ref iconSprite.Size);
+        Vector2 iconDrawPos = screenCenter + iconPos;
+        RoundVector2(ref iconDrawPos);
+        float shadowThickness = 2f * (float)Math.Max(1f, Math.Round(scale * 4f));
+        float shadowScale = scale * (_tgtIconSize.X + shadowThickness) / _tgtIconSize.X;
+        Color iconColor = ScaleColorAlpha(targetInfo.IconColor, alphaScale);
+        Color shadowColor = ScaleColorAlpha(_backColor, alphaScale);
 
-        var iconShadow = iconSprite;
-        iconShadow.Color = ScaleColorAlpha(Color.Black, alphaScale);
-        iconShadow.Size += Vector2.One * 2f * (float)Math.Max(1f, Math.Round(scale * 4f));
-
+        Vector2 iconSize = _tgtIconSize * scale;
         iconSize.Y *= _radarProjectionCos;
         var projectedIconSprite = new MySprite(SpriteType.TEXTURE, "Circle", color: ScaleColorAlpha(targetInfo.ElevationColor, alphaScale), size: iconSize);
         projectedIconSprite.Position = screenCenter + targetPosPlane;
         RoundVector2(ref projectedIconSprite.Position);
-        RoundVector2(ref projectedIconSprite.Size);
 
         bool showProjectedElevation = Math.Abs(iconPos.Y - targetPosPlane.Y) > iconSize.Y;
 
-        Vector2 iconSpriteOffset = targetInfo.Offset * scale * targetInfo.Scale;
-
         // Changing the order of drawing based on if above or below radar plane
-        if (targetPosPixels.Z >= 0)
+        if (targetInfo.AbovePlane)
         {
-            iconSprite.Position -= iconSpriteOffset * iconSprite.Size.Value.X;
-            iconShadow.Position -= iconSpriteOffset * iconShadow.Size.Value.X;
-
             if (showProjectedElevation)
             {
                 surf.Add(projectedIconSprite);
                 surf.Add(elevationSprite);
             }
-            surf.Add(iconShadow);
-            surf.Add(iconSprite);
+            targetInfo.DrawFunction(surf, iconDrawPos, iconColor, shadowColor, scale, 0);
         }
         else
         {
-            iconSprite.RotationOrScale = MathHelper.Pi;
-            iconShadow.RotationOrScale = MathHelper.Pi;
-
-            iconSprite.Position += iconSpriteOffset * iconSprite.Size.Value.X;
-            iconShadow.Position += iconSpriteOffset * iconShadow.Size.Value.X;
-
             if (showProjectedElevation)
+            {
                 surf.Add(elevationSprite);
-            surf.Add(iconShadow);
-            surf.Add(iconSprite);
+            }
+            targetInfo.DrawFunction(surf, iconDrawPos, iconColor, shadowColor, scale, MathHelper.Pi);
             if (showProjectedElevation)
+            {
                 surf.Add(projectedIconSprite);
+            }
         }
 
         if (targetInfo.TargetLock && alphaScale > 0.999f)
         {
             Vector2 targetBoxSize = (_tgtIconSize + 20) * scale;
-            DrawBoxCorners(surf, targetBoxSize, screenCenter + iconPos, 12 * scale, 4 * scale, targetInfo.IconColor);
+            DrawBoxCorners(surf, targetBoxSize, iconDrawPos, 12 * scale, 4 * scale, targetInfo.IconColor);
 
             if (targetInfo.MyTargetLock)
             {
@@ -1734,7 +1790,7 @@ new AnimationParams(345f,   0,   0, 160),
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
 
 #region Scheduler
 /// <summary>
