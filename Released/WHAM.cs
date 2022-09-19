@@ -1,7 +1,7 @@
 
-#region Script
-const string VERSION = "170.2.5";
-const string DATE = "2022/07/01";
+#region WHAM
+const string VERSION = "170.4.1";
+const string DATE = "2022/09/17";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -15,7 +15,7 @@ _______________________________
     NOTE
 
 This code has been minified so that it will fit in the programmable block.
-I have NOT obfuscated any of the code, so that if you copy paste this into an 
+I have NOT obfuscated any of the code, so that if you copy paste this into an
 IDE like Visual Studio or use a website like https://codebeautify.org/csharpviewer,
 you can uncompress this and it will be human readable.
 
@@ -85,14 +85,14 @@ Vector3D
     _targetVel,
     _aimDispersion;
 
-string 
+string
     _missileGroupNameTag = "",
     _missileNameTag = "",
     _missileTag = "Missile",
     _fireControlGroupNameTag = "Fire Control",
     _detachThrustTag = "Detach";
 
-double 
+double
     _disconnectDelay = 1,
     _guidanceDelay = 2,
     _detachDuration = 0,
@@ -106,7 +106,7 @@ double
     _gyroIntegralGain = 0,
     _gyroDerivativeGain = 10,
     _navConstant = 3,
-    _accelNavConstant = 0,
+    _accelNavConstant = 1.5,
     _offsetUp = 0,
     _offsetLeft = 0,
     _missileSpinRPM = 0,
@@ -120,8 +120,8 @@ double
     _timeTotal = 0,
     _timeSinceLastIngest = 0;
 
-int 
-    _missileNumber = 1,   
+int
+    _missileNumber = 1,
     _setupTicks = 0,
     _missileStage = 0;
 
@@ -234,7 +234,7 @@ string[] _antennaMemeMessages = new string[]
 };
 #endregion
 Random RNGesus = new Random();
-UniformSumRandom _bellCurveRandom = new UniformSumRandom(3);
+BatesDistributionRandom _bellCurveRandom = new BatesDistributionRandom(3);
 
 //So many lists...
 List<IMyTerminalBlock> _missileBlocks = new List<IMyTerminalBlock>();
@@ -271,6 +271,7 @@ DynamicCircularBuffer<IMyCameraBlock>
     _camerasUp = new DynamicCircularBuffer<IMyCameraBlock>(),
     _camerasDown = new DynamicCircularBuffer<IMyCameraBlock>();
 
+ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
 List<MyTuple<Vector3D, long>> _remoteFireRequests = new List<MyTuple<Vector3D, long>>();
 
 HashSet<long> _savedKeycodes = new HashSet<long>();
@@ -298,9 +299,10 @@ readonly MyIni _guidanceIni = new MyIni();
 readonly StringBuilder _saveSB = new StringBuilder();
 readonly RaycastHoming _raycastHoming;
 
-enum GuidanceMode : int { BeamRiding = 1, SemiActive = 2, Active = 4 };
+enum GuidanceMode : int { BeamRiding = 1, SemiActive = 2, Active = 4, Homing = SemiActive | Active };
 
-PID _yawPID, _pitchPID;
+PID _yawPID = new PID(1, 0, 0, SECONDS_PER_UPDATE),
+    _pitchPID = new PID(1, 0, 0, SECONDS_PER_UPDATE);
 IMyBlockGroup _missileGroup;
 Scheduler _scheduler;
 GuidanceMode _guidanceMode = GuidanceMode.SemiActive;
@@ -316,7 +318,7 @@ const string
     IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
     IGC_TAG_HOMING = "IGC_MSL_HOM_MSG",
     IGC_TAG_BEAM_RIDING = "IGC_MSL_OPT_MSG",
-    IGC_TAG_IFF = "IGC_IFF_MSG",
+    IGC_TAG_IFF = "IGC_IFF_PKT",
     IGC_TAG_FIRE = "IGC_MSL_FIRE_MSG",
     IGC_TAG_REMOTE_FIRE_REQUEST = "IGC_MSL_REM_REQ",
     IGC_TAG_REMOTE_FIRE_RESPONSE = "IGC_MSL_REM_RSP",
@@ -407,13 +409,13 @@ const string
     INI_MEME_MODE = "Antenna meme mode";
 #endregion
 
-QueuedAction 
+QueuedAction
     _stage1Action,
     _stage2Action,
     _stage3Action,
     _stage4Action;
 
-ScheduledAction 
+ScheduledAction
     _guidanceActivateAction,
     _randomHeadingVectorAction;
 #endregion
@@ -1102,8 +1104,12 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     }
     _selectedGuidance = _guidanceAlgorithms[_guidanceAlgoIndex];
 
-    _yawPID = new PID(_gyroProportionalGain, _gyroIntegralGain, _gyroDerivativeGain, 0.1, SECONDS_PER_UPDATE);
-    _pitchPID = new PID(_gyroProportionalGain, _gyroIntegralGain, _gyroDerivativeGain, 0.1, SECONDS_PER_UPDATE);
+    _yawPID.Kp = _gyroProportionalGain;
+    _yawPID.Ki = _gyroIntegralGain;
+    _yawPID.Kd = _gyroDerivativeGain;
+    _pitchPID.Kp = _gyroProportionalGain;
+    _pitchPID.Ki = _gyroIntegralGain;
+    _pitchPID.Kd = _gyroDerivativeGain;
     #endregion
 
     _preSetupFailed = false; // TODO rename
@@ -1377,7 +1383,7 @@ bool CollectBlocks(IMyTerminalBlock block)
     {
         /* Nothing to do here */
     }
-    
+
 
     return false;
 }
@@ -1584,7 +1590,7 @@ void ActivateGuidance()
 
 void GuidanceNavAndControl()
 {
-    if ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0)
+    if ((_guidanceMode & GuidanceMode.Homing) != 0)
         ActiveHomingScans();
 
     if (!_enableGuidance)
@@ -1597,11 +1603,11 @@ void GuidanceNavAndControl()
 
     Navigation(_minimumArmingRange,
         _enableEvasion,
-        _evadeWithSpiral, 
+        _evadeWithSpiral,
         out missileMatrix,
-        out missilePos, 
+        out missilePos,
         out missileVel,
-        out _shooterPos, 
+        out _shooterPos,
         out gravityVec,
         out missileMass,
         out missileAccel,
@@ -1628,10 +1634,10 @@ void Navigation(
     double minArmingRange,
     bool enableEvasion,
     bool evadeWithSpiral,
-    out MatrixD missileMatrix, 
-    out Vector3D missilePos, 
-    out Vector3D missileVel, 
-    out Vector3D shooterPos, 
+    out MatrixD missileMatrix,
+    out Vector3D missilePos,
+    out Vector3D missileVel,
+    out Vector3D shooterPos,
     out Vector3D gravity,
     out double missileMass,
     out double missileAcceleration,
@@ -1688,7 +1694,7 @@ Vector3D GuidanceMain(
 
         headingVec = HomingGuidance(
             missilePos,
-            missileVel, 
+            missileVel,
             gravity,
             missileAcceleration,
             out adjustedTargetPos);
@@ -1760,10 +1766,10 @@ Vector3D BeamRideGuidance(
     {
         headingVec = missileToTargetVec;
     }
-    
+
     if (!Vector3D.IsZero(gravity))
     {
-        headingVec = MissileGuidanceBase.GravityCompensation(missileAcceleration, headingVec, gravity);        
+        headingVec = MissileGuidanceBase.GravityCompensation(missileAcceleration, headingVec, gravity);
     }
 
     return headingVec;
@@ -1789,7 +1795,7 @@ Vector3D HomingGuidance(
             adjustedTargetPos += Vector3D.Normalize(gravityVec) * -_topDownAttackHeight;
         }
     }
-    
+
     if (_maxAimDispersion > 0.5)
     {
         if (Vector3D.IsZero(_aimDispersion))
@@ -1814,7 +1820,7 @@ void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec, Ve
     }
 
     // Get pitch and yaw angles
-    double yaw; double pitch; double roll;
+    double yaw, pitch, roll;
     GetRotationAnglesSimultaneous(headingVec, -gravityVec, missileMatrix, out pitch, out yaw, out roll);
 
     // Angle controller
@@ -1847,14 +1853,18 @@ void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec, Ve
 }
 
 #region Broadcast Missile IFF
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
 void NetworkTargets()
 {
-    var myType = Me.CubeGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid;
-    var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(TargetRelation.Friendly | myType), Me.CubeGrid.EntityId, Me.WorldAABB.Center, Me.CubeGrid.WorldAABB.HalfExtents.LengthSquared());
-    IGC.SendBroadcastMessage(IGC_TAG_IFF, myTuple);
+    bool hasTarget = _guidanceMode == GuidanceMode.Active && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked;
 
-    if (_guidanceMode == GuidanceMode.Active && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
+    int capacity = hasTarget ? 2 : 1;
+    _messageBuilder.Capacity = capacity;
+
+    var myType = TargetRelation.Missile | (Me.CubeGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid);
+    var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(TargetRelation.Friendly | myType), Me.CubeGrid.EntityId, Me.WorldAABB.Center, Me.CubeGrid.WorldAABB.HalfExtents.LengthSquared());
+    _messageBuilder.Add(myTuple);
+
+    if (hasTarget)
     {
         TargetRelation relation = TargetRelation.Locked;
         switch (_raycastHoming.TargetRelation)
@@ -1883,8 +1893,10 @@ void NetworkTargets()
         }
 
         myTuple = new MyTuple<byte, long, Vector3D, double>((byte)relation, _raycastHoming.TargetId, _raycastHoming.TargetCenter, 0);
-        IGC.SendBroadcastMessage(IGC_TAG_IFF, myTuple);
+        _messageBuilder.Add(myTuple);
     }
+
+    IGC.SendBroadcastMessage(IGC_TAG_IFF, _messageBuilder.MoveToImmutable());
 }
 #endregion
 
@@ -2005,9 +2017,9 @@ void CheckProximity()
 
     // Try raycast detonation methods
     double raycastHitDistance = 0;
-    
+
     // Do one scan in the direction of the target (if applicable)
-    if ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0 && RaycastTripwireInDirection(missileToTargetNorm, closingVelocity, out raycastHitDistance, out closingSpeed))
+    if ((_guidanceMode & GuidanceMode.Homing) != 0 && RaycastTripwireInDirection(missileToTargetNorm, closingVelocity, out raycastHitDistance, out closingSpeed))
     {
         Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
         return;
@@ -2032,7 +2044,7 @@ void CheckProximity()
         Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
         return;
     }
-    
+
     foreach (IMySensorBlock sensor in _sensors)
     {
         if (sensor.Closed)
@@ -2062,11 +2074,15 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
 {
     raycastHitDistance = 0;
     closingSpeed = 0;
-    
+
     var directionToTargetNorm = VectorMath.SafeNormalize(directionToTarget);
     foreach (var cameraBuffer in _cameraBufferList)
     {
-        if (cameraBuffer.Count != 0 && Vector3D.Dot(directionToTargetNorm, cameraBuffer.Peek().WorldMatrix.Forward) > .7071)
+        Vector3D localDirToTgt = Vector3D.TransformNormal(directionToTargetNorm, MatrixD.Transpose(cameraBuffer.Peek().WorldMatrix));
+        if (cameraBuffer.Count != 0 &&
+            localDirToTgt.Z < 0 &&
+            Math.Abs(localDirToTgt.X) < .7071 &&
+            Math.Abs(localDirToTgt.Y) < .7071)
         {
             IMyCameraBlock cam = cameraBuffer.MoveNext();
             if (!cam.EnableRaycast)
@@ -2078,7 +2094,7 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
             {
                 cam.Enabled = true;
             }
-            
+
             closingSpeed = Math.Max(0, Vector3D.Dot(closingVelocity, directionToTargetNorm));
             var closingDisplacement = closingSpeed * SECONDS_PER_UPDATE;
             var scanRange = _raycastRange + closingDisplacement;
@@ -2104,12 +2120,12 @@ bool IsValidTarget(MyDetectedEntityInfo targetInfo)
 {
     if (targetInfo.IsEmpty() ||
        (targetInfo.EntityId == Me.CubeGrid.EntityId) ||
-       (!_ignoreIdForDetonation && ((_guidanceMode & (GuidanceMode.SemiActive | GuidanceMode.Active)) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId)) ||
+       (!_ignoreIdForDetonation && ((_guidanceMode & GuidanceMode.Homing) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId)) ||
        (_raycastIgnorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet) ||
        (_raycastIgnoreFriends && (targetInfo.Relationship & (MyRelationsBetweenPlayerAndBlock.FactionShare | MyRelationsBetweenPlayerAndBlock.Owner)) != 0) ||
        (targetInfo.BoundingBox.Size.LengthSquared() < _raycastMinimumTargetSize * _raycastMinimumTargetSize))
     {
-        return false;       
+        return false;
     }
 
     return true;
@@ -2152,140 +2168,6 @@ double CalculateMissileThrust(List<IMyThrust> mainThrusters)
 #endregion
 
 #region Vector Math Functions
-public static class VectorMath
-{
-    public static Vector3D SafeNormalize(Vector3D a)
-    {
-        if (Vector3D.IsZero(a))
-            return Vector3D.Zero;
-
-        if (Vector3D.IsUnit(ref a))
-            return a;
-
-        return Vector3D.Normalize(a);
-    }
-
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
-    {
-        Vector3D project_a = Projection(a, b);
-        Vector3D reject_a = a - project_a;
-        return project_a - reject_a * rejectionFactor;
-    }
-
-    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
-
-    public static Vector3D Projection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a.Dot(b) / b.LengthSquared() * b;
-    }
-
-    public static double ScalarProjection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-
-        if (Vector3D.IsUnit(ref b))
-            return a.Dot(b);
-
-        return a.Dot(b) / b.Length();
-    }
-
-    public static double AngleBetween(Vector3D a, Vector3D b) //returns radians
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-    }
-
-    public static double CosBetween(Vector3D a, Vector3D b, bool useSmallestAngle = false) //returns radians
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-}
-
-/*
-Whip's GetRotationAnglesSimultaneous - Last modified: 2020/08/27
-
-Gets axis angle rotation and decomposes it upon each cardinal axis.
-Has the desired effect of not causing roll oversteer. Does NOT use
-sequential rotation angles.
-
-NOTE: 
-This is designed for use with Keen's gyroscopes where:
-  + pitch = -X rotation
-  + yaw   = -Y rotation
-  + roll  = -Z rotation
-
-As such, the resulting angles are negated since they are computed
-using the opposite sign assumption.
-
-Dependencies:
-VectorMath.SafeNormalize
-*/
-void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
-{
-    desiredForwardVector = VectorMath.SafeNormalize(desiredForwardVector);
-
-    MatrixD transposedWm;
-    MatrixD.Transpose(ref worldMatrix, out transposedWm);
-    Vector3D.Rotate(ref desiredForwardVector, ref transposedWm, out desiredForwardVector);
-    Vector3D.Rotate(ref desiredUpVector, ref transposedWm, out desiredUpVector);
-
-    Vector3D leftVector = Vector3D.Cross(desiredUpVector, desiredForwardVector);
-    Vector3D axis;
-    double angle;
-    if (Vector3D.IsZero(desiredUpVector) || Vector3D.IsZero(leftVector))
-    {
-        axis = new Vector3D(desiredForwardVector.Y, -desiredForwardVector.X, 0);
-        angle = Math.Acos(MathHelper.Clamp(-desiredForwardVector.Z, -1.0, 1.0));
-    }
-    else
-    {
-        leftVector = VectorMath.SafeNormalize(leftVector);
-        Vector3D upVector = Vector3D.Cross(desiredForwardVector, leftVector);
-
-        // Create matrix
-        MatrixD targetMatrix = MatrixD.Zero;
-        targetMatrix.Forward = desiredForwardVector;
-        targetMatrix.Left = leftVector;
-        targetMatrix.Up = upVector;
-
-        axis = new Vector3D(targetMatrix.M23 - targetMatrix.M32,
-                            targetMatrix.M31 - targetMatrix.M13,
-                            targetMatrix.M12 - targetMatrix.M21);
-
-        double trace = targetMatrix.M11 + targetMatrix.M22 + targetMatrix.M33;
-        angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1, 1));
-    }
-
-    if (Vector3D.IsZero(axis))
-    {
-        angle = desiredForwardVector.Z < 0 ? 0 : Math.PI;
-        yaw = angle;
-        pitch = 0;
-        roll = 0;
-        return;
-    }
-
-    axis = VectorMath.SafeNormalize(axis);
-    // Because gyros rotate about -X -Y -Z, we need to negate our angles
-    yaw = -axis.Y * angle;
-    pitch = -axis.X * angle;
-    roll = -axis.Z * angle;
-}
 
 // Computes optimal drift compensation vector to eliminate drift in a specified time
 static Vector3D CalculateDriftCompensation(Vector3D velocity, Vector3D directHeading, double accel, double timeConstant, Vector3D gravityVec, double maxDriftAngle = 60)
@@ -2382,34 +2264,6 @@ double CalculateGridRadiusFromAxis(IMyCubeGrid grid, Vector3D axis)
 }
 #endregion
 
-#region Gyroscopic Control Functions
-/*
-Whip's ApplyGyroOverride - Last modified: 2020/08/27
-
-Takes pitch, yaw, and roll speeds relative to the gyro's backwards
-ass rotation axes. 
-
-NOTE:
-Added Closed check for WHAM
-*/
-void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyroList, MatrixD worldMatrix)
-{
-    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
-    var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
-
-    foreach (var thisGyro in gyroList)
-    {
-        if (thisGyro.Closed)
-            continue;
-        var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(thisGyro.WorldMatrix));
-        thisGyro.Pitch = (float)transformedRotationVec.X;
-        thisGyro.Yaw = (float)transformedRotationVec.Y;
-        thisGyro.Roll = (float)transformedRotationVec.Z;
-        thisGyro.GyroOverride = true;
-    }
-}
-#endregion
-
 #region Storage Parsing/Saving
 void ParseStorage() //TODO: Add proper ini save/parse for Active guidance
 {
@@ -2460,6 +2314,244 @@ void Save()
     Storage = _saveSB.ToString();
 }
 #endregion
+#endregion
+
+#region INCLUDES
+
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
+
+public static class VectorMath
+{
+    /// <summary>
+    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// </summary>
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return Vector3D.Zero;
+
+        if (Vector3D.IsUnit(ref a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+
+    /// <summary>
+    /// Reflects vector a over vector b with an optional rejection factor
+    /// </summary>
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    {
+        Vector3D proj = Projection(a, b);
+        Vector3D rej = a - proj;
+        return proj - rej * rejectionFactor;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Scalar projection of a onto b
+    /// </summary>
+    public static double ScalarProjection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b);
+
+        return a.Dot(b) / b.Length();
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+    }
+
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors.
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
+
+    /// <summary>
+    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
+    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
+    /// </summary>
+    /// <param name="a">First vector</param>
+    /// <param name="b">Second vector</param>
+    /// <param name="tolerance">Cosine of maximum angle</param>
+    /// <returns></returns>
+    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
+    {
+        double dot = Vector3D.Dot(a, b);
+        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
+        return Math.Abs(dot) * dot > num;
+    }
+}
+
+/// Whip's GetRotationAnglesSimultaneous - Last modified: 2022/08/10
+/// <summary>
+/// <para>
+///     This method computes the axis-angle rotation required to align the
+///     reference world matrix with the desired forward and up vectors.
+/// </para>
+/// <para>
+///     The desired forward and up vectors are used to construct the desired
+///     target orientation relative to the current world matrix orientation.
+///     The current orientation of the craft with respect to itself will be the
+///     identity matrix, thus the error between our desired orientation and our
+///     target orientation is simply the target orientation itself:
+///     M_target = M_current * M_error =>
+///     M_target = I * M_error =>
+///     M_target = M_error
+/// </para>
+/// <para>
+///     This is designed for use with Keen's gyroscopes where:
+///     + pitch = -X rotation,
+///     + yaw   = -Y rotation,
+///     + roll  = -Z rotation
+/// </para>
+/// </summary>
+/// <remarks>
+///     Dependencies: <c>VectorMath.SafeNormalize</c>
+/// </remarks>
+/// <param name="desiredForwardVector">
+///     Desired forward direction in world frame.
+///     This is the primary constraint used to allign pitch and yaw.
+/// </param>
+/// <param name="desiredUpVector">
+///     Desired up direction in world frame.
+///     This is the secondary constraint used to align roll. 
+///     Set to <c>Vector3D.Zero</c> if roll control is not desired.
+/// </param>
+/// <param name="worldMatrix">
+///     World matrix describing current orientation.
+///     The translation part of the matrix is ignored; only the orientation matters.
+/// </param>
+/// <param name="pitch">Pitch angle to desired orientation (rads).</param>
+/// <param name="yaw">Yaw angle to desired orientation (rads).</param>
+/// <param name="roll">Roll angle to desired orientation (rads).</param>
+void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
+{
+    desiredForwardVector = VectorMath.SafeNormalize(desiredForwardVector);
+
+    MatrixD transposedWm;
+    MatrixD.Transpose(ref worldMatrix, out transposedWm);
+    Vector3D.Rotate(ref desiredForwardVector, ref transposedWm, out desiredForwardVector);
+    Vector3D.Rotate(ref desiredUpVector, ref transposedWm, out desiredUpVector);
+
+    Vector3D leftVector = Vector3D.Cross(desiredUpVector, desiredForwardVector);
+    Vector3D axis;
+    double angle;
+    
+    if (Vector3D.IsZero(desiredUpVector) || Vector3D.IsZero(leftVector))
+    {
+        /*
+         * Simple case where we have no valid roll constraint:
+         * We merely cross the current forward vector (Vector3D.Forward) on the 
+         * desiredForwardVector.
+         */
+        axis = new Vector3D(-desiredForwardVector.Y, desiredForwardVector.X, 0);
+        angle = Math.Acos(MathHelper.Clamp(-desiredForwardVector.Z, -1.0, 1.0));
+    }
+    else
+    {
+        /*
+         * Here we need to construct the target orientation matrix so that we
+         * can extract the error from it in axis-angle representation.
+         */
+        leftVector = VectorMath.SafeNormalize(leftVector);
+        Vector3D upVector = Vector3D.Cross(desiredForwardVector, leftVector);
+        MatrixD targetOrientation = new MatrixD()
+        {
+            Forward = desiredForwardVector,
+            Left = leftVector,
+            Up = upVector,
+        };
+
+        axis = new Vector3D(targetOrientation.M32 - targetOrientation.M23,
+                            targetOrientation.M13 - targetOrientation.M31,
+                            targetOrientation.M21 - targetOrientation.M12);
+
+        double trace = targetOrientation.M11 + targetOrientation.M22 + targetOrientation.M33;
+        angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1.0, 1.0));
+    }
+
+    if (Vector3D.IsZero(axis))
+    {
+        /*
+         * Degenerate case where we get a zero axis. This means we are either
+         * exactly aligned or exactly anti-aligned. In the latter case, we just
+         * assume the yaw is PI to get us away from the singularity.
+         */
+        angle = desiredForwardVector.Z < 0 ? 0 : Math.PI;
+        yaw = angle;
+        pitch = 0;
+        roll = 0;
+        return;
+    }
+
+    Vector3D axisAngle = VectorMath.SafeNormalize(axis) * angle;
+    yaw = axisAngle.Y;
+    pitch = axisAngle.X;
+    roll = axisAngle.Z;
+}
+
+/*
+Whip's ApplyGyroOverride - Last modified: 2020/08/27
+
+Takes pitch, yaw, and roll speeds relative to the gyro's backwards
+ass rotation axes. 
+*/
+void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyroList, MatrixD worldMatrix)
+{
+    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
+    var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
+
+    foreach (var thisGyro in gyroList)
+    {
+        var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(thisGyro.WorldMatrix));
+
+        thisGyro.Pitch = (float)transformedRotationVec.X;
+        thisGyro.Yaw = (float)transformedRotationVec.Y;
+        thisGyro.Roll = (float)transformedRotationVec.Z;
+        thisGyro.GyroOverride = true;
+    }
+}
 
 #region Scheduler
 /// <summary>
@@ -2470,7 +2562,7 @@ public class Scheduler
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    ScheduledAction _currentlyQueuedAction = null;
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
     bool _inUpdate = false;
 
@@ -2541,6 +2633,10 @@ public class Scheduler
             _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
@@ -2580,13 +2676,13 @@ public class Scheduler
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
@@ -2601,8 +2697,8 @@ public class Scheduler
 
 public class QueuedAction : ScheduledAction
 {
-    public QueuedAction(Action action, double runInterval)
-        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
     { }
 }
 
@@ -2635,7 +2731,7 @@ public class ScheduledAction
                 return;
 
             _runIntervalTicks = value < 0 ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : 1.0 / _runIntervalTicks;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
         }
     }
 
@@ -2693,51 +2789,41 @@ public class ScheduledAction
 }
 #endregion
 
-#region PID Control
-//Whip's PID controller class v6 - 11/22/17
+/// <summary>
+/// Discrete time PID controller class.
+/// Last edited: 2022/08/11 - Whiplash141
+/// </summary>
 public class PID
 {
-    double _kP = 0;
-    double _kI = 0;
-    double _kD = 0;
-    double _integralDecayRatio = 0;
-    double _lowerBound = 0;
-    double _upperBound = 0;
+    public double Kp { get; set; } = 0;
+    public double Ki { get; set; } = 0;
+    public double Kd { get; set; } = 0;
+    public double Value { get; private set; }
+
     double _timeStep = 0;
     double _inverseTimeStep = 0;
     double _errorSum = 0;
     double _lastError = 0;
     bool _firstRun = true;
-    bool _integralDecay = false;
-    public double Value { get; private set; }
 
-    public PID(double kP, double kI, double kD, double lowerBound, double upperBound, double timeStep)
+    public PID(double kp, double ki, double kd, double timeStep)
     {
-        _kP = kP;
-        _kI = kI;
-        _kD = kD;
-        _lowerBound = lowerBound;
-        _upperBound = upperBound;
+        Kp = kp;
+        Ki = ki;
+        Kd = kd;
         _timeStep = timeStep;
         _inverseTimeStep = 1 / _timeStep;
-        _integralDecay = false;
     }
 
-    public PID(double kP, double kI, double kD, double integralDecayRatio, double timeStep)
+    protected virtual double GetIntegral(double currentError, double errorSum, double timeStep)
     {
-        _kP = kP;
-        _kI = kI;
-        _kD = kD;
-        _timeStep = timeStep;
-        _inverseTimeStep = 1 / _timeStep;
-        _integralDecayRatio = integralDecayRatio;
-        _integralDecay = true;
+        return errorSum + currentError * timeStep;
     }
 
     public double Control(double error)
     {
         //Compute derivative term
-        var errorDerivative = (error - _lastError) * _inverseTimeStep;
+        double errorDerivative = (error - _lastError) * _inverseTimeStep;
 
         if (_firstRun)
         {
@@ -2745,64 +2831,65 @@ public class PID
             _firstRun = false;
         }
 
-        //Compute integral term
-        if (!_integralDecay)
-        {
-            _errorSum += error * _timeStep;
-
-            //Clamp integral term
-            if (_errorSum > _upperBound)
-                _errorSum = _upperBound;
-            else if (_errorSum < _lowerBound)
-                _errorSum = _lowerBound;
-        }
-        else
-        {
-            _errorSum = _errorSum * (1.0 - _integralDecayRatio) + error * _timeStep;
-        }
+        //Get error sum
+        _errorSum = GetIntegral(error, _errorSum, _timeStep);
 
         //Store this error as last error
         _lastError = error;
 
         //Construct output
-        this.Value = _kP * error + _kI * _errorSum + _kD * errorDerivative;
-        return this.Value;
+        Value = Kp * error + Ki * _errorSum + Kd * errorDerivative;
+        return Value;
     }
 
     public double Control(double error, double timeStep)
     {
-        _timeStep = timeStep;
-        _inverseTimeStep = 1 / _timeStep;
+        if (timeStep != _timeStep)
+        {
+            _timeStep = timeStep;
+            _inverseTimeStep = 1 / _timeStep;
+        }
         return Control(error);
     }
 
-    public void Reset()
+    public virtual void Reset()
     {
         _errorSum = 0;
         _lastError = 0;
         _firstRun = true;
     }
 }
-#endregion
 
-#region Runtime Monitoring
-// Class that tracks runtime history.
+/// <summary>
+/// Class that tracks runtime history.
+/// </summary>
 public class RuntimeTracker
 {
     public int Capacity { get; set; }
     public double Sensitivity { get; set; }
-    public double MaxRuntime { get; private set; }
-    public double MaxInstructions { get; private set; }
-    public double AverageRuntime { get; private set; }
-    public double AverageInstructions { get; private set; }
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
+    
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
 
-    private readonly Queue<double> _runtimes = new Queue<double>();
-    private readonly Queue<double> _instructions = new Queue<double>();
-    private readonly StringBuilder _sb = new StringBuilder();
-    private readonly int _instructionLimit;
-    private readonly Program _program;
-
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.01)
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
         _program = program;
         Capacity = capacity;
@@ -2813,61 +2900,55 @@ public class RuntimeTracker
     public void AddRuntime()
     {
         double runtime = _program.Runtime.LastRunTimeMs;
-        AverageRuntime = Sensitivity * (runtime - AverageRuntime) + AverageRuntime;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
 
         _runtimes.Enqueue(runtime);
         if (_runtimes.Count == Capacity)
         {
             _runtimes.Dequeue();
         }
-
+        
         MaxRuntime = _runtimes.Max();
     }
 
     public void AddInstructions()
     {
         double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
         AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-
+        
         _instructions.Enqueue(instructions);
         if (_instructions.Count == Capacity)
         {
             _instructions.Dequeue();
         }
-
+        
         MaxInstructions = _instructions.Max();
     }
 
     public string Write()
     {
-        _sb.Clear();
-        _sb.AppendLine("\n_____________________________\nGeneral Runtime Info\n");
-        _sb.AppendLine($"Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"Max runtime: {MaxRuntime:n4} ms");
-        return _sb.ToString();
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
     }
 }
-#endregion
-
-#region Ini Helper
-public static class MyIniHelper
-{
-    public static void SetVector3D(string sectionName, string vectorName, ref Vector3D vector, MyIni ini)
-    {
-        ini.Set(sectionName, vectorName, vector.ToString());
-    }
-
-    public static Vector3D GetVector3D(string sectionName, string vectorName, MyIni ini)
-    {
-        var vector = Vector3D.Zero;
-        Vector3D.TryParse(ini.Get(sectionName, vectorName).ToString(), out vector);
-        return vector;
-    }
-}
-#endregion
 
 #region Raycast Homing
 class RaycastHoming
@@ -3352,8 +3433,7 @@ abstract class MissileGuidanceBase
     protected double _deltaTime;
     protected double _updatesPerSecond;
 
-    Vector3D _lastVelocity;
-    bool _lastVelocitySet = false;
+    Vector3D? _lastVelocity;
 
     public MissileGuidanceBase(double updatesPerSecond)
     {
@@ -3363,16 +3443,14 @@ abstract class MissileGuidanceBase
 
     public void ClearAcceleration()
     {
-        _lastVelocitySet = false;
+        _lastVelocity = null;
     }
 
     public Vector3D Update(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D? gravity = null)
     {
         Vector3D targetAcceleration = Vector3D.Zero;
-        if (!_lastVelocitySet)
-            _lastVelocitySet = true;
-        else
-            targetAcceleration = (targetVelocity - _lastVelocity) * _updatesPerSecond;
+        if (_lastVelocity.HasValue)
+            targetAcceleration = (targetVelocity - _lastVelocity.Value) * _updatesPerSecond;
         _lastVelocity = targetVelocity;
 
         Vector3D pointingVector = GetPointingVector(missilePosition, missileVelocity, missileAcceleration, targetPosition, targetVelocity, targetAcceleration);
@@ -3489,8 +3567,9 @@ class ZeroEffortMissGuidance : RelNavGuidance
     override protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
     {
         double distToTarget = Vector3D.Dot(missileToTarget, missileToTargetNorm);
+        double closingSpeed = Vector3D.Dot(relativeVelocity, missileToTargetNorm);
         // Equation (8) with sign modification to keep time positive and not NaN
-        double tau = distToTarget / Math.Max(1, relativeVelocity.Length());
+        double tau = distToTarget / Math.Max(1, Math.Abs(closingSpeed));
         // Equation (6)
         Vector3D z = missileToTarget + relativeVelocity * tau;
         // Equation (7)
@@ -3500,7 +3579,10 @@ class ZeroEffortMissGuidance : RelNavGuidance
 }
 #endregion
 
-#region CircularBuffer
+/// <summary>
+/// A simple, generic circular buffer class with a variable capacity.
+/// </summary>
+/// <typeparam name="T"></typeparam>
 public class DynamicCircularBuffer<T>
 {
     public int Count
@@ -3510,21 +3592,32 @@ public class DynamicCircularBuffer<T>
             return _list.Count;
         }
     }
-
+    
     List<T> _list = new List<T>();
     int _getIndex = 0;
 
+    /// <summary>
+    /// Adds an item to the buffer.
+    /// </summary>
+    /// <param name="item"></param>
     public void Add(T item)
     {
         _list.Add(item);
     }
-
+    
+    /// <summary>
+    /// Clears the buffer.
+    /// </summary>
     public void Clear()
     {
         _list.Clear();
         _getIndex = 0;
     }
 
+    /// <summary>
+    /// Retrieves the current item in the buffer and increments the buffer index.
+    /// </summary>
+    /// <returns></returns>
     public T MoveNext()
     {
         if (_list.Count == 0)
@@ -3534,6 +3627,10 @@ public class DynamicCircularBuffer<T>
         return val;
     }
 
+    /// <summary>
+    /// Retrieves the current item in the buffer without incrementing the buffer index.
+    /// </summary>
+    /// <returns></returns>
     public T Peek()
     {
         if (_list.Count == 0)
@@ -3541,15 +3638,13 @@ public class DynamicCircularBuffer<T>
         return _list[_getIndex];
     }
 }
-#endregion
 
-#region UniformSumRandom
-class UniformSumRandom
+class BatesDistributionRandom
 {
     Random _rnd = new Random();
     readonly int _count;
 
-    public UniformSumRandom(int count)
+    public BatesDistributionRandom(int count)
     {
         if (count < 1)
         {
@@ -3568,6 +3663,4 @@ class UniformSumRandom
         return num / _count;
     }
 }
-#endregion
-
 #endregion
