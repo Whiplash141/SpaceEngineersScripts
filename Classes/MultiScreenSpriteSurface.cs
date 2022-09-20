@@ -151,7 +151,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     {
         get
         {
-            return _rotationAngle.HasValue ? _rotationAngle.Value : 0f;
+            return _rotationAngle ?? 0f;
         }
         set
         {
