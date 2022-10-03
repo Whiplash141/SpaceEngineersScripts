@@ -1,7 +1,7 @@
 
 #region WHAM
-const string VERSION = "170.4.1";
-const string DATE = "2022/09/17";
+const string VERSION = "170.4.2";
+const string DATE = "2022/10/02";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -325,28 +325,6 @@ const string
     IGC_TAG_REMOTE_FIRE_NOTIFICATION = "IGC_MSL_REM_NTF",
     IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
     UNICAST_TAG = "UNICAST";
-
-#region Storage Ini
-const string
-    INI_PARAMETER_SECTION_NAME = "params",
-    INI_KEYCODE_SECTION_NAME = "key",
-    INI_OPTICAL_SECTION_NAME = "op",
-    INI_SEMIACTIVE_SECTION_NAME = "sa",
-    INI_KEYCODE_CODE_NAME = "kc_c",
-    INI_OPTICAL_SHOOTER_POS_NAME = "op_sp",
-    INI_OPTICAL_FRONT_VEC_NAME = "op_fv",
-    INI_OPTICAL_LEFT_VEC_NAME = "op_lv",
-    INI_OPTICAL_UP_VEC_NAME = "op_uv",
-    INI_SEMIACTIVE_TARGET_POS_NAME = "sa_tp",
-    INI_SEMIACTIVE_HIT_POS_NAME = "sa_hp",
-    INI_SEMIACTIVE_TARGET_VEL_NAME = "sa_tv",
-    INI_SEMIACTIVE_SHOOTER_POS_NAME = "sa_sp",
-    INI_SEMIACTIVE_TIME_SINCE_LOCK_NAME = "sa_t",
-    INI_PARAMETER_KILL_NAME = "kill",
-    INI_PARAMETER_STEALTH_NAME = "stealth",
-    INI_PARAMETER_SPIRAL_NAME = "spiral",
-    INI_PARAMETER_TOPDOWN_NAME = "topdown";
-#endregion
 
 #region Custom Data Ini
 readonly MyIni _myIni = new MyIni();
@@ -780,7 +758,7 @@ void ProcessRemoteFireRequests()
             antennaRange = dSq;
         }
     }
-    antennaRange = (float)Math.Sqrt(antennaRange);
+    antennaRange = (float)Math.Sqrt(antennaRange) + 100f;
 
     foreach (var a in _antennas)
     {
@@ -2078,9 +2056,13 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
     var directionToTargetNorm = VectorMath.SafeNormalize(directionToTarget);
     foreach (var cameraBuffer in _cameraBufferList)
     {
+        if (cameraBuffer.Count == 0)
+        {
+            continue;
+        }
+
         Vector3D localDirToTgt = Vector3D.TransformNormal(directionToTargetNorm, MatrixD.Transpose(cameraBuffer.Peek().WorldMatrix));
-        if (cameraBuffer.Count != 0 &&
-            localDirToTgt.Z < 0 &&
+        if (localDirToTgt.Z < 0 &&
             Math.Abs(localDirToTgt.X) < .7071 &&
             Math.Abs(localDirToTgt.Y) < .7071)
         {
