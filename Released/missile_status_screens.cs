@@ -40,8 +40,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 =================================================
 */
 
-const string VERSION = "1.6.3";
-const string DATE = "2022/09/05";
+const string VERSION = "1.6.4";
+const string DATE = "2022/10/02";
 
 List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 Dictionary<IMyTextSurface, StatusScreen> _statusScreens = new Dictionary<IMyTextSurface, StatusScreen>();
@@ -321,7 +321,7 @@ void DrawScreens()
             {
                 Color colorOverride = missileSpriteData.Value.Ready ? _missileReadyColor : _missileFiredColor;
                 Vector2 spriteOffset = missileSpriteData.Value.GetLocationPx(viewportSize);
-                float spriteScale = 0.25f * missileSpriteData.Value.Scale;
+                float spriteScale = minScale * missileSpriteData.Value.Scale;
                 float rotation = missileSpriteData.Value.Rotation;
                 DrawMissileSprites(frame, screenCenter + spriteOffset, colorOverride, _backgroundColor, spriteScale, rotation);
             }
@@ -334,6 +334,7 @@ public void DrawMissileSprites(MySpriteDrawFrame frame, Vector2 centerPos, Color
 {
     float sin = (float)Math.Sin(rotation);
     float cos = (float)Math.Cos(rotation);
+    scale *= 0.25f;
     frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-72f,cos*-72f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // topFin
     frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*48f,cos*48f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // bottomFin
     frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-sin*-96f,cos*-96f)*scale+centerPos, new Vector2(48f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // noseCone
@@ -624,7 +625,7 @@ public class Scheduler
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    ScheduledAction _currentlyQueuedAction = null;
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
     bool _inUpdate = false;
 
@@ -695,6 +696,10 @@ public class Scheduler
             _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
@@ -734,13 +739,13 @@ public class Scheduler
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
@@ -755,8 +760,8 @@ public class Scheduler
 
 public class QueuedAction : ScheduledAction
 {
-    public QueuedAction(Action action, double runInterval)
-        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
     { }
 }
 
