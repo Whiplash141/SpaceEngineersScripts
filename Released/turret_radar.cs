@@ -50,7 +50,7 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.3.1";
+const string Version = "35.3.2";
 const string Date = "2022/10/04";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
@@ -2781,7 +2781,7 @@ IMyShipController GetControlledShipController(List<IMyShipController> controller
 
         // Grab the first seat that has a player sitting in it
         // and save it away in-case we don't have a main contoller
-        if (currentlyControlled == null && ctrl.IsUnderControl && ctrl.CanControlShip)
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
         {
             currentlyControlled = ctrl;
         }
