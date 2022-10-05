@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.3.0";
-const string Date = "2022/09/19";
+const string Version = "35.3.1";
+const string Date = "2022/10/04";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -1522,10 +1522,6 @@ public static class Log
 
     public static string Write(bool preserveLog = false)
     {
-        //WriteLine($"Error count: {_errorList.Count}");
-        //WriteLine($"Warning count: {_warningList.Count}");
-        //WriteLine($"Info count: {_infoList.Count}");
-
         if (_errorList.Count != 0 && _warningList.Count != 0 && _infoList.Count != 0)
             WriteLine("");
 
@@ -1535,7 +1531,6 @@ public static class Log
             {
                 WriteLine("");
                 WriteElememt(i + 1, "ERROR", _errorList[i]);
-                //if (i < _errorList.Count - 1)
             }
         }
 
@@ -1545,7 +1540,6 @@ public static class Log
             {
                 WriteLine("");
                 WriteElememt(i + 1, "WARNING", _warningList[i]);
-                //if (i < _warningList.Count - 1)
             }
         }
 
@@ -1555,7 +1549,6 @@ public static class Log
             {
                 WriteLine("");
                 WriteElememt(i + 1, "Info", _infoList[i]);
-                //if (i < _infoList.Count - 1)
             }
         }
 
@@ -2801,8 +2794,14 @@ IMyShipController GetControlledShipController(List<IMyShipController> controller
         return lastController;
     }
 
-    // Otherwise we return the first ship controller that we 
+    // Otherwise we return the first ship controller that we
     // found that was controlled.
-    return currentlyControlled;
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
 }
 #endregion
