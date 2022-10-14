@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.5.0";
-const string DATE = "2022/09/13";
+const string VERSION = "1.5.1";
+const string DATE = "2022/10/14";
 
 // Configurable
 string _textSurfaceGroupName = "SIMPL";
@@ -1516,7 +1516,7 @@ public class Scheduler
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    ScheduledAction _currentlyQueuedAction = null;
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
     bool _inUpdate = false;
 
@@ -1587,6 +1587,10 @@ public class Scheduler
             _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
@@ -1626,13 +1630,13 @@ public class Scheduler
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
@@ -1647,8 +1651,8 @@ public class Scheduler
 
 public class QueuedAction : ScheduledAction
 {
-    public QueuedAction(Action action, double runInterval)
-        : base(action, 1.0 / runInterval, removeAfterRun: true, timeOffset: 0)
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
     { }
 }
 
@@ -2057,13 +2061,29 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     {
         get
         {
-            return _rotationAngle;
+            return _rotationAngle ?? 0f;
         }
         set
         {
+            bool newAngle = !_rotationAngle.HasValue || _rotationAngle.Value != value;
             _rotationAngle = value;
-            _spanVectorAbs = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
-            _spanVectorAbs *= Vector2.SignNonZero(_spanVectorAbs);
+            if (!newAngle)
+            {
+                return;
+            }
+
+            _spanVector = RotateToDisplayOrientation(new Vector2(Cols, Rows), RotationRads);
+            _spanVector *= Vector2.SignNonZero(_spanVector);
+            _textureSize = null;
+            _basePanelSizeNoRotation = null;
+            _textureSizeNoRotation = null;
+            for (int r = 0; r < Rows; ++r)
+            {
+                for (int c = 0; c < Cols; ++c)
+                {
+                    UpdateSurfaceRotation(r, c);
+                }
+            }
         }
     }
     float RotationRads
@@ -2079,7 +2099,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         {
             if (!_textureSize.HasValue)
             {
-                _textureSize = BasePanelSize * _spanVectorAbs;
+                _textureSize = BasePanelSize * _spanVector;
             }
             return _textureSize.Value;
         }
@@ -2129,11 +2149,11 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     Program _p;
     IMyTextPanel _anchor;
     ITerminalProperty<float> _rotationProp;
-    float _rotationAngle = 0f;
+    float? _rotationAngle;
     Vector2? _textureSize;
     Vector2? _basePanelSizeNoRotation;
     Vector2? _textureSizeNoRotation;
-    Vector2 _spanVectorAbs;
+    Vector2 _spanVector;
 
     readonly SingleScreenSpriteSurface[,] _surfaces;
     readonly Vector2[,] _screenOrigins;
@@ -2147,16 +2167,15 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         Rows = rows;
         Cols = cols;
 
-        _rotationProp = anchor.GetProperty("Rotate").Cast<float>();
-        Rotation = _rotationProp.GetValue(anchor);
+        _rotationProp = _anchor.GetProperty("Rotate").Cast<float>();
 
-        Vector3I anchorPos = anchor.Position;
-        Vector3I anchorRight = -Base6Directions.GetIntVector(anchor.Orientation.Left);
-        Vector3I anchorDown = -Base6Directions.GetIntVector(anchor.Orientation.Up);
-        Vector3I anchorBlockSize = anchor.Max - anchor.Min + Vector3I.One;
+        Vector3I anchorPos = _anchor.Position;
+        Vector3I anchorRight = -Base6Directions.GetIntVector(_anchor.Orientation.Left);
+        Vector3I anchorDown = -Base6Directions.GetIntVector(_anchor.Orientation.Up);
+        Vector3I anchorBlockSize = _anchor.Max - _anchor.Min + Vector3I.One;
         Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
         Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
-        IMyCubeGrid grid = anchor.CubeGrid;
+        IMyCubeGrid grid = _anchor.CubeGrid;
         for (int r = 0; r < Rows; ++r)
         {
             for (int c = 0; c < Cols; ++c)
@@ -2164,19 +2183,31 @@ public class MultiScreenSpriteSurface : ISpriteSurface
                 Vector3I blockPosition = anchorPos + r * stepDown + c * stepRight;
                 var surf = new SingleScreenSpriteSurface(grid, blockPosition);
                 _surfaces[r, c] = surf;
-                if (surf.CubeBlock != null)
-                {
-                    _rotationProp.SetValue(surf.CubeBlock, Rotation);
-                }
-
-                // Calc screen coords
-                Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
-                Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
-                Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
-                Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
-                _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
             }
         }
+
+        UpdateRotation();
+    }
+
+    public void UpdateRotation()
+    {
+        Rotation = _rotationProp.GetValue(_anchor);
+    }
+
+    void UpdateSurfaceRotation(int r, int c)
+    {
+        SingleScreenSpriteSurface surf = _surfaces[r, c];
+        if (surf.CubeBlock != null)
+        {
+            _rotationProp.SetValue(surf.CubeBlock, Rotation);
+        }
+
+        // Calc screen coords
+        Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
+        Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
+        Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
+        Vector2 screenCenterRotated = fromCenterRotated + 0.5f * TextureSize;
+        _screenOrigins[r, c] = screenCenterRotated - 0.5f * BasePanelSize;
     }
 
     Vector2 RotateToDisplayOrientation(Vector2 vec, float angleRad)
@@ -2213,39 +2244,112 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
     }
 
+    Vector2 GetRotatedSize(Vector2 size, float angleRad)
+    {
+        if (Math.Abs(angleRad) < 1e-3)
+        {
+            return size;
+        }
+
+        float cos = Math.Abs(MyMath.FastCos(angleRad));
+        float sin = Math.Abs(MyMath.FastSin(angleRad));
+        
+        Vector2 rotated = Vector2.Zero;
+        rotated.X = size.X * cos + size.Y * sin;
+        rotated.Y = size.X * sin + size.Y * cos;
+        return rotated;
+    }
+
     public void Add(MySprite sprite)
     {
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
-        Vector2 spriteSize;
-        if (sprite.Size != null)
+        bool isText = sprite.Type == SpriteType.TEXT;
+        int lowerCol, upperCol, lowerRow, upperRow;
+        if (sprite.Type == SpriteType.CLIP_RECT)
         {
-            spriteSize = sprite.Size.Value;
-        }
-        else if (sprite.Type == SpriteType.TEXT)
-        {
-            _stringBuilder.Clear();
-            _stringBuilder.Append(sprite.Data);
-            spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            lowerCol = lowerRow = 0;
+            upperCol = Cols - 1;
+            upperRow = Rows - 1;
         }
         else
         {
-            spriteSize = TextureSize;
+            Vector2 spriteSize;
+            if (sprite.Size != null)
+            {
+                spriteSize = sprite.Size.Value;
+            }
+            else if (isText)
+            {
+                _stringBuilder.Clear();
+                _stringBuilder.Append(sprite.Data);
+                spriteSize = _anchor.MeasureStringInPixels(_stringBuilder, sprite.FontId, sprite.RotationOrScale);
+            }
+            else
+            {
+                spriteSize = TextureSize;
+                sprite.Size = spriteSize;
+            }
+
+            Vector2 fromCenter = pos - (TextureSize * 0.5f);
+            Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
+            Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
+
+            // Determine span of the sprite used for culling
+            Vector2 rotatedSize = (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
+            Vector2 topLeft, bottomRight;
+            switch (sprite.Alignment)
+            {
+                case TextAlignment.LEFT:
+                    if (isText)
+                    {
+                        topLeft = Vector2.Zero;
+                        bottomRight = rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = new Vector2(0f, 0.5f) * rotatedSize;
+                        bottomRight = new Vector2(1f, 0.5f) * rotatedSize;
+                    }
+                    break;
+                case TextAlignment.RIGHT:
+                    if (isText)
+                    {
+                        topLeft = new Vector2(1f, 0f) * rotatedSize;
+                        bottomRight = new Vector2(0f, 1f) * rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = new Vector2(1f, 0.5f) * rotatedSize;
+                        bottomRight = new Vector2(0f, 0.5f) * rotatedSize;
+                    }
+                    break;
+                
+                default:
+                case TextAlignment.CENTER:
+                    if (isText)
+                    {
+                        topLeft = new Vector2(0.5f, 0f) * rotatedSize;
+                        bottomRight = new Vector2(0.5f, 1f) * rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = bottomRight = 0.5f * rotatedSize;
+                    }
+                    break;
+            }
+            topLeft = RotateToBaseOrientation(topLeft, RotationRads);
+            topLeft *= Vector2.SignNonZero(topLeft);
+            bottomRight = RotateToBaseOrientation(bottomRight, RotationRads);
+            bottomRight *= Vector2.SignNonZero(bottomRight);
+
+            var lowerCoords = Vector2I.Floor((basePos - topLeft) / BasePanelSizeNoRotation);
+            var upperCoords = Vector2I.Floor((basePos + bottomRight) / BasePanelSizeNoRotation);
+
+            lowerCol = Math.Max(0, lowerCoords.X);
+            upperCol = Math.Min(Cols - 1, upperCoords.X);
+            lowerRow = Math.Max(0, lowerCoords.Y);
+            upperRow = Math.Min(Rows - 1, upperCoords.Y);
         }
-        float rad = spriteSize.Length() * 0.5f;
-
-
-        Vector2 fromCenter = pos - (TextureSize * 0.5f);
-        Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
-        Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
-
-        var lowerCoords = Vector2I.Floor((basePos - rad) / BasePanelSizeNoRotation);
-        var upperCoords = Vector2I.Floor((basePos + rad) / BasePanelSizeNoRotation);
-
-        int lowerCol = Math.Max(0, lowerCoords.X);
-        int upperCol = Math.Min(Cols - 1, upperCoords.X);
-
-        int lowerRow = Math.Max(0, lowerCoords.Y);
-        int upperRow = Math.Min(Rows - 1, upperCoords.Y);
 
         for (int r = lowerRow; r <= upperRow; ++r)
         {
@@ -2269,7 +2373,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
         SpriteCount = 0;
     }
-}  
+}
 #endregion
 #endregion
 
