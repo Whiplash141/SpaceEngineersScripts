@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.3.2";
-const string Date = "2022/10/04";
+const string Version = "35.3.3";
+const string Date = "2022/10/14";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -1284,7 +1284,6 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
 
         if (parsed && _textSurfaceIni.ContainsSection(IniSectionMultiscreen))
         {
-            Echo($"{parsed}");
             multiscreen = true;
             _rows.ReadFromIni(_textSurfaceIni);
             _cols.ReadFromIni(_textSurfaceIni);
@@ -2579,7 +2578,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     public void Add(MySprite sprite)
     {
         Vector2 pos = sprite.Position ?? TextureSize * 0.5f;
-        
+        bool isText = sprite.Type == SpriteType.TEXT;
         int lowerCol, upperCol, lowerRow, upperRow;
         if (sprite.Type == SpriteType.CLIP_RECT)
         {
@@ -2594,7 +2593,7 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             {
                 spriteSize = sprite.Size.Value;
             }
-            else if (sprite.Type == SpriteType.TEXT)
+            else if (isText)
             {
                 _stringBuilder.Clear();
                 _stringBuilder.Append(sprite.Data);
@@ -2605,15 +2604,61 @@ public class MultiScreenSpriteSurface : ISpriteSurface
                 spriteSize = TextureSize;
                 sprite.Size = spriteSize;
             }
-            
-            Vector2 rotatedHalfSize = 0.5f * (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
 
             Vector2 fromCenter = pos - (TextureSize * 0.5f);
             Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
             Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
 
-            var lowerCoords = Vector2I.Floor((basePos - rotatedHalfSize) / BasePanelSizeNoRotation);
-            var upperCoords = Vector2I.Floor((basePos + rotatedHalfSize) / BasePanelSizeNoRotation);
+            // Determine span of the sprite used for culling
+            Vector2 rotatedSize = (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
+            Vector2 topLeft, bottomRight;
+            switch (sprite.Alignment)
+            {
+                case TextAlignment.LEFT:
+                    if (isText)
+                    {
+                        topLeft = Vector2.Zero;
+                        bottomRight = rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = new Vector2(0f, 0.5f) * rotatedSize;
+                        bottomRight = new Vector2(1f, 0.5f) * rotatedSize;
+                    }
+                    break;
+                case TextAlignment.RIGHT:
+                    if (isText)
+                    {
+                        topLeft = new Vector2(1f, 0f) * rotatedSize;
+                        bottomRight = new Vector2(0f, 1f) * rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = new Vector2(1f, 0.5f) * rotatedSize;
+                        bottomRight = new Vector2(0f, 0.5f) * rotatedSize;
+                    }
+                    break;
+                
+                default:
+                case TextAlignment.CENTER:
+                    if (isText)
+                    {
+                        topLeft = new Vector2(0.5f, 0f) * rotatedSize;
+                        bottomRight = new Vector2(0.5f, 1f) * rotatedSize;
+                    }
+                    else
+                    {
+                        topLeft = bottomRight = 0.5f * rotatedSize;
+                    }
+                    break;
+            }
+            topLeft = RotateToBaseOrientation(topLeft, RotationRads);
+            topLeft *= Vector2.SignNonZero(topLeft);
+            bottomRight = RotateToBaseOrientation(bottomRight, RotationRads);
+            bottomRight *= Vector2.SignNonZero(bottomRight);
+
+            var lowerCoords = Vector2I.Floor((basePos - topLeft) / BasePanelSizeNoRotation);
+            var upperCoords = Vector2I.Floor((basePos + bottomRight) / BasePanelSizeNoRotation);
 
             lowerCol = Math.Max(0, lowerCoords.X);
             upperCol = Math.Min(Cols - 1, upperCoords.X);
