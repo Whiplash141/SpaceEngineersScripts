@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.5.1";
-const string DATE = "2022/10/14";
+const string VERSION = "1.6.0";
+const string DATE = "2022/10/16";
 
 // Configurable
 string _textSurfaceGroupName = "SIMPL";
@@ -484,45 +484,65 @@ void HandleStateMachines()
 }
 
 #region Block Storage
+HashSet<Vector3I> _enqueuedPositions = new HashSet<Vector3I>();
+Queue<Vector3I> _cellsToStore = new Queue<Vector3I>();
+Vector3I _maxCheckedPos = Vector3I.MinValue;
+Vector3I _minCheckedPos = Vector3I.MaxValue;
+
+void EnqueuePositionIfUnique(Vector3I pos)
+{
+    if (!_enqueuedPositions.Contains(pos))
+    {
+        _cellsToStore.Enqueue(pos);
+        _enqueuedPositions.Add(pos);
+    }
+}
+
 public IEnumerator<float> GridSpaceStorageIterator()
 {
-    Vector3I start = Me.CubeGrid.Min;
-    Vector3I end = Me.CubeGrid.Max;
-
-    int count = (end.X - start.X + 1) * (end.Y - start.Y + 1) * (end.Z - start.Z + 1);
-    _blockInfoArray = new List<BlockInfo>(count);
-
-    int index = 0;
-    Vector3I_RangeIterator rangeIter = new Vector3I_RangeIterator(ref start, ref end);
+    int volume = (Me.CubeGrid.Max - Me.CubeGrid.Min + Vector3I.One).Volume();
+    EnqueuePositionIfUnique(Me.Position);
+    
     _storageStageStr = "Storing blocks...";
-
-    while (rangeIter.IsValid())
+    
+    int blocksStored = 0;
+    while(_cellsToStore.Count > 0)
     {
-        if (Me.CubeGrid.CubeExists(rangeIter.Current))
+        Vector3I pos = _cellsToStore.Dequeue();
+        _maxCheckedPos = Vector3I.Max(pos, _maxCheckedPos);
+        _minCheckedPos = Vector3I.Min(pos, _minCheckedPos);
+        int checkedVolume = (_maxCheckedPos - _minCheckedPos + Vector3I.One).Volume();
+        if (Me.CubeGrid.CubeExists(pos))
         {
-            BlockInfo blockInfo = new BlockInfo(ref rangeIter.Current, Me.CubeGrid);
+            BlockInfo blockInfo = new BlockInfo(ref pos, Me.CubeGrid);
             _blockInfoArray.Add(blockInfo);
             _planarMap.StoreBlockInfo(blockInfo);
+            
+            // Step towards neighbors
+            EnqueuePositionIfUnique(pos + Vector3I.UnitX);
+            EnqueuePositionIfUnique(pos + Vector3I.UnitY);
+            EnqueuePositionIfUnique(pos + Vector3I.UnitZ);
+            EnqueuePositionIfUnique(pos - Vector3I.UnitX);
+            EnqueuePositionIfUnique(pos - Vector3I.UnitY);
+            EnqueuePositionIfUnique(pos - Vector3I.UnitZ);
         }
 
-        index++;
-        rangeIter.MoveNext();
-
-        if (index % BLOCKS_TO_STORE_PER_TICK == 0)
+        blocksStored++;
+        if (blocksStored % BLOCKS_TO_STORE_PER_TICK == 0)
         {
-            yield return 90f * index / count;
+            yield return 70f * Math.Min(1f, checkedVolume / volume);
         }
     }
 
     _planarMap.CreateQuadTrees();
-    yield return 90f;
+    yield return 70f;
 
     _storageStageStr = "Processing X-axis Quad Tree...";
     while (!_planarMap.QuadTreeXNormal.Finished)
     {
         _planarMap.QuadTreeXNormal.Subdivide();
         if (Runtime.CurrentInstructionCount > 5000)
-            yield return 90f + 3.333f * _planarMap.QuadTreeXNormal.ProcessedNodeCount / _planarMap.QuadTreeXNormal.TotalNodeCount;
+            yield return 70f + 10f * _planarMap.QuadTreeXNormal.ProcessedNodeCount / _planarMap.QuadTreeXNormal.TotalNodeCount;
     }
 
     _storageStageStr = "Processing Y-axis Quad Tree...";
@@ -530,7 +550,7 @@ public IEnumerator<float> GridSpaceStorageIterator()
     {
         _planarMap.QuadTreeYNormal.Subdivide();
         if (Runtime.CurrentInstructionCount > 5000)
-            yield return 93.333f + 3.333f * _planarMap.QuadTreeYNormal.ProcessedNodeCount / _planarMap.QuadTreeYNormal.TotalNodeCount;
+            yield return 80f + 10f * _planarMap.QuadTreeYNormal.ProcessedNodeCount / _planarMap.QuadTreeYNormal.TotalNodeCount;
     }
 
     _storageStageStr = "Processing Z-axis Quad Tree...";
@@ -538,7 +558,7 @@ public IEnumerator<float> GridSpaceStorageIterator()
     {
         _planarMap.QuadTreeZNormal.Subdivide();
         if (Runtime.CurrentInstructionCount > 5000)
-            yield return 96.666f + 3.333f * _planarMap.QuadTreeZNormal.ProcessedNodeCount / _planarMap.QuadTreeZNormal.TotalNodeCount;
+            yield return 90f + 10f * _planarMap.QuadTreeZNormal.ProcessedNodeCount / _planarMap.QuadTreeZNormal.TotalNodeCount;
     }
 
     yield return 100f;
@@ -680,7 +700,7 @@ public IEnumerator<float> SpriteDrawStateMachine()
 
         if (!_blockInfoStored)
         {
-            _loadingScreen.Draw(surf, _blockStorageStateMachine.Current * 0.01f, $"{_storageStageStr} ({_blockStorageStateMachine.Current:n0}%)");
+            _loadingScreen.Draw(surf, _blockStorageStateMachine.Current * 0.01f, $"{_storageStageStr} ({Math.Ceiling(_blockStorageStateMachine.Current)}%)");
             yield return 100f * jj / _textSurfaces.Count;
             continue;
         }
