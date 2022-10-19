@@ -1,7 +1,7 @@
 
 #region WHAM
-const string VERSION = "170.4.2";
-const string DATE = "2022/10/02";
+const string VERSION = "170.4.3";
+const string DATE = "2022/10/16";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -1258,7 +1258,7 @@ bool SetupErrorChecking()
     setupFailed |= EchoIfTrue(_antennas.Count == 0, ">> ERR: No antennas found");
     setupFailed |= EchoIfTrue(_gyros.Count == 0, ">> ERR: No gyros found");
     setupFailed |= EchoIfTrue(_shipControllers.Count == 0, ">> ERR: No remotes found");
-    if (!setupFailed)
+    if (_shipControllers.Count > 0)
     {
         GetThrusterOrientation(_shipControllers[0]);
     }
@@ -1280,6 +1280,7 @@ bool SetupErrorChecking()
     EchoBlockCount(_beacons.Count, "beacon");
     EchoBlockCount(_cameras.Count, "camera");
     EchoBlockCount(_timers.Count, "timer");
+    EchoBlockCount(_unsortedThrusters.Count, "total thruster");
     EchoBlockCount(_mainThrusters.Count, "main thruster");
     EchoBlockCount(_sideThrusters.Count, "side thruster");
     EchoBlockCount(_detachThrusters.Count, "detach thruster");
