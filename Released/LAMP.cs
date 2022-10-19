@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.6.0";
-const string DATE = "2022/09/16";
+const string VERSION = "95.6.2";
+const string DATE = "2022/10/17";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -578,7 +578,7 @@ void BroadcastTargetingData()
                 Vector3D.Zero,
                 Me.CubeGrid.WorldAABB.Center,
                 _timeSinceTurretLock,
-                0, // TODO: Test if ID works now
+                _targetInfo.EntityId,
                 broadcastKey);
             break;
     }
@@ -2296,7 +2296,7 @@ public class MissileStatusScreenHandler
 
     const string 
         FONT = "DEBUG",
-        TOP_TEXT = "WMI Missile Fire Control",
+        TOP_TEXT = "LAMP Fire Control",
         MODE_TEXT = "Mode",
         MODE_CAMERA_TEXT = "Camera",
         MODE_TURRET_TEXT = "Turret",
@@ -2804,7 +2804,7 @@ public static class MyIniHelper
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other }
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
 
 #region Raycast Homing
 class RaycastHoming
@@ -4054,7 +4054,7 @@ IMyShipController GetControlledShipController(List<IMyShipController> controller
 
         // Grab the first seat that has a player sitting in it
         // and save it away in-case we don't have a main contoller
-        if (currentlyControlled == null && ctrl.IsUnderControl && ctrl.CanControlShip)
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
         {
             currentlyControlled = ctrl;
         }
@@ -4067,9 +4067,15 @@ IMyShipController GetControlledShipController(List<IMyShipController> controller
         return lastController;
     }
 
-    // Otherwise we return the first ship controller that we 
+    // Otherwise we return the first ship controller that we
     // found that was controlled.
-    return currentlyControlled;
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
 }
 #endregion
 
