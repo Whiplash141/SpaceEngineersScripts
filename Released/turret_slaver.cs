@@ -1,7 +1,7 @@
 
 #region This goes in the programmable block
-const string VERSION = "122.0.1";
-const string DATE = "2022/02/03";
+const string VERSION = "122.0.2";
+const string DATE = "2022/12/12";
 
 /*
 / //// / Whip's Turret Slaver / //// /
@@ -1756,6 +1756,13 @@ class SlavedAIGroup : TurretGroupBase
             if (timer != null)
             {
                 CollectTimer(timer);
+                continue;
+            }
+            
+            var tcb = block as IMyTurretControlBlock;
+            if (tcb != null && StringExtensions.Contains(block.CustomName, _designatorName))
+            {
+                _designators.Add(new TurretInterface(tcb));
                 continue;
             }
 
