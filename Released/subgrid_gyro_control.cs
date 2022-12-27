@@ -56,8 +56,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 const string NAME = "Whip's Subgrid Gyro Manager (SuGMa)";
-const string VERSION = "1.3.2";
-const string DATE = "2021/10/08";
+const string VERSION = "1.3.3";
+const string DATE = "2022/12/27";
 
 const string INI_SECTION_SGCS = "Subgrid Gyro Config";
 const string INI_KEY_IGNORE_TAG = "Gyro ignore name tag";
@@ -65,12 +65,14 @@ const string INI_KEY_SCAN_CONNECTORS = "Detect blocks over connectors";
 const string INI_KEY_PITCH_GAIN = "Pitch gain";
 const string INI_KEY_YAW_GAIN = "Yaw gain";
 const string INI_KEY_ROLL_GAIN = "Roll gain";
+const string INI_KEY_TITLE_SCREEN = "Draw title screen";
 
 public double GyroPitchGain = 60.0;
 public double GyroYawGain = 60.0;
 public double GyroRollGain = 60.0;
 bool _detectOverConnectors = false;
 string _gyroIgnoreTag = "Ignore";
+bool _drawTitleScreen = true;
 
 const double RPMToRadsPerSecond = Math.PI / 30.0;
 bool _setup = false;
@@ -86,6 +88,14 @@ long _lastCubeGridId = -1;
 MyIni _ini = new MyIni();
 SubgridGyroScreenManager _screenManager;
 
+void Draw()
+{
+    if (_drawTitleScreen)
+    {
+        _screenManager.Draw();
+    }
+}
+
 Program()
 {
     _screenManager = new SubgridGyroScreenManager(VERSION, this);
@@ -96,7 +106,7 @@ Program()
     _scheduler.AddScheduledAction(ProcessInputs, 60);
     _scheduler.AddScheduledAction(DoWork, 10);
     _scheduler.AddScheduledAction(WriteDetailedInfo, 1);
-    _scheduler.AddScheduledAction(_screenManager.Draw, 6);
+    _scheduler.AddScheduledAction(Draw, 6);
     _scheduler.AddScheduledAction(_screenManager.RestartDraw, 0.1, timeOffset: 0.5);
     _scheduler.AddScheduledAction(_scheduledSetup);
     
@@ -327,6 +337,8 @@ void ParseIni()
         GyroPitchGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_PITCH_GAIN).ToDouble(GyroPitchGain);
         GyroYawGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_YAW_GAIN).ToDouble(GyroYawGain);
         GyroRollGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_ROLL_GAIN).ToDouble(GyroRollGain);
+        _drawTitleScreen = _ini.Get(INI_SECTION_SGCS, INI_KEY_TITLE_SCREEN).ToBoolean(_drawTitleScreen);
+
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
@@ -338,6 +350,8 @@ void ParseIni()
     _ini.Set(INI_SECTION_SGCS, INI_KEY_PITCH_GAIN, GyroPitchGain);
     _ini.Set(INI_SECTION_SGCS, INI_KEY_YAW_GAIN, GyroYawGain);
     _ini.Set(INI_SECTION_SGCS, INI_KEY_ROLL_GAIN, GyroRollGain);
+    _ini.Set(INI_SECTION_SGCS, INI_KEY_TITLE_SCREEN, _drawTitleScreen);
+
     
     string output = _ini.ToString();
     if (output != Me.CustomData)
