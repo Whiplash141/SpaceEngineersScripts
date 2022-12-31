@@ -1,8 +1,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.6.2";
-const string DATE = "2022/10/17";
+const string VERSION = "95.7.0";
+const string DATE = "2022/12/31";
 const string COMPAT_VERSION = "170.0.0";
 #endregion
 
@@ -1832,6 +1832,12 @@ void AlphaStrike()
     }
 }
 
+bool IsMissilePBValid(IMyTerminalBlock b)
+{
+    var func = (IMyFunctionalBlock)b;
+    return func != null && func.IsWorking && !firedMissileProgramAge.ContainsKey((IMyProgrammableBlock)b);
+}
+
 bool FireMissilePrograms(int missileNumber)
 {
     IMyBlockGroup group = null;
@@ -1839,7 +1845,7 @@ bool FireMissilePrograms(int missileNumber)
         return false;
 
     missilePrograms.Clear();
-    group.GetBlocksOfType(missilePrograms, x => !firedMissileProgramAge.ContainsKey(x));
+    group.GetBlocksOfType(missilePrograms, IsMissilePBValid);
     if (missilePrograms.Count == 0)
     {
         return false; // Could not fire
