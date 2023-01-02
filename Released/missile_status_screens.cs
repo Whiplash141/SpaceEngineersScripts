@@ -40,14 +40,16 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 =================================================
 */
 
-const string VERSION = "1.6.4";
-const string DATE = "2022/10/02";
+const string VERSION = "1.7.0";
+const string DATE = "2023/01/01";
+
+public enum MissileStatus { Ready, Inactive, Fired };
 
 List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 Dictionary<IMyTextSurface, StatusScreen> _statusScreens = new Dictionary<IMyTextSurface, StatusScreen>();
 List<string> _missileNames = new List<string>();
 List<IMyProgrammableBlock> _missilePrograms = new List<IMyProgrammableBlock>();
-Dictionary<string, bool> _missileStatuses = new Dictionary<string, bool>();
+Dictionary<string, MissileStatus> _missileStatuses = new Dictionary<string, MissileStatus>();
 
 string _screenNameTag = "Missile Status";
 string _missileGroupNameTag = "Missile";
@@ -56,6 +58,7 @@ const string IniSectionGeneral = "Missile Status Screens - General Config";
 const string IniScreenGroupName = "Status screen group name";
 const string IniMissileGroupName = "Missile group name tag";
 const string IniReadyColor = "Missile ready color";
+const string IniInactiveColor = "Missile inactive color";
 const string IniFiredColor = "Missile fired color";
 const string IniTitleBarColor = "Title bar color";
 const string IniTitleTextColor = "Title text color";
@@ -77,6 +80,7 @@ Color _backgroundColor = new Color(0, 0, 0);
 Color _titleTextColor = new Color(150, 150, 150);
 Color _titleBarColor = new Color(25, 25, 25);
 Color _missileReadyColor = new Color(0, 75, 0);
+Color _missileInactiveColor = new Color(75, 75, 0);
 Color _missileFiredColor = new Color(25, 25, 25);
 
 Scheduler _scheduler;
@@ -145,7 +149,7 @@ bool CollectBlocks(IMyTerminalBlock b)
         if (!StringExtensions.Contains(name, _missileGroupNameTag))
             continue;
 
-        _missileStatuses[name] = false;
+        _missileStatuses[name] = MissileStatus.Fired;
 
         // Read ini
         Vector2 locationRatio = MyIniHelper.GetVector2(name, IniSpriteLocation, _ini);
@@ -224,6 +228,7 @@ void ParseIni()
         _showTitleBar = _ini.Get(IniSectionGeneral, IniShowTitleBar).ToBoolean(_showTitleBar);
         _titleScale = _ini.Get(IniSectionGeneral, IniTitleScale).ToSingle(_titleScale);
         _missileReadyColor = MyIniHelper.GetColor(IniSectionGeneral, IniReadyColor, _ini, _missileReadyColor);
+        _missileInactiveColor = MyIniHelper.GetColor(IniSectionGeneral, IniInactiveColor, _ini, _missileInactiveColor);
         _missileFiredColor = MyIniHelper.GetColor(IniSectionGeneral, IniFiredColor, _ini, _missileFiredColor);
         _titleBarColor = MyIniHelper.GetColor(IniSectionGeneral, IniTitleBarColor, _ini, _titleBarColor);
         _titleTextColor = MyIniHelper.GetColor(IniSectionGeneral, IniTitleTextColor, _ini, _titleTextColor);
@@ -239,6 +244,7 @@ void ParseIni()
     _ini.Set(IniSectionGeneral, IniShowTitleBar, _showTitleBar);
     _ini.Set(IniSectionGeneral, IniTitleScale, _titleScale);
     MyIniHelper.SetColor(IniSectionGeneral, IniReadyColor, _missileReadyColor, _ini);
+    MyIniHelper.SetColor(IniSectionGeneral, IniInactiveColor, _missileInactiveColor, _ini);
     MyIniHelper.SetColor(IniSectionGeneral, IniFiredColor, _missileFiredColor, _ini);
     MyIniHelper.SetColor(IniSectionGeneral, IniTitleBarColor, _titleBarColor, _ini);
     MyIniHelper.SetColor(IniSectionGeneral, IniTitleTextColor, _titleTextColor, _ini);
@@ -256,14 +262,18 @@ void GetStatuses()
     foreach (var name in _missileNames)
     {
         _missilePrograms.Clear();
-        bool present = false;
         var group = GridTerminalSystem.GetBlockGroupWithName(name);
+        MissileStatus status = MissileStatus.Fired;
         if (group != null)
         {
             group.GetBlocksOfType<IMyProgrammableBlock>(_missilePrograms);
-            present = _missilePrograms.Count > 0;
+            bool present = _missilePrograms.Count > 0;
+            if (present)
+            {
+                status = _missilePrograms[0].IsWorking ? MissileStatus.Ready : MissileStatus.Inactive;
+            }
         }
-        _missileStatuses[name] = present;
+        _missileStatuses[name] = status;
     }
 }
 
@@ -319,7 +329,20 @@ void DrawScreens()
 
             foreach (var missileSpriteData in screen.MissileSprites)
             {
-                Color colorOverride = missileSpriteData.Value.Ready ? _missileReadyColor : _missileFiredColor;
+                Color colorOverride;
+                switch (missileSpriteData.Value.Status)
+                {
+                    case MissileStatus.Ready:
+                        colorOverride = _missileReadyColor;
+                        break;
+                    case MissileStatus.Inactive:
+                        colorOverride = _missileInactiveColor;
+                        break;
+                    default:
+                    case MissileStatus.Fired:
+                        colorOverride = _missileFiredColor;
+                        break;
+                }
                 Vector2 spriteOffset = missileSpriteData.Value.GetLocationPx(viewportSize);
                 float spriteScale = minScale * missileSpriteData.Value.Scale;
                 float rotation = missileSpriteData.Value.Rotation;
@@ -347,19 +370,20 @@ public void DrawMissileSprites(MySpriteDrawFrame frame, Vector2 centerPos, Color
 }
 
 #region Classes
+
 public class MissileSpriteData
 {
     public readonly Vector2 LocationRatio;
     public readonly float Scale;
     public readonly float Rotation;
-    public bool Ready;
+    public MissileStatus Status;
 
     public MissileSpriteData(Vector2 locationRatio, float scale, float rotation)
     {
         LocationRatio = locationRatio;
         Scale = scale;
         Rotation = rotation;
-        Ready = true;
+        Status = MissileStatus.Ready;
     }
 
     public Vector2 GetLocationPx(Vector2 screenSize)
@@ -385,13 +409,16 @@ public class StatusScreen
         MissileSprites[name] = data;
     }
 
-    public void Update(Dictionary<string, bool> missileStatuses)
+    public void Update(Dictionary<string, MissileStatus> missileStatuses)
     {
         foreach (var kvp in MissileSprites)
         {
-            bool ready = false;
-            missileStatuses.TryGetValue(kvp.Key, out ready);
-            kvp.Value.Ready = ready;
+            MissileStatus status;
+            if (!missileStatuses.TryGetValue(kvp.Key, out status))
+            {
+                status = MissileStatus.Fired;
+            }
+            kvp.Value.Status = status;
         }
     }
 } 
