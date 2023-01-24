@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.3.3";
-const string Date = "2022/10/14";
+const string Version = "35.4.0";
+const string Date = "2023/01/23";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -75,7 +75,9 @@ ConfigColor
     _neutralIconColor,
     _neutralElevationColor,
     _allyIconColor,
-    _allyElevationColor;
+    _allyElevationColor,
+    _asteroidColor,
+    _asteroidElevationColor;
 ConfigInt
     _rows,
     _cols;
@@ -142,30 +144,32 @@ Program()
 
     _generalConfig = new IConfigValue[]
     {
-_textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
-_broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
-_networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
-_useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
-_rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
-_radarSurface.ProjectionAngleDeg = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
-_radarSurface.DrawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
-_referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
-_drawRunningScreen = new ConfigBool(IniSectionGeneral, "Draw title screen", true),
-_fadeOutInterval = new ConfigFloat(IniSectionGeneral, "Target fadeout interval (s)", 2f),
-_radarSurface.Amogus = new ConfigBool(IniSectionGeneral, "Amogus", false),
+        _textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
+        _broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
+        _networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
+        _useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
+        _rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
+        _radarSurface.ProjectionAngleDeg = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
+        _radarSurface.DrawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
+        _referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
+        _drawRunningScreen = new ConfigBool(IniSectionGeneral, "Draw title screen", true),
+        _fadeOutInterval = new ConfigFloat(IniSectionGeneral, "Target fadeout interval (s)", 2f),
+        _radarSurface.Amogus = new ConfigBool(IniSectionGeneral, "Amogus", false),
 
-_radarSurface.TitleBarColor = new ConfigColor(IniSectionColors, "Title bar", new Color(100, 30, 0, 5)),
-_radarSurface.TextColor = new ConfigColor(IniSectionColors, "Text", new Color(255, 100, 0, 100)),
-_radarSurface.BackColor = new ConfigColor(IniSectionColors, "Background", new Color(0, 0, 0, 255)),
-_radarSurface.LineColor = new ConfigColor(IniSectionColors, "Radar lines", new Color(255, 100, 0, 50)),
-_radarSurface.PlaneColor = new ConfigColor(IniSectionColors, "Radar plane", new Color(100, 30, 0, 5)),
-_enemyIconColor = new ConfigColor(IniSectionColors, "Enemy icon", new Color(150, 0, 0, 255)),
-_enemyElevationColor = new ConfigColor(IniSectionColors, "Enemy elevation", new Color(75, 0, 0, 255)),
-_neutralIconColor = new ConfigColor(IniSectionColors, "Neutral icon", new Color(150, 150, 0, 255)),
-_neutralElevationColor = new ConfigColor(IniSectionColors, "Neutral elevation", new Color(75, 75, 0, 255)),
-_allyIconColor = new ConfigColor(IniSectionColors, "Friendly icon", new Color(0, 50, 150, 255)),
-_allyElevationColor = new ConfigColor(IniSectionColors, "Friendly elevation", new Color(0, 25, 75, 255)),
-_radarSurface.RadarLockWarningColor = new ConfigColor(IniSectionColors, "Lock on warning", new Color(150, 0, 0, 255)),
+        _radarSurface.TitleBarColor = new ConfigColor(IniSectionColors, "Title bar", new Color(100, 30, 0, 5)),
+        _radarSurface.TextColor = new ConfigColor(IniSectionColors, "Text", new Color(255, 100, 0, 100)),
+        _radarSurface.BackColor = new ConfigColor(IniSectionColors, "Background", new Color(0, 0, 0, 255)),
+        _radarSurface.LineColor = new ConfigColor(IniSectionColors, "Radar lines", new Color(255, 100, 0, 50)),
+        _radarSurface.PlaneColor = new ConfigColor(IniSectionColors, "Radar plane", new Color(100, 30, 0, 5)),
+        _enemyIconColor = new ConfigColor(IniSectionColors, "Enemy icon", new Color(150, 0, 0, 255)),
+        _enemyElevationColor = new ConfigColor(IniSectionColors, "Enemy elevation", new Color(75, 0, 0, 255)),
+        _neutralIconColor = new ConfigColor(IniSectionColors, "Neutral icon", new Color(150, 150, 0, 255)),
+        _neutralElevationColor = new ConfigColor(IniSectionColors, "Neutral elevation", new Color(75, 75, 0, 255)),
+        _allyIconColor = new ConfigColor(IniSectionColors, "Friendly icon", new Color(0, 50, 150, 255)),
+        _allyElevationColor = new ConfigColor(IniSectionColors, "Friendly elevation", new Color(0, 25, 75, 255)),
+        _asteroidColor = new ConfigColor(IniSectionColors, "Asteroid icon", new Color(50, 50, 50, 255)),
+        _asteroidElevationColor = new ConfigColor(IniSectionColors, "Asteroid elevation", new Color(25, 25, 25, 255)),
+        _radarSurface.RadarLockWarningColor = new ConfigColor(IniSectionColors, "Lock on warning", new Color(150, 0, 0, 255)),
     };
 
     _rows = new ConfigInt(IniSectionMultiscreen, "Screen rows", 1);
@@ -476,6 +480,10 @@ void AddTargetData(MyDetectedEntityInfo targetInfo)
     {
         targetData.Type = TargetRelation.SmallGrid;
     }
+    else if (targetInfo.Type == MyDetectedEntityType.Asteroid || targetInfo.Type == MyDetectedEntityType.Planet)
+    {
+        targetData.Type = TargetRelation.Asteroid;
+    }
     else
     {
         targetData.Type = TargetRelation.Other;
@@ -539,17 +547,26 @@ void GetTurretTargets()
 
         Color targetIconColor = _enemyIconColor;
         Color targetElevationColor = _enemyElevationColor;
-        switch (targetData.Relation)
+        
+        if ((targetData.Type & TargetRelation.Asteroid) != 0)
         {
-            case TargetRelation.Friendly:
-                targetIconColor = _allyIconColor;
-                targetElevationColor = _allyElevationColor;
-                break;
+            targetIconColor = _asteroidColor;
+            targetElevationColor = _asteroidElevationColor;
+        }
+        else
+        {
+            switch (targetData.Relation)
+            {
+                case TargetRelation.Friendly:
+                    targetIconColor = _allyIconColor;
+                    targetElevationColor = _allyElevationColor;
+                    break;
 
-            case TargetRelation.Neutral:
-                targetIconColor = _neutralIconColor;
-                targetElevationColor = _neutralElevationColor;
-                break;
+                case TargetRelation.Neutral:
+                    targetIconColor = _neutralIconColor;
+                    targetElevationColor = _neutralElevationColor;
+                    break;
+            }
         }
 
         _radarSurface.AddContact(
@@ -735,6 +752,10 @@ class RadarSurface
             if (Amogus)
             {
                 drawFunction = DrawAmogus;
+            }
+            else if ((type & TargetRelation.Asteroid) != 0)
+            {
+                drawFunction = DrawHollowCircle;
             }
             else if ((type & TargetRelation.Missile) != 0)
             {
@@ -1055,8 +1076,8 @@ class RadarSurface
         float sin = (float)Math.Sin(rotation);
         float cos = (float)Math.Cos(rotation);
         scale *= 0.1f;
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(300f, 300f) * scale, shadowColor, null, TextAlignment.CENTER, rotation)); // square shadow
-        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(200f, 200f) * scale, color, null, TextAlignment.CENTER, rotation)); // square
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(260f, 260f) * scale, shadowColor, null, TextAlignment.CENTER, rotation)); // square shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(160f, 160f) * scale, color, null, TextAlignment.CENTER, rotation)); // square
     }
 
     void DrawCircle(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
@@ -1064,6 +1085,14 @@ class RadarSurface
         scale *= 0.1f;
         frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(300f, 300f) * scale, shadowColor, null, TextAlignment.CENTER, 0f)); // circle shadow
         frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(200f, 200f) * scale, color, null, TextAlignment.CENTER, 0f)); // circle
+    }
+    
+    void DrawHollowCircle(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
+    {
+        scale *= 0.1f;
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(300f, 300f) * scale, shadowColor, null, TextAlignment.CENTER, 0f)); // circle shadow
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(200f, 200f) * scale, color, null, TextAlignment.CENTER, 0f)); // circle
+        frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(0f, 0f) * scale + centerPos, new Vector2(100f, 100f) * scale, shadowColor, null, TextAlignment.CENTER, 0f)); // center
     }
 
     void DrawTriangle(ISpriteSurface frame, Vector2 centerPos, Color color, Color shadowColor, float scale, float rotation)
@@ -1762,7 +1791,7 @@ new AnimationParams(345f,   0,   0, 160),
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
 
 #region Scheduler
 /// <summary>
@@ -2693,16 +2722,18 @@ public class MultiScreenSpriteSurface : ISpriteSurface
 
 interface IConfigValue
 {
+    string Section { get; set; }
     void WriteToIni(MyIni ini);
-    void ReadFromIni(MyIni ini);
+    void ReadFromIni(MyIni ini, bool setDefault = false);
 }
 
-abstract class ConfigValue<T> : IConfigValue
+public abstract class ConfigValue<T> : IConfigValue
 {
     public T Value;
-    readonly string _section;
+    public string Section { get; set; }
     readonly string _name;
     readonly string _comment;
+    readonly T _defaultValue;
 
     public static implicit operator T(ConfigValue<T> cfg)
     {
@@ -2711,10 +2742,11 @@ abstract class ConfigValue<T> : IConfigValue
 
     public ConfigValue(string section, string name, T value = default(T), string comment = null)
     {
-        _section = section;
-        _name = name;
         Value = value;
+        Section = section;
+        _name = name;
         _comment = comment;
+        _defaultValue = value;
     }
 
     protected virtual string GetIniString()
@@ -2724,41 +2756,42 @@ abstract class ConfigValue<T> : IConfigValue
 
     public void WriteToIni(MyIni ini)
     {
-        ini.Set(_section, _name, GetIniString());
+        ini.Set(Section, _name, GetIniString());
         if (!string.IsNullOrWhiteSpace(_comment))
         {
-            ini.SetComment(_section, _name, _comment);
+            ini.SetComment(Section, _name, _comment);
         }
     }
 
     protected abstract void UpdateValue(ref MyIniValue val);
 
-    public void ReadFromIni(MyIni ini)
+    public void ReadFromIni(MyIni ini, bool setDefault = false)
     {
-        MyIniValue val = ini.Get(_section, _name);
+        if (setDefault) { Value = _defaultValue; }
+        MyIniValue val = ini.Get(Section, _name);
         UpdateValue(ref val);
     }
 }
 
-class ConfigString : ConfigValue<string>
+public class ConfigString : ConfigValue<string>
 {
     public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
     protected override void UpdateValue(ref MyIniValue val) { Value = val.ToString(Value); }
 }
 
-class ConfigBool : ConfigValue<bool>
+public class ConfigBool : ConfigValue<bool>
 {
     public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
     protected override void UpdateValue(ref MyIniValue val) { Value = val.ToBoolean(Value); }
 }
 
-class ConfigFloat : ConfigValue<float>
+public class ConfigFloat : ConfigValue<float>
 {
     public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
     protected override void UpdateValue(ref MyIniValue val) { Value = val.ToSingle(Value); }
 }
 
-class ConfigColor : ConfigValue<Color>
+public class ConfigColor : ConfigValue<Color>
 {
     public ConfigColor(string section, string name, Color value = default(Color), string comment = null) : base(section, name, value, comment) { }
     protected override string GetIniString()
@@ -2793,7 +2826,7 @@ class ConfigColor : ConfigValue<Color>
     }
 }
 
-class ConfigInt : ConfigValue<int>
+public class ConfigInt : ConfigValue<int>
 {
     public ConfigInt(string section, string name, int value = 0, string comment = null) : base(section, name, value, comment) { }
     protected override void UpdateValue(ref MyIniValue val) { Value = val.ToInt32(Value); }
