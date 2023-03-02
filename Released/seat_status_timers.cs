@@ -4,6 +4,7 @@
 INSTRUCTIONS
 1. Make a group named "SEAT" (all caps) that contains all the seats 
    that you want to add entry/exit timers to.
+   - You can also include turrets and custom turret controllers in this group.
 2. Place this script in a programmable block
 3. Open the custom data of each seat in the "SEAT" group 
    and set the names of the timers that should be triggered. Leave
@@ -13,14 +14,14 @@ INSTRUCTIONS
 - Whiplash141
 */
 
-const string VERSION = "1.0.2";
-const string DATE = "2021/11/29";
+const string VERSION = "1.1.2";
+const string DATE = "2023/03/02";
 
 const string INI_SECTION_GENERAL = "Seat Entry/Exit Activated Timers - General Config";
 const string INI_KEY_GROUP_NAME = "Group name";
 const string INI_KEY_DRAW_SCREENS = "Draw title screen";
 
-const string INI_SECTION_TIMER = "Seat Entry/Exit Activated Timers - Seat Config";
+const string INI_SECTION_TIMER = "Seat Entry/Exit Activated Timers - {0} Config";
 const string INI_KEY_TIMER_ENTRY = "Timer to trigger on entry";
 const string INI_KEY_TIMER_EXIT = "Timer to trigger on exit";
 
@@ -32,10 +33,70 @@ StringBuilder _bobTheBuilder = new StringBuilder(128);
 String _errorString = "";
 List<StatusTimer> _statusTimers = new List<StatusTimer>();
 SeatStatusTimersScreenManager _screenManager;
+int _seatCount = 0;
+int _turretCount = 0;
+int _ctcCount = 0;
+
+public interface IControllable
+{
+    bool IsUnderControl { get; }
+    string CustomData { get; set; }
+    string Type { get; }
+}
+
+public abstract class CustomDataBlock : IControllable
+{
+    private IMyTerminalBlock _block;
+    
+    public CustomDataBlock(IMyTerminalBlock block) { _block = block; }
+    
+    public abstract bool IsUnderControl { get; }
+    
+    public abstract string Type { get; }
+    
+    public string CustomData
+    {
+        get { return _block.CustomData; }
+        set { _block.CustomData = value; }
+    }
+} 
+
+public class ShipControlBlock : CustomDataBlock
+{
+    private IMyShipController _ctrl;
+    
+    public ShipControlBlock(IMyShipController controller) : base(controller) { _ctrl = controller; }
+    
+    public override bool IsUnderControl => _ctrl.IsUnderControl;
+    
+    public override string Type => "Seat";
+}
+
+public class TurretBlock : CustomDataBlock
+{
+    private IMyLargeTurretBase _turret;
+    
+    public TurretBlock(IMyLargeTurretBase turret) : base(turret) { _turret = turret; }
+    
+    public override bool IsUnderControl => _turret.IsUnderControl;
+    
+    public override string Type => "Turret";
+}
+
+public class CustomTurretControlBlock : CustomDataBlock
+{
+    private IMyTurretControlBlock _tcb;
+    
+    public CustomTurretControlBlock(IMyTurretControlBlock tcb) : base(tcb) { _tcb = tcb; }
+    
+    public override bool IsUnderControl => _tcb.IsUnderControl;
+    
+    public override string Type => "CTC";
+}
 
 class StatusTimer
 {
-    IMyShipController _controller;
+    IControllable _controller;
     IMyTimerBlock _entryTimer;
     IMyTimerBlock _exitTimer;
     MyIni _ini = new MyIni();
@@ -44,21 +105,22 @@ class StatusTimer
     bool _firstRun = true;
     bool _wasControlled = false;
 
-    public StatusTimer(IMyShipController controller, Program program)
+    public StatusTimer(IControllable controller, Program program)
     {
         _p = program;
         _controller = controller;
         string entryTimerName = "", exitTimerName = "";
         _ini.Clear();
+        string sectionName = string.Format(INI_SECTION_TIMER, _controller.Type);
         if (_ini.TryParse(_controller.CustomData))
         {
-            entryTimerName = _ini.Get(INI_SECTION_TIMER, INI_KEY_TIMER_ENTRY).ToString();
-            exitTimerName = _ini.Get(INI_SECTION_TIMER, INI_KEY_TIMER_EXIT).ToString();
+            entryTimerName = _ini.Get(sectionName, INI_KEY_TIMER_ENTRY).ToString();
+            exitTimerName = _ini.Get(sectionName, INI_KEY_TIMER_EXIT).ToString();
             _entryTimer = program.GridTerminalSystem.GetBlockWithName(entryTimerName) as IMyTimerBlock;
             _exitTimer = program.GridTerminalSystem.GetBlockWithName(exitTimerName) as IMyTimerBlock;
         }
-        _ini.Set(INI_SECTION_TIMER, INI_KEY_TIMER_ENTRY, entryTimerName);
-        _ini.Set(INI_SECTION_TIMER, INI_KEY_TIMER_EXIT, exitTimerName);
+        _ini.Set(sectionName, INI_KEY_TIMER_ENTRY, entryTimerName);
+        _ini.Set(sectionName, INI_KEY_TIMER_EXIT, exitTimerName);
 
         string output = _ini.ToString();
         if (output != _controller.CustomData)
@@ -116,7 +178,7 @@ void Main(string arg, UpdateType updateSource)
         Echo($"Seat Entry Activated\nTimers Running...\n(Version {VERSION} - {DATE})\n");
         if (_isSetup)
         {
-            Echo($"Found {_statusTimers.Count} status seats.\n");
+            Echo($"Found:\n - {_seatCount} status seats\n - {_turretCount} turrets\n - {_ctcCount} custom turret controllers\n");
         }
         else
         {
@@ -145,6 +207,9 @@ void GetBlocks()
         Me.CustomData = output;
     }
 
+    _seatCount = 0;
+    _turretCount = 0;
+    _ctcCount = 0;
     _statusTimers.Clear();
     var group = GridTerminalSystem.GetBlockGroupWithName(_groupName);
     if (group == null)
@@ -154,16 +219,34 @@ void GetBlocks()
     }
     else
     {
-        group.GetBlocksOfType<IMyShipController>(null, CollectBlocks);
-        _isSetup = true;        
+        group.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks);
+        _isSetup = true;
     }
     _errorString = _bobTheBuilder.ToString();
 }
 
 bool CollectBlocks(IMyTerminalBlock b)
 {
-    var sc = (IMyShipController)b;
-    _statusTimers.Add(new StatusTimer(sc, this));
+    var sc = b as IMyShipController;
+    if (sc != null)
+    {
+        _statusTimers.Add(new StatusTimer(new ShipControlBlock(sc), this));
+        _seatCount++;
+    }
+    
+    var turret = b as IMyLargeTurretBase;
+    if (turret != null)
+    {
+        _statusTimers.Add(new StatusTimer(new TurretBlock(turret), this));
+        _turretCount++;
+    }
+    
+    var tcb = b as IMyTurretControlBlock;
+    if (tcb != null)
+    {
+        _statusTimers.Add(new StatusTimer(new CustomTurretControlBlock(tcb), this));
+        _ctcCount++;
+    }
     return false;
 }
 
