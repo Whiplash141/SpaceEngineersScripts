@@ -50,7 +50,7 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.1",
+public const string Version = "1.8.2",
                     Date = "2023/03/09",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
@@ -189,6 +189,7 @@ class CustomTurretController
     float _idleTime = 0f;
 
     const float RestSpeed = 10f;
+    const float PlayerInputMultiplier = 1f/50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
 
     enum ReturnCode
     {
@@ -244,6 +245,11 @@ class CustomTurretController
         }
     }
 
+    static float MouseInputToRotorVelocityRpm(float input, float multiplierRpm, IMyMotorStator rotor)
+    {   
+        return input * PlayerInputMultiplier * multiplierRpm;
+    }
+
     public void Update1()
     {
         _azimuthStabilizer.Update(1f / 60f);
@@ -255,7 +261,7 @@ class CustomTurretController
             if (BlockValid(_azimuthStabilizer.Rotor))
             {
                 _azimuthStabilizer.Rotor.TargetVelocityRPM =
-                    MathHelper.RPMToRadiansPerSecond * _controller.VelocityMultiplierAzimuthRpm * _controller.RotationIndicator.Y +
+                    MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
                     (_stabilizeAzimuth ? _azimuthStabilizer.Velocity : 0);
             }
 
@@ -263,7 +269,7 @@ class CustomTurretController
             if (BlockValid(_elevationStabilizer.Rotor))
             {
                 _elevationStabilizer.Rotor.TargetVelocityRPM =
-                    MathHelper.RPMToRadiansPerSecond * _controller.VelocityMultiplierElevationRpm * _controller.RotationIndicator.X +
+                    MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
                     (_stabilizeElevation ? _elevationStabilizer.Velocity : 0);
             }
             _wasManuallyControlled = true;
