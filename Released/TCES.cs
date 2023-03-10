@@ -50,7 +50,7 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.0",
+public const string Version = "1.8.1",
                     Date = "2023/03/09",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
@@ -170,6 +170,8 @@ class CustomTurretController
     StabilizedRotor _elevationStabilizer = new StabilizedRotor();
     float? _azimuthRestAngle = null;
     float? _elevationRestAngle = null;
+    bool _stabilizeAzimuth = true;
+    bool _stabilizeElevation = true;
     IMyTurretControlBlock _controller;
 
     Program _p;
@@ -250,19 +252,19 @@ class CustomTurretController
         if (IsManuallyControlled)
         {
             _controller.AzimuthRotor = null;
-            _controller.ElevationRotor = null;
-
             if (BlockValid(_azimuthStabilizer.Rotor))
             {
                 _azimuthStabilizer.Rotor.TargetVelocityRPM =
                     MathHelper.RPMToRadiansPerSecond * _controller.VelocityMultiplierAzimuthRpm * _controller.RotationIndicator.Y +
-                    _azimuthStabilizer.Velocity;
+                    (_stabilizeAzimuth ? _azimuthStabilizer.Velocity : 0);
             }
+
+            _controller.ElevationRotor = null;
             if (BlockValid(_elevationStabilizer.Rotor))
             {
                 _elevationStabilizer.Rotor.TargetVelocityRPM =
                     MathHelper.RPMToRadiansPerSecond * _controller.VelocityMultiplierElevationRpm * _controller.RotationIndicator.X +
-                    _elevationStabilizer.Velocity;
+                    (_stabilizeElevation ? _elevationStabilizer.Velocity : 0);
             }
             _wasManuallyControlled = true;
         }
@@ -415,7 +417,7 @@ class CustomTurretController
         }
     }
 
-    void ParseRotorIni(IMyMotorStator r, out float? restAngle)
+    void ParseRotorIni(IMyMotorStator r, out float? restAngle, out bool stabilize)
     {
         _ini.Clear();
         if (!_ini.TryParse(r.CustomData) && !string.IsNullOrWhiteSpace(r.CustomData))
@@ -435,6 +437,7 @@ class CustomTurretController
         }
 
         restAngle = _restAngle.HasValue ? MathHelper.ToRadians(_restAngle.Value) : (float?)null;
+        stabilize = _enableStabilization;
     }
 
     bool CollectBlocks(IMyTerminalBlock b)
@@ -455,7 +458,7 @@ class CustomTurretController
                 else
                 {
                     _azimuthStabilizer.Rotor = rotor;
-                    ParseRotorIni(_azimuthStabilizer.Rotor, out _azimuthRestAngle);
+                    ParseRotorIni(_azimuthStabilizer.Rotor, out _azimuthRestAngle, out _stabilizeAzimuth);
                 }
             }
             else if (StringExtensions.Contains(b.CustomName, _p.ElevationName))
@@ -467,7 +470,7 @@ class CustomTurretController
                 else
                 {
                     _elevationStabilizer.Rotor = rotor;
-                    ParseRotorIni(_elevationStabilizer.Rotor, out _elevationRestAngle);
+                    ParseRotorIni(_elevationStabilizer.Rotor, out _elevationRestAngle, out _stabilizeElevation);
                 }
             }
             else
@@ -972,11 +975,11 @@ void OnUpdate1()
 
 void OnUpdate10()
 {
-    bool anyUnderControl = false;
+    bool needsFastUpdate = false;
     foreach (var c in _turretControllers)
     {
         c.Update10();
-        anyUnderControl |= c.IsManuallyControlled;
+        needsFastUpdate |= c.IsManuallyControlled;
     }
 
     if (_drawTitleScreen)
@@ -985,7 +988,7 @@ void OnUpdate10()
     }
 
     UpdateFrequency desiredFrequency;
-    if (anyUnderControl)
+    if (needsFastUpdate)
     {
         desiredFrequency = UpdateFrequency.Update10 | UpdateFrequency.Update1;
     }
