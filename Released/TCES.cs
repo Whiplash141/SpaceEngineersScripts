@@ -50,7 +50,7 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.3",
+public const string Version = "1.8.4",
                     Date = "2023/03/11",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
@@ -257,14 +257,14 @@ class CustomTurretController
         {
             if (_stabilizeAzimuth) 
             { 
-                _azimuthStabilizer.Update(1f / 60f); 
+                _azimuthStabilizer.Update(1f / 60f);
             }
             _controller.AzimuthRotor = null;
             if (BlockValid(_azimuthStabilizer.Rotor))
             {
                 _azimuthStabilizer.Rotor.TargetVelocityRPM =
                     MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
-                    (_stabilizeAzimuth ? _azimuthStabilizer.Velocity : 0);
+                    (_stabilizeAzimuth && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
             }
 
             _controller.ElevationRotor = null;
@@ -276,7 +276,7 @@ class CustomTurretController
                 }
                 _elevationStabilizer.Rotor.TargetVelocityRPM =
                     MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
-                    (_stabilizeElevation ? _elevationStabilizer.Velocity : 0);
+                    (_stabilizeElevation && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
             }
             _wasManuallyControlled = true;
         }
