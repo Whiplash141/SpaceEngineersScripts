@@ -50,8 +50,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.4",
-                    Date = "2023/03/11",
+public const string Version = "1.8.5",
+                    Date = "2023/03/15",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -245,9 +245,20 @@ class CustomTurretController
         }
     }
 
+    /*
+     * Since we are nulling out the rotors in order to apply stabilization,
+     * the GetAzimuth/ElevationSpeedMax methods will return 30 rpm always. However,
+     * when a rotor is actually assigned, small grid rotors will return 60 rpm. The
+     * multipliers below account for this.
+     */
+    static float GetRotorMultiplier(IMyMotorStator rotor)
+    {
+        return (rotor.CubeGrid.GridSizeEnum == MyCubeSize.Small) ? 2f : 1f;
+    }
+
     static float MouseInputToRotorVelocityRpm(float input, float multiplierRpm, IMyMotorStator rotor)
     {   
-        return input * PlayerInputMultiplier * multiplierRpm;
+        return input * PlayerInputMultiplier * multiplierRpm * GetRotorMultiplier(rotor);
     }
 
     public void Update1()
