@@ -1,7 +1,7 @@
 
 #region WHAM
-const string VERSION = "170.4.3";
-const string DATE = "2022/10/16";
+const string VERSION = "170.8.4";
+const string DATE = "2023/03/20";
 const string COMPAT_VERSION = "95.0.0";
 
 /*
@@ -59,17 +59,10 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 #region Global Fields
 
-int _guidanceAlgoIndex = 0;
-bool _autoConfigure = true;
-bool _debugAntennas = false; // If true, the antenna name will be set to the current missile status
+enum GuidanceAlgoType { ProNav, WhipNav, HybridNav, ZeroEffortMiss };
 
 MissileGuidanceBase _selectedGuidance;
-ProNavGuidance _proNavGuid;
-WhipNavGuidance _whipNavGuid;
-HybridNavGuidance _hybridNavGuid;
-ZeroEffortMissGuidance _zeroEffortMissGuid;
-
-List<MissileGuidanceBase> _guidanceAlgorithms = new List<MissileGuidanceBase>();
+Dictionary<GuidanceAlgoType, MissileGuidanceBase> _guidanceAlgorithms;
 
 const string MISSILE_NAME_PATTERN = "({0} {1})";
 const string MISSILE_GROUP_PATTERN = "{0} {1}";
@@ -87,52 +80,19 @@ Vector3D
 
 string
     _missileGroupNameTag = "",
-    _missileNameTag = "",
-    _missileTag = "Missile",
-    _fireControlGroupNameTag = "Fire Control",
-    _detachThrustTag = "Detach";
+    _missileNameTag = "";
 
 double
-    _disconnectDelay = 1,
-    _guidanceDelay = 2,
-    _detachDuration = 0,
-    _mainIgnitionDelay = 0,
-    _raycastRange = 2.5,
-    _raycastMinimumTargetSize = 10,
-    _spiralDegrees = 15,
-    _timeMaxSpiral = 3,
-    _spiralActivationRange = 1000,
-    _gyroProportionalGain = 10,
-    _gyroIntegralGain = 0,
-    _gyroDerivativeGain = 10,
-    _navConstant = 3,
-    _accelNavConstant = 1.5,
-    _offsetUp = 0,
-    _offsetLeft = 0,
-    _missileSpinRPM = 0,
-    _minimumArmingRange = 100,
-    _randomVectorInterval = 0.5,
-    _maxRandomAccelRatio = 0.25,
-    _maxAimDispersion = 0,
-    _topDownAttackHeight = 1500,
     _timeSinceLastLock = 0,
     _distanceFromShooter = 0,
     _timeTotal = 0,
     _timeSinceLastIngest = 0;
 
 int
-    _missileNumber = 1,
     _setupTicks = 0,
     _missileStage = 0;
 
 bool
-    _useCamerasForHoming = true,
-    _raycastIgnoreFriends = false,
-    _raycastIgnorePlanetSurface = true,
-    _ignoreIdForDetonation = false,
-    _allowRemoteFire = false,
-    _evadeWithRandomizedHeading = true,
-    _evadeWithSpiral = false,
     _shouldFire = false,
     _shouldKill = false,
     _hasPassed = false,
@@ -146,91 +106,91 @@ bool
     _markedForDetonation = false,
     _canSetup = true,
     _preSetupFailed = false,
-    _remotelyFired = false,
     _topDownAttack = false,
     _enableEvasion = false,
     _precisionMode = false,
     _retask = false;
 
 #region Meme Mode Stuff
-bool _antennaMemeMode = true;
-string _antennaName = "";
+enum AntennaNameMode { Meme, Empty, MissileName, MissileStatus };
+
+int _memeIndex;
 string[] _antennaMemeMessages = new string[]
 {
-"All your base are belong to us",
-"Pucker up buttercup",
-"You are screwed",
-"Are you my mommy?",
-"You feeling lucky?",
-"Herpes",
-"Pootis",
-"From Whip with love!",
-"Run!",
-"General Distress",
-"Unknown Signal",
-"Here comes the pain",
-"Bend over",
-"Private Shipment",
-"Argentavis",
-"Cargo Hauler",
-"Art thou feeling it now Mr. Krabs?",
-"It's commin' right for us!",
-"Nothing personal kid...",
-"*Fortnite dancing in public*",
-"*Dabbing intensifies*",
-"*Heavy breathing*",
-"A surprise to be sure, but a welcome one",
-"Hello there",
-"General Kenobi",
-"You underestimate my power",
-"I am the SENATE!",
-"Did you ever hear the tragedy of Darth Plagueis The Wise?",
-"I thought not. It's not a story the Jedi would tell you.",
-"It's a Sith legend.",
-"Darth Plagueis was a Dark Lord of the Sith...",
-"...so powerful and so wise he could use the Force...",
-"...to influence the midichlorians to create life...",
-"*Evil head turn*",
-"He had such a knowledge of the dark side...",
-"...that he could even keep the ones he cared about from dying.",
-"The dark side of the Force is a pathway to many abilities...",
-"...some consider to be unnatural.",
-"He became so powerful, the only thing he was afraid of...",
-"...was losing his power, which eventually, of course, he did.",
-"Unfortunately, he taught his apprentice everything he knew...",
-"...then his apprentice killed him in his sleep.",
-"Ironic.",
-"He could save others from death, but not himself.",
-"Another happy landing!",
-"*Internalized Oppression*",
-"Area is not secure!",
-"Perfectly balanced, as all things should be",
-"It's super effective!",
-"Ah yes, an old friend of mine is here",
-"Anything else you'd like to order?",
-"Hi! Welcome to Chili's!",
-"Platinum",
-"Gold",
-"Dinner is served!",
-"UwU",
-"* Arrow to the knee *",
-"Atmospheric Lander",
-"Just like mother used to make!",
-"Big Chungus",
-"Hecking Bamboozolled",
-"Time to take out the trash",
-"BUT WAIT!! THERE'S MORE!!",
-"Is this the Krusty Krab?",
-"No this is PATRICK!!!",
-"I'm about to end this whole man's career..",
-"Do you get to the Cloud District very often?",
-"It's over Anakin!",
-"I have the high ground!",
-"You underestimate my POWER!",
-"You were the chosen one!",
-"It was said you would destroy the sith not join them...",
-"...Bring balance to the force, not leave it in darkness!",
-"We've been trying to reach you about your car's extended warranty",
+    "All your base are belong to us",
+    "Pucker up buttercup",
+    "You are screwed",
+    "Are you my mommy?",
+    "You feeling lucky?",
+    "Herpes",
+    "Pootis",
+    "From Whip with love!",
+    "Run!",
+    "General Distress",
+    "Unknown Signal",
+    "Here comes the pain",
+    "Bend over",
+    "Private Shipment",
+    "Argentavis",
+    "Cargo Hauler",
+    "Art thou feeling it now Mr. Krabs?",
+    "It's commin' right for us!",
+    "Nothing personal kid...",
+    "*Fortnite dancing in public*",
+    "*Dabbing intensifies*",
+    "*Heavy breathing*",
+    "A surprise to be sure, but a welcome one",
+    "Hello there",
+    "General Kenobi",
+    "You underestimate my power",
+    "I am the SENATE!",
+    "Did you ever hear the tragedy of Darth Plagueis The Wise?",
+    "I thought not. It's not a story the Jedi would tell you.",
+    "It's a Sith legend.",
+    "Darth Plagueis was a Dark Lord of the Sith...",
+    "...so powerful and so wise he could use the Force...",
+    "...to influence the midichlorians to create life...",
+    "*Evil head turn*",
+    "He had such a knowledge of the dark side...",
+    "...that he could even keep the ones he cared about from dying.",
+    "The dark side of the Force is a pathway to many abilities...",
+    "...some consider to be unnatural.",
+    "He became so powerful, the only thing he was afraid of...",
+    "...was losing his power, which eventually, of course, he did.",
+    "Unfortunately, he taught his apprentice everything he knew...",
+    "...then his apprentice killed him in his sleep.",
+    "Ironic.",
+    "He could save others from death, but not himself.",
+    "Another happy landing!",
+    "*Internalized Oppression*",
+    "Area is not secure!",
+    "Perfectly balanced, as all things should be",
+    "It's super effective!",
+    "Ah yes, an old friend of mine is here",
+    "Anything else you'd like to order?",
+    "Hi! Welcome to Chili's!",
+    "Platinum",
+    "Gold",
+    "Dinner is served!",
+    "UwU",
+    "* Arrow to the knee *",
+    "Atmospheric Lander",
+    "Just like mother used to make!",
+    "Big Chungus",
+    "Hecking Bamboozolled",
+    "Time to take out the trash",
+    "BUT WAIT!! THERE'S MORE!!",
+    "Is this the Krusty Krab?",
+    "No this is PATRICK!!!",
+    "I'm about to end this whole man's career..",
+    "Do you get to the Cloud District very often?",
+    "It's over Anakin!",
+    "I have the high ground!",
+    "You underestimate my POWER!",
+    "You were the chosen one!",
+    "It was said you would destroy the sith not join them...",
+    "...Bring balance to the force, not leave it in darkness!",
+    "We've been trying to reach you about your car's extended warranty",
 };
 #endregion
 Random RNGesus = new Random();
@@ -326,67 +286,6 @@ const string
     IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
     UNICAST_TAG = "UNICAST";
 
-#region Custom Data Ini
-readonly MyIni _myIni = new MyIni();
-
-const string
-    INI_SECTION_NAME = "Names",
-    INI_NAME_AUTO_SETUP = "Auto-configure missile name",
-    INI_NAME_TAG = "Missile name tag",
-    INI_NAME_NUM = "Missile number",
-    INI_NAME_FIRE_CTRL = "Fire control group name",
-    INI_NAME_DETACH = "Detach thruster name tag",
-
-    INI_SECTION_DELAY = "Delays",
-    INI_DELAY_GUIDANCE = "Guidance delay (s)",
-    INI_DELAY_DISCONNECT = "Stage 1: Disconnect delay (s)",
-    INI_DELAY_DETACH = "Stage 2: Detach duration (s)",
-    INI_DELAY_MAIN_IGITION = "Stage 3: Main ignition delay (s)",
-
-    INI_SECTION_GYRO = "Gyros",
-    INI_GYRO_KP = "Proportional gain",
-    INI_GYRO_KI = "Integral gain",
-    INI_GYRO_KD = "Derivative gain",
-
-    INI_SECTION_HOMING = "Homing Parameters",
-    INI_HOMING_RELNAV = "Navigation constant",
-    INI_HOMING_RELNAV_ACCEL = "Acceleration constant",
-    INI_HOMING_AIM_DISPERSION = "Max aim dispersion (m)",
-    INI_TOPDOWN_ATTACK_HEIGHT = "Topdown attack height (m)",
-
-    INI_SECTION_BEAMRIDE = "Beam Riding Parameters",
-    INI_BEAMRIDE_OFFSET_UP = "Hit offset up (m)",
-    INI_BEAMRIDE_OFFSET_LEFT = "Hit offset left (m)",
-
-    INI_SECTION_EVASION = "Evasion Parameters",
-    INI_EVASION_SPIN_RPM = "Spin rate (RPM)",
-    INI_EVASION_USE_SPIRAL = "Use spiral",
-    INI_EVASION_USE_RANDOM = "Use random flight path",
-    INI_COMMENT_EVASION_USE_RANDOM = " AKA \"Drunken Missile Mode\"",
-
-    INI_SECTION_SPIRAL = "Spiral Parameters",
-    INI_SPIRAL_DEG = "Spiral angle (deg)",
-    INI_SPIRAL_TIME = "Spiral time (sec)",
-    INI_SPIRAL_RANGE = "Spiral activation range (m)",
-
-    INI_SECTION_RANDOM = "Random Fligh Path Parameters",
-    INI_RANDOM_INTERVAL = "Direction change interval (sec)",
-    INI_RANDOM_MAX_ACCEL = "Max acceleration ratio",
-
-    INI_SECTION_RAYCAST = "Raycast/Sensors",
-    INI_RAYCAST_CAMS_FOR_HOMING = "Use cameras for homing",
-    INI_RAYCAST_RANGE = "Tripwire range (m)",
-    INI_RAYCAST_MIN_TGT_SIZE = "Minimum target size (m)",
-    INI_RAYCAST_MIN_RANGE = "Minimum warhead arming range (m)",
-    INI_RAYCAST_FRIENDS = "Ignore friendlies",
-    INI_RAYCAST_IGNORE_PLANETS = "Ignore planets",
-    INI_RAYCAST_IGNORE_ID_DETONATION = "Ignore target ID for detonation",
-
-    INI_SECTION_MISC = "Misc.",
-    INI_REMOTE_FIRE = "Allow remote firing",
-    INI_MEME_MODE = "Antenna meme mode";
-#endregion
-
 QueuedAction
     _stage1Action,
     _stage2Action,
@@ -396,11 +295,133 @@ QueuedAction
 ScheduledAction
     _guidanceActivateAction,
     _randomHeadingVectorAction;
+
+#region Custom Data Ini
+readonly MyIni _myIni = new MyIni();
+
+const string
+    INI_SECTION_NAME = "Names",
+    INI_SECTION_DELAY = "Delays",
+    INI_SECTION_GYRO = "Gyros",
+    INI_SECTION_HOMING = "Homing Parameters",
+    INI_SECTION_BEAMRIDE = "Beam Riding Parameters",
+    INI_SECTION_EVASION = "Evasion Parameters",
+    INI_SECTION_SPIRAL = "Spiral Parameters",
+    INI_SECTION_RANDOM = "Random Fligh Path Parameters",
+    INI_SECTION_RAYCAST = "Raycast/Sensors",
+    INI_SECTION_MISC = "Misc.",
+    INI_MEME_MODE = "Antenna meme mode";
+
+ConfigBool _autoConfigure = new ConfigBool(INI_SECTION_NAME, "Auto-configure missile name", true);
+ConfigString _missileTag = new ConfigString(INI_SECTION_NAME, "Missile name tag", "Missile");
+ConfigInt _missileNumber = new ConfigInt(INI_SECTION_NAME, "Missile number", 1);   
+ConfigString _fireControlGroupNameTag = new ConfigString(INI_SECTION_NAME, "Fire control group name", "Fire Control");   
+ConfigString _detachThrustTag = new ConfigString(INI_SECTION_NAME, "Detach thruster name tag", "Detach");
+
+ConfigDouble _disconnectDelay = new ConfigDouble(INI_SECTION_DELAY, "Stage 1: Disconnect delay (s)", 0);
+ConfigDouble _guidanceDelay = new ConfigDouble(INI_SECTION_DELAY, "Guidance delay (s)", 1);
+ConfigDouble _detachDuration = new ConfigDouble(INI_SECTION_DELAY, "Stage 2: Detach duration (s)", 0);
+ConfigDouble _mainIgnitionDelay = new ConfigDouble(INI_SECTION_DELAY, "Stage 3: Main ignition delay (s)", 0);
+
+ConfigDouble _gyroProportionalGain = new ConfigDouble(INI_SECTION_GYRO, "Proportional gain", 10);
+ConfigDouble _gyroIntegralGain = new ConfigDouble(INI_SECTION_GYRO, "Integral gain", 0);
+ConfigDouble _gyroDerivativeGain = new ConfigDouble(INI_SECTION_GYRO, "Derivative gain", 10);
+
+ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>(INI_SECTION_HOMING, "Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms: ProNav, WhipNav, HybridNav, ZeroEffortMiss");
+ConfigDouble _navConstant = new ConfigDouble(INI_SECTION_HOMING, "Navigation constant", 3);
+ConfigDouble _accelNavConstant = new ConfigDouble(INI_SECTION_HOMING, "Acceleration constant", 1.5);
+ConfigDouble _maxAimDispersion = new ConfigDouble(INI_SECTION_HOMING, "Max aim dispersion (m)", 0);
+ConfigDouble _topDownAttackHeight = new ConfigDouble(INI_SECTION_HOMING, "Topdown attack height (m)", 1500);
+
+ConfigDouble _offsetUp = new ConfigDouble(INI_SECTION_BEAMRIDE, "Hit offset up (m)", 0);
+ConfigDouble _offsetLeft = new ConfigDouble(INI_SECTION_BEAMRIDE, "Hit offset left (m)", 0);
+
+ConfigDouble _missileSpinRPM = new ConfigDouble(INI_SECTION_EVASION, "Spin rate (RPM)", 0);
+ConfigBool _evadeWithSpiral = new ConfigBool(INI_SECTION_EVASION, "Use spiral", false);
+ConfigBool _evadeWithRandomizedHeading = new ConfigBool(INI_SECTION_EVASION, "Use random flight path", true, " AKA \"Drunken Missile Mode\"");
+
+ConfigDouble _spiralDegrees = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral angle (deg)", 15);
+ConfigDouble _timeMaxSpiral = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral time (sec)", 3);
+ConfigDouble _spiralActivationRange = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral activation range (m)", 1000);
+
+ConfigDouble _randomVectorInterval = new ConfigDouble(INI_SECTION_RANDOM, "Direction change interval (sec)", 0.5);
+ConfigDouble _maxRandomAccelRatio = new ConfigDouble(INI_SECTION_RANDOM, "Max acceleration ratio", 0.25);
+
+ConfigBool _useCamerasForHoming = new ConfigBool(INI_SECTION_RAYCAST, "Use cameras for homing", true);
+ConfigDouble _raycastRange = new ConfigDouble(INI_SECTION_RAYCAST, "Tripwire range (m)", 0.25);
+ConfigDouble _raycastMinimumTargetSize = new ConfigDouble(INI_SECTION_RAYCAST, "Minimum target size (m)", 0);
+ConfigDouble _minimumArmingRange = new ConfigDouble(INI_SECTION_RAYCAST, "Minimum warhead arming range (m)", 100);
+ConfigBool _raycastIgnoreFriends = new ConfigBool(INI_SECTION_RAYCAST, "Ignore friendlies", false);
+ConfigBool _raycastIgnorePlanetSurface = new ConfigBool(INI_SECTION_RAYCAST, "Ignore planets", true);
+ConfigBool _ignoreIdForDetonation = new ConfigBool(INI_SECTION_RAYCAST, "Ignore target ID for detonation", false);
+
+ConfigBool _allowRemoteFire = new ConfigBool(INI_SECTION_MISC, "Allow remote firing", false);
+ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>(INI_SECTION_MISC, "Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes: Meme, Empty, MissileName, MissileStatus");
+
+IConfigValue[] _config;
+
+void SetupConfig()
+{
+    _config = new IConfigValue[]
+    {
+        _autoConfigure,
+        _missileTag,
+        _missileNumber,
+        _fireControlGroupNameTag,
+        _detachThrustTag,
+
+        _disconnectDelay,
+        _guidanceDelay,
+        _detachDuration,
+        _mainIgnitionDelay,
+
+        _gyroProportionalGain,
+        _gyroIntegralGain,
+        _gyroDerivativeGain,
+
+        _guidanceAlgoType,
+        _navConstant,
+        _accelNavConstant,
+        _maxAimDispersion,
+        _topDownAttackHeight,
+
+        _offsetUp,
+        _offsetLeft,
+
+        _missileSpinRPM,
+        _evadeWithSpiral,
+        _evadeWithRandomizedHeading,
+
+        _spiralDegrees,
+        _timeMaxSpiral,
+        _spiralActivationRange,
+
+        _randomVectorInterval,
+        _maxRandomAccelRatio,
+
+        _useCamerasForHoming,
+        _raycastRange,
+        _raycastMinimumTargetSize,
+        _minimumArmingRange,
+        _raycastIgnoreFriends,
+        _raycastIgnorePlanetSurface,
+        _ignoreIdForDetonation,
+
+        _allowRemoteFire,
+        _antennaMode,
+    };
+}
+#endregion
+
 #endregion
 
 #region Main Methods
 Program()
 {
+    SetupConfig();
+    
+    _memeIndex = RNGesus.Next(_antennaMemeMessages.Length);
+    
     _unicastListener = IGC.UnicastListener;
     _unicastListener.SetMessageCallback(UNICAST_TAG);
 
@@ -438,17 +459,14 @@ Program()
     _raycastHoming = new RaycastHoming(5000, 3, 0, Me.CubeGrid.EntityId);
     _raycastHoming.AddEntityTypeToFilter(MyDetectedEntityType.FloatingObject, MyDetectedEntityType.Planet, MyDetectedEntityType.Asteroid);
 
-    // Init guidance
-    _proNavGuid = new ProNavGuidance(UPDATES_PER_SECOND, _navConstant);
-    _whipNavGuid = new WhipNavGuidance(UPDATES_PER_SECOND, _navConstant);
-    _hybridNavGuid = new HybridNavGuidance(UPDATES_PER_SECOND, _navConstant);
-    _zeroEffortMissGuid = new ZeroEffortMissGuidance(UPDATES_PER_SECOND, _navConstant);
-
-    // Populate guidance algo list
-    _guidanceAlgorithms.Add(_proNavGuid);
-    _guidanceAlgorithms.Add(_whipNavGuid);
-    _guidanceAlgorithms.Add(_hybridNavGuid);
-    _guidanceAlgorithms.Add(_zeroEffortMissGuid);
+    // Populate guidance algos
+    _guidanceAlgorithms = new Dictionary<GuidanceAlgoType, MissileGuidanceBase>()
+    {
+        { GuidanceAlgoType.ProNav, new ProNavGuidance(UPDATES_PER_SECOND, _navConstant) },
+        { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UPDATES_PER_SECOND, _navConstant) },
+        { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UPDATES_PER_SECOND, _navConstant) },
+        { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UPDATES_PER_SECOND, _navConstant) },
+    };
 
     // Enable raycast spooling
     GridTerminalSystem.GetBlocksOfType<IMyCameraBlock>(null, camera =>
@@ -493,22 +511,12 @@ void Main(string arg, UpdateType updateSource)
     bool igcMsg = (updateSource & UpdateType.IGC) != 0;
     if (igcMsg)
     {
-        if (arg.Equals(UNICAST_TAG))
-        {
-            ParseUnicastMessages();
-        }
-        else if (arg.Equals(IGC_TAG_REMOTE_FIRE_REQUEST) && _allowRemoteFire && !_shouldFire)
-        {
-            ParseRemoteFireRequest();
-        }
+        IgcMessageHandling(_shouldFire);    
     }
-
+    
     if (!_shouldFire)
-        return;
-
-    if (igcMsg && (arg.Equals(IGC_TAG_PARAMS) || arg.Equals(IGC_TAG_HOMING) || arg.Equals(IGC_TAG_BEAM_RIDING)))
     {
-        HandleBroadcastListeners();
+        return;
     }
 
     _scheduler.Update();
@@ -571,52 +579,17 @@ void LoadIniConfig()
         return;
     }
 
-    _autoConfigure = _myIni.Get(INI_SECTION_NAME, INI_NAME_AUTO_SETUP).ToBoolean(_autoConfigure);
-    _missileTag = _myIni.Get(INI_SECTION_NAME, INI_NAME_TAG).ToString(_missileTag);
-    _missileNumber = _myIni.Get(INI_SECTION_NAME, INI_NAME_NUM).ToInt32(_missileNumber);
+    foreach (IConfigValue c in _config)
+    {
+        c.ReadFromIni(_myIni);
+    }
 
-    _fireControlGroupNameTag = _myIni.Get(INI_SECTION_NAME, INI_NAME_FIRE_CTRL).ToString(_fireControlGroupNameTag);
-    _detachThrustTag = _myIni.Get(INI_SECTION_NAME, INI_NAME_DETACH).ToString(_detachThrustTag);
-
-    _disconnectDelay = _myIni.Get(INI_SECTION_DELAY, INI_DELAY_DISCONNECT).ToDouble(_disconnectDelay);
-    _guidanceDelay = _myIni.Get(INI_SECTION_DELAY, INI_DELAY_GUIDANCE).ToDouble(_guidanceDelay);
-    _detachDuration = _myIni.Get(INI_SECTION_DELAY, INI_DELAY_DETACH).ToDouble(_detachDuration);
-    _mainIgnitionDelay = _myIni.Get(INI_SECTION_DELAY, INI_DELAY_MAIN_IGITION).ToDouble(_mainIgnitionDelay);
-
-    _gyroProportionalGain = _myIni.Get(INI_SECTION_GYRO, INI_GYRO_KP).ToDouble(_gyroProportionalGain);
-    _gyroIntegralGain = _myIni.Get(INI_SECTION_GYRO, INI_GYRO_KI).ToDouble(_gyroIntegralGain);
-    _gyroDerivativeGain = _myIni.Get(INI_SECTION_GYRO, INI_GYRO_KD).ToDouble(_gyroDerivativeGain);
-
-    _navConstant = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_RELNAV).ToDouble(_navConstant);
-    _accelNavConstant = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_RELNAV_ACCEL).ToDouble(_accelNavConstant);
-    _maxAimDispersion = _myIni.Get(INI_SECTION_HOMING, INI_HOMING_AIM_DISPERSION).ToDouble(_maxAimDispersion);
-    _topDownAttackHeight = _myIni.Get(INI_SECTION_HOMING, INI_TOPDOWN_ATTACK_HEIGHT).ToDouble(_topDownAttackHeight);
-    _topDownAttackHeight = Math.Max(0, _topDownAttackHeight);
-
-    _offsetUp = _myIni.Get(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_UP).ToDouble(_offsetUp);
-    _offsetLeft = _myIni.Get(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_LEFT).ToDouble(_offsetLeft);
-
-    _missileSpinRPM = _myIni.Get(INI_SECTION_EVASION, INI_EVASION_SPIN_RPM).ToDouble(_missileSpinRPM);
-    _evadeWithSpiral = _myIni.Get(INI_SECTION_EVASION, INI_EVASION_USE_SPIRAL).ToBoolean(_evadeWithSpiral);
-    _evadeWithRandomizedHeading = _myIni.Get(INI_SECTION_EVASION, INI_EVASION_USE_RANDOM).ToBoolean(_evadeWithRandomizedHeading);
-
-    _spiralDegrees = _myIni.Get(INI_SECTION_SPIRAL, INI_SPIRAL_DEG).ToDouble(_spiralDegrees);
-    _timeMaxSpiral = _myIni.Get(INI_SECTION_SPIRAL, INI_SPIRAL_TIME).ToDouble(_timeMaxSpiral);
-    _spiralActivationRange = _myIni.Get(INI_SECTION_SPIRAL, INI_SPIRAL_RANGE).ToDouble(_spiralActivationRange);
-
-    _randomVectorInterval = _myIni.Get(INI_SECTION_RANDOM, INI_RANDOM_INTERVAL).ToDouble(_randomVectorInterval);
-    _maxRandomAccelRatio = _myIni.Get(INI_SECTION_RANDOM, INI_RANDOM_MAX_ACCEL).ToDouble(_maxRandomAccelRatio);
-
-    _useCamerasForHoming = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_CAMS_FOR_HOMING).ToBoolean(_useCamerasForHoming);
-    _raycastRange = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_RANGE).ToDouble(_raycastRange);
-    _raycastMinimumTargetSize = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_MIN_TGT_SIZE).ToDouble(_raycastMinimumTargetSize);
-    _minimumArmingRange = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_MIN_RANGE).ToDouble(_minimumArmingRange);
-    _raycastIgnoreFriends = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_FRIENDS).ToBoolean(_raycastIgnoreFriends);
-    _raycastIgnorePlanetSurface = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_IGNORE_PLANETS).ToBoolean(_raycastIgnorePlanetSurface);
-    _ignoreIdForDetonation = _myIni.Get(INI_SECTION_RAYCAST, INI_RAYCAST_IGNORE_ID_DETONATION).ToBoolean(_ignoreIdForDetonation);
-
-    _allowRemoteFire = _myIni.Get(INI_SECTION_MISC, INI_REMOTE_FIRE).ToBoolean(_allowRemoteFire);
-    _antennaMemeMode = _myIni.Get(INI_SECTION_MISC, INI_MEME_MODE).ToBoolean(_antennaMemeMode);
+    // For backwards compat
+    bool antennaMemeMode;
+    if (_myIni.Get(INI_SECTION_MISC, INI_MEME_MODE).TryGetBoolean(out antennaMemeMode))
+    {
+        _antennaMode.Value = antennaMemeMode ? AntennaNameMode.Meme : AntennaNameMode.Empty;
+    }
 
     _setupBuilder.Append("Loaded missile config!\n");
 }
@@ -628,53 +601,13 @@ void SaveIniConfig()
     _missileGroupNameTag = string.Format(MISSILE_GROUP_PATTERN, _missileTag, _missileNumber);
     _missileNameTag = string.Format(MISSILE_NAME_PATTERN, _missileTag, _missileNumber);
 
-    _myIni.Set(INI_SECTION_NAME, INI_NAME_AUTO_SETUP, _autoConfigure);
-    _myIni.Set(INI_SECTION_NAME, INI_NAME_TAG, _missileTag);
-    _myIni.Set(INI_SECTION_NAME, INI_NAME_NUM, _missileNumber);
-    _myIni.Set(INI_SECTION_NAME, INI_NAME_FIRE_CTRL, _fireControlGroupNameTag);
-    _myIni.Set(INI_SECTION_NAME, INI_NAME_DETACH, _detachThrustTag);
+    foreach (IConfigValue c in _config)
+    {
+        c.WriteToIni(_myIni);
+    }
 
-    _myIni.Set(INI_SECTION_DELAY, INI_DELAY_GUIDANCE, _guidanceDelay);
-    _myIni.Set(INI_SECTION_DELAY, INI_DELAY_DISCONNECT, _disconnectDelay);
-    _myIni.Set(INI_SECTION_DELAY, INI_DELAY_DETACH, _detachDuration);
-    _myIni.Set(INI_SECTION_DELAY, INI_DELAY_MAIN_IGITION, _mainIgnitionDelay);
-
-    _myIni.Set(INI_SECTION_GYRO, INI_GYRO_KP, _gyroProportionalGain);
-    _myIni.Set(INI_SECTION_GYRO, INI_GYRO_KI, _gyroIntegralGain);
-    _myIni.Set(INI_SECTION_GYRO, INI_GYRO_KD, _gyroDerivativeGain);
-
-    _myIni.Set(INI_SECTION_HOMING, INI_HOMING_RELNAV, _navConstant);
-    _myIni.Set(INI_SECTION_HOMING, INI_HOMING_RELNAV_ACCEL, _accelNavConstant);
-    _myIni.Set(INI_SECTION_HOMING, INI_HOMING_AIM_DISPERSION, _maxAimDispersion);
-    _myIni.Set(INI_SECTION_HOMING, INI_TOPDOWN_ATTACK_HEIGHT, _topDownAttackHeight);
-
-    _myIni.Set(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_UP, _offsetUp);
-    _myIni.Set(INI_SECTION_BEAMRIDE, INI_BEAMRIDE_OFFSET_LEFT, _offsetLeft);
-
-    _myIni.Set(INI_SECTION_EVASION, INI_EVASION_SPIN_RPM, _missileSpinRPM);
-    _myIni.Set(INI_SECTION_EVASION, INI_EVASION_USE_SPIRAL, _evadeWithSpiral);
-    _myIni.Set(INI_SECTION_EVASION, INI_EVASION_USE_RANDOM, _evadeWithRandomizedHeading);
-    _myIni.SetComment(INI_SECTION_EVASION, INI_EVASION_USE_RANDOM, INI_COMMENT_EVASION_USE_RANDOM);
-
-    _myIni.Set(INI_SECTION_SPIRAL, INI_SPIRAL_DEG, _spiralDegrees);
-    _timeMaxSpiral = Math.Max(_timeMaxSpiral, 0.1);
-    _myIni.Set(INI_SECTION_SPIRAL, INI_SPIRAL_TIME, _timeMaxSpiral);
-    _myIni.Set(INI_SECTION_SPIRAL, INI_SPIRAL_RANGE, _spiralActivationRange);
-
-    _myIni.Set(INI_SECTION_RANDOM, INI_RANDOM_INTERVAL, _randomVectorInterval);
-    _maxRandomAccelRatio = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
-    _myIni.Set(INI_SECTION_RANDOM, INI_RANDOM_MAX_ACCEL, _maxRandomAccelRatio);
-
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_CAMS_FOR_HOMING, _useCamerasForHoming);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_RANGE, _raycastRange);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_MIN_TGT_SIZE, _raycastMinimumTargetSize);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_MIN_RANGE, _minimumArmingRange);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_FRIENDS, _raycastIgnoreFriends);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_IGNORE_PLANETS, _raycastIgnorePlanetSurface);
-    _myIni.Set(INI_SECTION_RAYCAST, INI_RAYCAST_IGNORE_ID_DETONATION, _ignoreIdForDetonation);
-
-    _myIni.Set(INI_SECTION_MISC, INI_REMOTE_FIRE, _allowRemoteFire);
-    _myIni.Set(INI_SECTION_MISC, INI_MEME_MODE, _antennaMemeMode);
+    _timeMaxSpiral.Value = Math.Max(_timeMaxSpiral, 0.1);
+    _maxRandomAccelRatio.Value = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
 
     _guidanceActivateAction.RunInterval = _guidanceDelay;
     _stage2Action.RunInterval = _disconnectDelay;
@@ -687,63 +620,6 @@ void SaveIniConfig()
 #endregion
 
 #region Argument Handling and IGC Processing
-void ParseUnicastMessages()
-{
-    bool fireCommanded = false;
-
-    // Process message queue
-    while (_unicastListener.HasPendingMessage)
-    {
-        MyIGCMessage message = _unicastListener.AcceptMessage();
-        object data = message.Data;
-        if (message.Tag == IGC_TAG_FIRE)
-        {
-            fireCommanded = true;
-        }
-        else if (message.Tag == IGC_TAG_REGISTER)
-        {
-            if (data is long)
-            {
-                long keycode = (long)data;
-                _savedKeycodes.Add(keycode);
-                _remotelyFired = true;
-            }
-        }
-    }
-
-    if (fireCommanded)
-    {
-        _postSetupAction = PostSetupAction.Fire;
-        InitiateSetup(_remotelyFired);
-        if (_remotelyFired)
-        {
-            IGC.SendBroadcastMessage(IGC_TAG_REMOTE_FIRE_NOTIFICATION, _missileNumber, TransmissionDistance.CurrentConstruct);
-        }
-    }
-}
-
-void ParseRemoteFireRequest()
-{
-    bool remoteFireRequest = false;
-
-    while (_broadcastListenerRemoteFire.HasPendingMessage)
-    {
-        object messageData = _broadcastListenerRemoteFire.AcceptMessage().Data;
-        if (messageData is MyTuple<Vector3D, long>)
-        {
-            var payload = (MyTuple<Vector3D, long>)messageData;
-            _remoteFireRequests.Add(payload);
-            remoteFireRequest = true;
-        }
-    }
-
-    if (remoteFireRequest)
-    {
-        _postSetupAction = PostSetupAction.FireRequestResponse;
-        InitiateSetup(true);
-    }
-}
-
 void ProcessRemoteFireRequests()
 {
     Runtime.UpdateFrequency |= UpdateFrequency.Update10;
@@ -790,104 +666,168 @@ void SendRemoteFireResponse()
     {
         if (a.Closed)
             continue;
+        a.Radius = 1f;
         a.EnableBroadcasting = false;
+        a.Enabled = _allowRemoteFire && !_foundLampAntennas;
         break;
     }
 }
 
-void HandleBroadcastListeners()
+void IgcMessageHandling(bool shouldFire)
 {
-    while (_broadcastListenerParameters.HasPendingMessage)
+    if (!shouldFire)
     {
-        object messageData = _broadcastListenerParameters.AcceptMessage().Data;
+        if (_allowRemoteFire)
+        {
+            // Handle remote fire requests
+            bool remoteFireRequest = false;
+            while (_broadcastListenerRemoteFire.HasPendingMessage)
+            {
+                object messageData = _broadcastListenerRemoteFire.AcceptMessage().Data;
+                if (messageData is MyTuple<Vector3D, long>)
+                {
+                    var payload = (MyTuple<Vector3D, long>)messageData;
+                    _remoteFireRequests.Add(payload);
+                    remoteFireRequest = true;
+                }
+            }
 
-        if (!(messageData is MyTuple<byte, long>))
-            continue;
+            if (remoteFireRequest)
+            {
+                _postSetupAction = PostSetupAction.FireRequestResponse;
+                InitiateSetup(true);
+            }
+        }
 
-        var payload = (MyTuple<byte, long>)messageData;
-        long keycode = payload.Item2;
+        // Handle unicast messages
+        bool fireCommanded = false;
+        bool remotelyFired = false;
+        while (_unicastListener.HasPendingMessage)
+        {
+            MyIGCMessage message = _unicastListener.AcceptMessage();
+            object data = message.Data;
+            if (message.Tag == IGC_TAG_FIRE)
+            {
+                fireCommanded = true;
+            }
+            else if (message.Tag == IGC_TAG_REGISTER)
+            {
+                if (data is long)
+                {
+                    long keycode = (long)data;
+                    _savedKeycodes.Add(keycode);
+                    remotelyFired = true;
+                }
+            }
+        }
 
-        if (!_savedKeycodes.Contains(keycode))
-            continue;
-
-        byte packedBools = payload.Item1;
-        if (_killAllowed && !_shouldKill)
-            _shouldKill = (packedBools & (1)) != 0;
-
-        _shouldStealth = (packedBools & (1 << 1)) != 0;
-        _enableEvasion = (packedBools & (1 << 2)) != 0;
-        _topDownAttack = (packedBools & (1 << 3)) != 0;
-        _precisionMode = (packedBools & (1 << 4)) != 0;
-        _retask = (packedBools & (1 << 5)) != 0;
-
-        if (_shouldKill)
-            _shouldStealth = true;
-
-        _raycastHoming.OffsetTargeting = _precisionMode;
+        if (fireCommanded)
+        {
+            _postSetupAction = PostSetupAction.Fire;
+            InitiateSetup(remotelyFired);
+            if (remotelyFired)
+            {
+                IGC.SendBroadcastMessage(IGC_TAG_REMOTE_FIRE_NOTIFICATION, _missileNumber, TransmissionDistance.CurrentConstruct);
+            }
+        }
+        
+        return;
     }
-
-    while (_broadcastListenerBeamRiding.HasPendingMessage)
+    else
     {
-        object messageData = _broadcastListenerBeamRiding.AcceptMessage().Data;
+        // Handle broadcast listeners
+        while (_broadcastListenerParameters.HasPendingMessage)
+        {
+            object messageData = _broadcastListenerParameters.AcceptMessage().Data;
 
-        if (_guidanceMode == GuidanceMode.Active && !_retask)
-            continue;
+            if (!(messageData is MyTuple<byte, long>))
+                continue;
 
-        if (!(messageData is MyTuple<Vector3, Vector3, Vector3, Vector3, long>))
-            continue;
+            var payload = (MyTuple<byte, long>)messageData;
+            long keycode = payload.Item2;
 
-        var payload = (MyTuple<Vector3, Vector3, Vector3, Vector3, long>)messageData;
-        long keycode = payload.Item5;
-        if (!_savedKeycodes.Contains(keycode))
-            continue;
+            if (!_savedKeycodes.Contains(keycode))
+                continue;
 
-        _retask = false;
-        _shooterForwardVec = payload.Item1;
-        _shooterLeftVec = payload.Item2;
-        _shooterUpVec = payload.Item3;
-        _shooterPosCached = payload.Item4;
+            byte packedBools = payload.Item1;
+            if (_killAllowed && !_shouldKill)
+                _shouldKill = (packedBools & (1)) != 0;
 
-        _guidanceMode = GuidanceMode.BeamRiding;
-    }
+            _shouldStealth = (packedBools & (1 << 1)) != 0;
+            _enableEvasion = (packedBools & (1 << 2)) != 0;
+            _topDownAttack = (packedBools & (1 << 3)) != 0;
+            _precisionMode = (packedBools & (1 << 4)) != 0;
+            _retask = (packedBools & (1 << 5)) != 0;
 
-    /* Item1.Col0: Hit position */
-    /* Item1.Col1: Target position */
-    /* Item1.Col2: Target velocity */
-    /* Item2.Col0: Precision offset */
-    /* Item2.Col1: Shooter position */
-    /* Item2.Col2: <NOT USED> */
-    /* Item3:      Time since last lock */
-    /* Item4:      Target ID */
-    /* Item5:      Key code */
-    while (_broadcastListenerHoming.HasPendingMessage)
-    {
-        object messageData = _broadcastListenerHoming.AcceptMessage().Data;
+            if (_shouldKill)
+                _shouldStealth = true;
 
-        if (!(messageData is MyTuple<Matrix3x3, Matrix3x3, float, long, long>))
-            continue;
+            _raycastHoming.OffsetTargeting = _precisionMode;
+        }
 
-        var payload = (MyTuple<Matrix3x3, Matrix3x3, float, long, long>)messageData;
-        long keycode = payload.Item5;
-        if (!_savedKeycodes.Contains(keycode))
-            continue;
+        while (_broadcastListenerBeamRiding.HasPendingMessage)
+        {
+            object messageData = _broadcastListenerBeamRiding.AcceptMessage().Data;
 
-        _shooterPosCached = payload.Item2.Col1;
+            if (_guidanceMode == GuidanceMode.Active && !_retask)
+                continue;
 
-        if (_guidanceMode == GuidanceMode.Active && !_retask)
-            continue;
+            if (!(messageData is MyTuple<Vector3, Vector3, Vector3, Vector3, long>))
+                continue;
 
-        _retask = false;
-        Vector3D hitPos = payload.Item1.Col0;
-        Vector3D offset = payload.Item2.Col0;
-        _targetPos = payload.Item1.Col1;
-        _targetVel = payload.Item1.Col2;
-        _timeSinceLastLock = payload.Item3;
-        long targetId = payload.Item4;
-        _timeSinceLastIngest = 1.0 / 60.0; // IGC messages are always a tick delayed
+            var payload = (MyTuple<Vector3, Vector3, Vector3, Vector3, long>)messageData;
+            long keycode = payload.Item5;
+            if (!_savedKeycodes.Contains(keycode))
+                continue;
 
-        _guidanceMode = GuidanceMode.SemiActive;
+            _retask = false;
+            _shooterForwardVec = payload.Item1;
+            _shooterLeftVec = payload.Item2;
+            _shooterUpVec = payload.Item3;
+            _shooterPosCached = payload.Item4;
 
-        _raycastHoming.SetInitialLockParameters(hitPos, _targetVel, offset, _timeSinceLastLock, targetId);
+            _guidanceMode = GuidanceMode.BeamRiding;
+        }
+
+        /* Item1.Col0: Hit position */
+        /* Item1.Col1: Target position */
+        /* Item1.Col2: Target velocity */
+        /* Item2.Col0: Precision offset */
+        /* Item2.Col1: Shooter position */
+        /* Item2.Col2: <NOT USED> */
+        /* Item3:      Time since last lock */
+        /* Item4:      Target ID */
+        /* Item5:      Key code */
+        while (_broadcastListenerHoming.HasPendingMessage)
+        {
+            object messageData = _broadcastListenerHoming.AcceptMessage().Data;
+
+            if (!(messageData is MyTuple<Matrix3x3, Matrix3x3, float, long, long>))
+                continue;
+
+            var payload = (MyTuple<Matrix3x3, Matrix3x3, float, long, long>)messageData;
+            long keycode = payload.Item5;
+            if (!_savedKeycodes.Contains(keycode))
+                continue;
+
+            _shooterPosCached = payload.Item2.Col1;
+
+            if (_guidanceMode == GuidanceMode.Active && !_retask)
+                continue;
+
+            _retask = false;
+            Vector3D hitPos = payload.Item1.Col0;
+            Vector3D offset = payload.Item2.Col0;
+            _targetPos = payload.Item1.Col1;
+            _targetVel = payload.Item1.Col2;
+            _timeSinceLastLock = payload.Item3;
+            long targetId = payload.Item4;
+            _timeSinceLastIngest = 1.0 / 60.0; // IGC messages are always a tick delayed
+
+            _guidanceMode = GuidanceMode.SemiActive;
+
+            _raycastHoming.SetInitialLockParameters(hitPos, _targetVel, offset, _timeSinceLastLock, targetId);
+        }
     }
 }
 
@@ -994,7 +934,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
 
             if (groupName.StartsWith(_missileTag))
             {
-                int spaceIndex = groupName.IndexOf(' ', _missileTag.Length);
+                int spaceIndex = groupName.IndexOf(' ', _missileTag.Value.Length);
                 if (spaceIndex == -1)
                     continue;
 
@@ -1046,7 +986,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         else
         {
             _setupBuilder.Append($"> Missile group found:\n  '{_missileTag} {_autoConfigureMissileNumber}'\n");
-            _missileNumber = _autoConfigureMissileNumber;
+            _missileNumber.Value = _autoConfigureMissileNumber;
         }
     }
     else // Default: Read from custom data
@@ -1073,14 +1013,14 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     #region Guidance and PID config
     foreach (var guid in _guidanceAlgorithms)
     {
-        var relNav = guid as RelNavGuidance;
+        var relNav = guid.Value as RelNavGuidance;
         if (relNav != null)
         {
             relNav.NavConstant = _navConstant;
             relNav.NavAccelConstant = _accelNavConstant;
         }
     }
-    _selectedGuidance = _guidanceAlgorithms[_guidanceAlgoIndex];
+    _selectedGuidance = _guidanceAlgorithms[_guidanceAlgoType]; // TODO: Ensure value in bounds or just let it crash?
 
     _yawPID.Kp = _gyroProportionalGain;
     _yawPID.Ki = _gyroIntegralGain;
@@ -1156,18 +1096,6 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     }
     #endregion
 
-    #region Set Meme Mode name
-    if (_antennaMemeMode)
-    {
-        int index = RNGesus.Next(_antennaMemeMessages.Length);
-        _antennaName = _antennaMemeMessages[index];
-    }
-    else
-    {
-        _antennaName = "";
-    }
-    #endregion
-
     yield return SetupStatus.Done;
 }
 
@@ -1196,7 +1124,7 @@ public void RunSetupStateMachine()
             bool setupPassed = SetupErrorChecking();
             if (!setupPassed || _preSetupFailed)
             {
-                _setupBuilder.Append($"\n>>> Setup Failed! <<<\n");
+                _setupBuilder.Append("\n>>> Setup Failed! <<<\n");
                 Echo(_setupBuilder.ToString());
                 return;
             }
@@ -1221,7 +1149,7 @@ public void RunSetupStateMachine()
     else // Setup failed
     {
         _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)\n");
-        _setupBuilder.Append($"\n>>> Setup Failed! <<<\n");
+        _setupBuilder.Append("\n>>> Setup Failed! <<<\n");
         _canSetup = true;
         Echo(_setupBuilder.ToString());
     }
@@ -1594,7 +1522,7 @@ void GuidanceNavAndControl()
         out pastArmingRange,
         out shouldSpiral);
 
-    Vector3D headingVec = GuidanceMain(
+    Vector3D accelCmd = GuidanceMain(
         _guidanceMode,
         missileMatrix,
         missilePos,
@@ -1605,7 +1533,7 @@ void GuidanceNavAndControl()
         shouldSpiral,
         out _shouldProximityScan);
 
-    Control(missileMatrix, headingVec, gravityVec, missileVel, missileMass);
+    Control(missileMatrix, accelCmd, gravityVec, missileVel, missileMass);
     #endregion
 }
 
@@ -1655,10 +1583,10 @@ Vector3D GuidanceMain(
     bool shouldSpiral,
     out bool shouldProximityScan)
 {
-    Vector3D headingVec;
+    Vector3D accelCmd;
     if (guidanceMode == GuidanceMode.BeamRiding)
     {
-        headingVec = BeamRideGuidance(
+        accelCmd = BeamRideGuidance(
             missilePos,
             missileVel,
             gravity,
@@ -1671,7 +1599,7 @@ Vector3D GuidanceMain(
     {
         Vector3D adjustedTargetPos;
 
-        headingVec = HomingGuidance(
+        accelCmd = HomingGuidance(
             missilePos,
             missileVel,
             gravity,
@@ -1683,23 +1611,20 @@ Vector3D GuidanceMain(
         shouldProximityScan = pastMinArmingRange && (closingSpeedSq > distanceToTgtSq); // Roughly 1 second till impact
 
         // Only spiral if we are close enough to the target to conserve fuel
-        if (shouldSpiral)
-        {
-            shouldSpiral = ((_spiralActivationRange * _spiralActivationRange > distanceToTgtSq) && (closingSpeedSq * 4.0 < distanceToTgtSq)); // TODO: Don't hard code this lol
-        }
+        shouldSpiral &= ((_spiralActivationRange * _spiralActivationRange > distanceToTgtSq) && (closingSpeedSq * 4.0 < distanceToTgtSq)); // TODO: Don't hard code this lol
     }
 
     if (shouldSpiral)
     {
-        headingVec = missileAcceleration * SpiralTrajectory(headingVec, _missileReference.WorldMatrix.Up);
+        accelCmd = missileAcceleration * SpiralTrajectory(accelCmd, _missileReference.WorldMatrix.Up);
     }
 
     if (_enableEvasion && _evadeWithRandomizedHeading)
     {
-        headingVec += missileAcceleration * _randomizedHeadingVector;
+        accelCmd += missileAcceleration * _randomizedHeadingVector;
     }
 
-    return headingVec;
+    return accelCmd;
 }
 
 Vector3D BeamRideGuidance(
@@ -1736,22 +1661,22 @@ Vector3D BeamRideGuidance(
 
     Vector3D missileToTargetVec = destinationVec - missilePos;
 
-    Vector3D headingVec;
+    Vector3D accelCmd;
     if (_missileStage == 4)
     {
-        headingVec = CalculateDriftCompensation(missileVel, missileToTargetVec, missileAcceleration, 0.5, gravity, 60);
+        accelCmd = CalculateDriftCompensation(missileVel, missileToTargetVec, missileAcceleration, 0.5, gravity, 60);
     }
     else
     {
-        headingVec = missileToTargetVec;
+        accelCmd = missileToTargetVec;
     }
 
     if (!Vector3D.IsZero(gravity))
     {
-        headingVec = MissileGuidanceBase.GravityCompensation(missileAcceleration, headingVec, gravity);
+        accelCmd = MissileGuidanceBase.GravityCompensation(missileAcceleration, accelCmd, gravity);
     }
 
-    return headingVec;
+    return VectorMath.SafeNormalize(accelCmd) * missileAcceleration;
 }
 
 Vector3D HomingGuidance(
@@ -1784,23 +1709,23 @@ Vector3D HomingGuidance(
         adjustedTargetPos += VectorMath.Rejection(_aimDispersion, adjustedTargetPos - missilePos);
     }
 
-    Vector3D headingVec = _selectedGuidance.Update(missilePos, missileVel, missileAcceleration, adjustedTargetPos, _targetVel, gravityVec);
-    return headingVec;
+    Vector3D accelCmd = _selectedGuidance.Update(missilePos, missileVel, missileAcceleration, adjustedTargetPos, _targetVel, gravityVec);
+    return accelCmd * missileAcceleration;
 }
 
-void Control(MatrixD missileMatrix, Vector3D headingVec, Vector3D gravityVec, Vector3D velocityVec, double mass)
+void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vector3D velocityVec, double mass)
 {
     if (_missileStage == 4)
     {
-        var headingDeviation = VectorMath.CosBetween(headingVec, missileMatrix.Forward);
+        var headingDeviation = VectorMath.CosBetween(accelCmd, missileMatrix.Forward);
         ApplyThrustOverride(_mainThrusters, (float)MathHelper.Clamp(headingDeviation, 0.25f, 1f) * 100f);
-        var sideVelocity = VectorMath.Rejection(velocityVec, headingVec);
+        var sideVelocity = VectorMath.Rejection(velocityVec, accelCmd);
         ApplySideThrust(_sideThrusters, sideVelocity, gravityVec, mass);
     }
 
     // Get pitch and yaw angles
     double yaw, pitch, roll;
-    GetRotationAnglesSimultaneous(headingVec, -gravityVec, missileMatrix, out pitch, out yaw, out roll);
+    GetRotationAnglesSimultaneous(accelCmd, -gravityVec, missileMatrix, out pitch, out yaw, out roll);
 
     // Angle controller
     double yawSpeed = _yawPID.Control(yaw);
@@ -1880,24 +1805,31 @@ void NetworkTargets()
 #endregion
 
 #region Block Property Functions
+string GetAntennaName()
+{
+    switch (_antennaMode.Value)
+    {
+        case AntennaNameMode.Meme:
+            return _antennaMemeMessages[_memeIndex];
+        case AntennaNameMode.MissileName:
+            return _missileNameTag;
+        case AntennaNameMode.MissileStatus:
+            return $"{_missileNameTag} / Mode: {_guidanceMode} / Age: {(_guidanceMode == GuidanceMode.BeamRiding ? 0 : _timeSinceLastLock):0.0}";
+        default:
+        case AntennaNameMode.Empty:
+            return "";
+    }
+}
+
 void ScaleAntennaRange(double dist)
 {
     foreach (IMyRadioAntenna a in _antennas)
     {
         if (a.Closed)
             continue;
-
         a.Radius = (float)dist;
-
-        if (_shouldStealth)
-            a.EnableBroadcasting = false;
-        else
-            a.EnableBroadcasting = true;
-
-        if (_debugAntennas)
-            a.CustomName = $"{_guidanceMode}\n{_guidanceAlgoIndex}\n{_raycastHoming.Status}\n";
-        else
-            a.CustomName = _antennaName;
+        a.EnableBroadcasting = !_shouldStealth;
+        a.CustomName = GetAntennaName();
     }
 
     foreach (IMyBeacon thisBeacon in _beacons)
@@ -2301,7 +2233,7 @@ void Save()
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
 
 public static class VectorMath
 {
@@ -2448,7 +2380,7 @@ public static class VectorMath
 /// <param name="pitch">Pitch angle to desired orientation (rads).</param>
 /// <param name="yaw">Yaw angle to desired orientation (rads).</param>
 /// <param name="roll">Roll angle to desired orientation (rads).</param>
-void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
+public static void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
 {
     desiredForwardVector = VectorMath.SafeNormalize(desiredForwardVector);
 
@@ -3442,7 +3374,7 @@ abstract class MissileGuidanceBase
         {
             pointingVector = GravityCompensation(missileAcceleration, pointingVector, gravity.Value);
         }
-        return pointingVector;
+        return VectorMath.SafeNormalize(pointingVector);
     }
     
     public static Vector3D GravityCompensation(double missileAcceleration, Vector3D desiredDirection, Vector3D gravity)
@@ -3644,6 +3576,118 @@ class BatesDistributionRandom
             num += _rnd.NextDouble();
         }
         return num / _count;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(MyIni ini);
+    void ReadFromIni(MyIni ini);
+    void Update(MyIni ini);
+}
+
+public abstract class ConfigValue<T> : IConfigValue
+{
+    public T Value;
+    public string Section { get; set; }
+    public string Name { get; set; }
+    T DefaultValue { get; }
+    readonly string _comment;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string section, string name, T defaultValue, string comment)
+    {
+        Section = section;
+        Name = name;
+        Value = defaultValue;
+        DefaultValue = defaultValue;
+        _comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public void Update(MyIni ini)
+    {
+        ReadFromIni(ini);
+        WriteToIni(ini);
+    }
+
+    public void WriteToIni(MyIni ini)
+    {
+        ini.Set(Section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(_comment))
+        {
+            ini.SetComment(Section, Name, _comment);
+        }
+    }
+
+    protected abstract void SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault() 
+    {
+        Value = DefaultValue;
+    }
+
+    public void ReadFromIni(MyIni ini)
+    {
+        MyIniValue val = ini.Get(Section, Name);
+        if (!val.IsEmpty)
+        {
+            SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+    }
+}
+
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
+    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetString(out Value)) SetDefault(); }
+}
+
+public class ConfigDouble : ConfigValue<double>
+{
+    public ConfigDouble(string section, string name, double value = 0, string comment = null) : base(section, name, value, comment) { }
+    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetDouble(out Value)) SetDefault(); }
+}
+
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
+    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetBoolean(out Value)) SetDefault(); }
+}
+
+public class ConfigInt : ConfigValue<int>
+{
+    public ConfigInt(string section, string name, int value = 0, string comment = null) : base(section, name, value, comment) { }
+    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetInt32(out Value)) SetDefault(); }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string section, string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (section, name, defaultValue, comment) 
+    {}
+    
+    protected override void SetValue(ref MyIniValue val)
+    {
+        string antennaModeStr;
+        if (!val.TryGetString(out antennaModeStr) || 
+            !Enum.TryParse(antennaModeStr, true, out Value) ||
+            !Enum.IsDefined(typeof(TEnum), Value))
+        {
+            SetDefault();
+        }
     }
 }
 #endregion
