@@ -1,8 +1,8 @@
 
 #region WHAM
-const string VERSION = "170.8.4";
-const string DATE = "2023/03/20";
-const string COMPAT_VERSION = "95.0.0";
+const string Version = "170.8.6";
+const string Date = "2023/03/20";
+const string CompatVersion = "95.0.0";
 
 /*
 / //// / (WHAM) Whip's Homing Advanced Missile Script / //// /
@@ -25,7 +25,7 @@ you can uncompress this and it will be human readable.
 =================================================
     DO NOT MODIFY VARIABLES IN THE SCRIPT!
 
- USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
+    USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 =================================================
 
 
@@ -64,8 +64,8 @@ enum GuidanceAlgoType { ProNav, WhipNav, HybridNav, ZeroEffortMiss };
 MissileGuidanceBase _selectedGuidance;
 Dictionary<GuidanceAlgoType, MissileGuidanceBase> _guidanceAlgorithms;
 
-const string MISSILE_NAME_PATTERN = "({0} {1})";
-const string MISSILE_GROUP_PATTERN = "{0} {1}";
+const string MissileNamePattern = "({0} {1})";
+const string MissileGroupPattern = "{0} {1}";
 
 Vector3D
     _shooterForwardVec,
@@ -244,16 +244,16 @@ PostSetupAction _postSetupAction = PostSetupAction.None;
 const int MAX_INSTRUCTIONS_PER_SETUP_RUN = 5000;
 
 const double
-    UPDATES_PER_SECOND = 10.0,
-    SECONDS_PER_UPDATE = 1.0 / UPDATES_PER_SECOND,
-    DEG_TO_RAD = Math.PI / 180,
-    RPM_TO_RAD = Math.PI / 30,
-    TOPDOWN_DESCENT_ANGLE = Math.PI / 6,
-    MAX_GUIDANCE_TIME = 180,
-    RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666,
-    GYRO_SLOWDOWN_ANGLE = Math.PI / 36;
+    UpdatesPerSecond = 10.0,
+    SecondsPerUpdate = 1.0 / UpdatesPerSecond,
+    DegToRad = Math.PI / 180,
+    RpmToRad = Math.PI / 30,
+    TopdownDescentAngle = Math.PI / 6,
+    MaxGuidanceTime = 180,
+    RuntimeToRealtime = (1.0 / 60.0) / 0.0166666,
+    GyroSlowdownAngle = Math.PI / 36;
 
-const float MIN_THRUST = 1e-9f;
+const float MinThrust = 1e-9f;
 
 readonly MyIni _guidanceIni = new MyIni();
 readonly StringBuilder _saveSB = new StringBuilder();
@@ -261,8 +261,8 @@ readonly RaycastHoming _raycastHoming;
 
 enum GuidanceMode : int { BeamRiding = 1, SemiActive = 2, Active = 4, Homing = SemiActive | Active };
 
-PID _yawPID = new PID(1, 0, 0, SECONDS_PER_UPDATE),
-    _pitchPID = new PID(1, 0, 0, SECONDS_PER_UPDATE);
+PID _yawPID = new PID(1, 0, 0, SecondsPerUpdate),
+    _pitchPID = new PID(1, 0, 0, SecondsPerUpdate);
 IMyBlockGroup _missileGroup;
 Scheduler _scheduler;
 GuidanceMode _guidanceMode = GuidanceMode.SemiActive;
@@ -275,16 +275,16 @@ IMyBroadcastListener
 IMyUnicastListener _unicastListener;
 
 const string
-    IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
-    IGC_TAG_HOMING = "IGC_MSL_HOM_MSG",
-    IGC_TAG_BEAM_RIDING = "IGC_MSL_OPT_MSG",
-    IGC_TAG_IFF = "IGC_IFF_PKT",
-    IGC_TAG_FIRE = "IGC_MSL_FIRE_MSG",
-    IGC_TAG_REMOTE_FIRE_REQUEST = "IGC_MSL_REM_REQ",
-    IGC_TAG_REMOTE_FIRE_RESPONSE = "IGC_MSL_REM_RSP",
-    IGC_TAG_REMOTE_FIRE_NOTIFICATION = "IGC_MSL_REM_NTF",
-    IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
-    UNICAST_TAG = "UNICAST";
+    IgcTagParams = "IGC_MSL_PAR_MSG",
+    IgcTagHoming = "IGC_MSL_HOM_MSG",
+    IgcTagBeamRiding = "IGC_MSL_OPT_MSG",
+    IgcTagIff = "IGC_IFF_PKT",
+    IgcTagFire = "IGC_MSL_FIRE_MSG",
+    IgcTagRemoteFireRequest = "IGC_MSL_REM_REQ",
+    IgcTagRemoteFireResponse = "IGC_MSL_REM_RSP",
+    IgcTagRemoteFireNotification = "IGC_MSL_REM_NTF",
+    IgcTagregister = "IGC_MSL_REG_MSG",
+    IgcTagUnicast = "UNICAST";
 
 QueuedAction
     _stage1Action,
@@ -300,63 +300,63 @@ ScheduledAction
 readonly MyIni _myIni = new MyIni();
 
 const string
-    INI_SECTION_NAME = "Names",
-    INI_SECTION_DELAY = "Delays",
-    INI_SECTION_GYRO = "Gyros",
-    INI_SECTION_HOMING = "Homing Parameters",
-    INI_SECTION_BEAMRIDE = "Beam Riding Parameters",
-    INI_SECTION_EVASION = "Evasion Parameters",
-    INI_SECTION_SPIRAL = "Spiral Parameters",
-    INI_SECTION_RANDOM = "Random Fligh Path Parameters",
-    INI_SECTION_RAYCAST = "Raycast/Sensors",
-    INI_SECTION_MISC = "Misc.",
-    INI_MEME_MODE = "Antenna meme mode";
+    IniSectionNames = "Names",
+    IniSectionDelays = "Delays",
+    IniSectionGyro = "Gyros",
+    IniSectionHoming = "Homing Parameters",
+    IniSectionBeamRide = "Beam Riding Parameters",
+    IniSectionEvasion = "Evasion Parameters",
+    IniSectionSpiral = "Spiral Parameters",
+    IniSectionRandom = "Random Fligh Path Parameters",
+    IniSectionRaycast = "Raycast/Sensors",
+    IniSectionMisc = "Misc.",
+    IniCompatMemeMode = "Antenna meme mode";
 
-ConfigBool _autoConfigure = new ConfigBool(INI_SECTION_NAME, "Auto-configure missile name", true);
-ConfigString _missileTag = new ConfigString(INI_SECTION_NAME, "Missile name tag", "Missile");
-ConfigInt _missileNumber = new ConfigInt(INI_SECTION_NAME, "Missile number", 1);   
-ConfigString _fireControlGroupNameTag = new ConfigString(INI_SECTION_NAME, "Fire control group name", "Fire Control");   
-ConfigString _detachThrustTag = new ConfigString(INI_SECTION_NAME, "Detach thruster name tag", "Detach");
+ConfigBool _autoConfigure = new ConfigBool(IniSectionNames, "Auto-configure missile name", true);
+ConfigString _missileTag = new ConfigString(IniSectionNames, "Missile name tag", "Missile");
+ConfigInt _missileNumber = new ConfigInt(IniSectionNames, "Missile number", 1);
+ConfigString _fireControlGroupNameTag = new ConfigString(IniSectionNames, "Fire control group name", "Fire Control");
+ConfigString _detachThrustTag = new ConfigString(IniSectionNames, "Detach thruster name tag", "Detach");
 
-ConfigDouble _disconnectDelay = new ConfigDouble(INI_SECTION_DELAY, "Stage 1: Disconnect delay (s)", 0);
-ConfigDouble _guidanceDelay = new ConfigDouble(INI_SECTION_DELAY, "Guidance delay (s)", 1);
-ConfigDouble _detachDuration = new ConfigDouble(INI_SECTION_DELAY, "Stage 2: Detach duration (s)", 0);
-ConfigDouble _mainIgnitionDelay = new ConfigDouble(INI_SECTION_DELAY, "Stage 3: Main ignition delay (s)", 0);
+ConfigDouble _disconnectDelay = new ConfigDouble(IniSectionDelays, "Stage 1: Disconnect delay (s)", 0);
+ConfigDouble _guidanceDelay = new ConfigDouble(IniSectionDelays, "Guidance delay (s)", 1);
+ConfigDouble _detachDuration = new ConfigDouble(IniSectionDelays, "Stage 2: Detach duration (s)", 0);
+ConfigDouble _mainIgnitionDelay = new ConfigDouble(IniSectionDelays, "Stage 3: Main ignition delay (s)", 0);
 
-ConfigDouble _gyroProportionalGain = new ConfigDouble(INI_SECTION_GYRO, "Proportional gain", 10);
-ConfigDouble _gyroIntegralGain = new ConfigDouble(INI_SECTION_GYRO, "Integral gain", 0);
-ConfigDouble _gyroDerivativeGain = new ConfigDouble(INI_SECTION_GYRO, "Derivative gain", 10);
+ConfigDouble _gyroProportionalGain = new ConfigDouble(IniSectionGyro, "Proportional gain", 10);
+ConfigDouble _gyroIntegralGain = new ConfigDouble(IniSectionGyro, "Integral gain", 0);
+ConfigDouble _gyroDerivativeGain = new ConfigDouble(IniSectionGyro, "Derivative gain", 10);
 
-ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>(INI_SECTION_HOMING, "Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms: ProNav, WhipNav, HybridNav, ZeroEffortMiss");
-ConfigDouble _navConstant = new ConfigDouble(INI_SECTION_HOMING, "Navigation constant", 3);
-ConfigDouble _accelNavConstant = new ConfigDouble(INI_SECTION_HOMING, "Acceleration constant", 1.5);
-ConfigDouble _maxAimDispersion = new ConfigDouble(INI_SECTION_HOMING, "Max aim dispersion (m)", 0);
-ConfigDouble _topDownAttackHeight = new ConfigDouble(INI_SECTION_HOMING, "Topdown attack height (m)", 1500);
+ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>(IniSectionHoming, "Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms: ProNav, WhipNav, HybridNav, ZeroEffortMiss");
+ConfigDouble _navConstant = new ConfigDouble(IniSectionHoming, "Navigation constant", 3);
+ConfigDouble _accelNavConstant = new ConfigDouble(IniSectionHoming, "Acceleration constant", 1.5);
+ConfigDouble _maxAimDispersion = new ConfigDouble(IniSectionHoming, "Max aim dispersion (m)", 0);
+ConfigDouble _topDownAttackHeight = new ConfigDouble(IniSectionHoming, "Topdown attack height (m)", 1500);
 
-ConfigDouble _offsetUp = new ConfigDouble(INI_SECTION_BEAMRIDE, "Hit offset up (m)", 0);
-ConfigDouble _offsetLeft = new ConfigDouble(INI_SECTION_BEAMRIDE, "Hit offset left (m)", 0);
+ConfigDouble _offsetUp = new ConfigDouble(IniSectionBeamRide, "Hit offset up (m)", 0);
+ConfigDouble _offsetLeft = new ConfigDouble(IniSectionBeamRide, "Hit offset left (m)", 0);
 
-ConfigDouble _missileSpinRPM = new ConfigDouble(INI_SECTION_EVASION, "Spin rate (RPM)", 0);
-ConfigBool _evadeWithSpiral = new ConfigBool(INI_SECTION_EVASION, "Use spiral", false);
-ConfigBool _evadeWithRandomizedHeading = new ConfigBool(INI_SECTION_EVASION, "Use random flight path", true, " AKA \"Drunken Missile Mode\"");
+ConfigDouble _missileSpinRPM = new ConfigDouble(IniSectionEvasion, "Spin rate (RPM)", 0);
+ConfigBool _evadeWithSpiral = new ConfigBool(IniSectionEvasion, "Use spiral", false);
+ConfigBool _evadeWithRandomizedHeading = new ConfigBool(IniSectionEvasion, "Use random flight path", true, " AKA \"Drunken Missile Mode\"");
 
-ConfigDouble _spiralDegrees = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral angle (deg)", 15);
-ConfigDouble _timeMaxSpiral = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral time (sec)", 3);
-ConfigDouble _spiralActivationRange = new ConfigDouble(INI_SECTION_SPIRAL, "Spiral activation range (m)", 1000);
+ConfigDouble _spiralDegrees = new ConfigDouble(IniSectionSpiral, "Spiral angle (deg)", 15);
+ConfigDouble _timeMaxSpiral = new ConfigDouble(IniSectionSpiral, "Spiral time (sec)", 3);
+ConfigDouble _spiralActivationRange = new ConfigDouble(IniSectionSpiral, "Spiral activation range (m)", 1000);
 
-ConfigDouble _randomVectorInterval = new ConfigDouble(INI_SECTION_RANDOM, "Direction change interval (sec)", 0.5);
-ConfigDouble _maxRandomAccelRatio = new ConfigDouble(INI_SECTION_RANDOM, "Max acceleration ratio", 0.25);
+ConfigDouble _randomVectorInterval = new ConfigDouble(IniSectionRandom, "Direction change interval (sec)", 0.5);
+ConfigDouble _maxRandomAccelRatio = new ConfigDouble(IniSectionRandom, "Max acceleration ratio", 0.25);
 
-ConfigBool _useCamerasForHoming = new ConfigBool(INI_SECTION_RAYCAST, "Use cameras for homing", true);
-ConfigDouble _raycastRange = new ConfigDouble(INI_SECTION_RAYCAST, "Tripwire range (m)", 0.25);
-ConfigDouble _raycastMinimumTargetSize = new ConfigDouble(INI_SECTION_RAYCAST, "Minimum target size (m)", 0);
-ConfigDouble _minimumArmingRange = new ConfigDouble(INI_SECTION_RAYCAST, "Minimum warhead arming range (m)", 100);
-ConfigBool _raycastIgnoreFriends = new ConfigBool(INI_SECTION_RAYCAST, "Ignore friendlies", false);
-ConfigBool _raycastIgnorePlanetSurface = new ConfigBool(INI_SECTION_RAYCAST, "Ignore planets", true);
-ConfigBool _ignoreIdForDetonation = new ConfigBool(INI_SECTION_RAYCAST, "Ignore target ID for detonation", false);
+ConfigBool _useCamerasForHoming = new ConfigBool(IniSectionRaycast, "Use cameras for homing", true);
+ConfigDouble _raycastRange = new ConfigDouble(IniSectionRaycast, "Tripwire range (m)", 0.25);
+ConfigDouble _raycastMinimumTargetSize = new ConfigDouble(IniSectionRaycast, "Minimum target size (m)", 0);
+ConfigDouble _minimumArmingRange = new ConfigDouble(IniSectionRaycast, "Minimum warhead arming range (m)", 100);
+ConfigBool _raycastIgnoreFriends = new ConfigBool(IniSectionRaycast, "Ignore friendlies", false);
+ConfigBool _raycastIgnorePlanetSurface = new ConfigBool(IniSectionRaycast, "Ignore planets", true);
+ConfigBool _ignoreIdForDetonation = new ConfigBool(IniSectionRaycast, "Ignore target ID for detonation", false);
 
-ConfigBool _allowRemoteFire = new ConfigBool(INI_SECTION_MISC, "Allow remote firing", false);
-ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>(INI_SECTION_MISC, "Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes: Meme, Empty, MissileName, MissileStatus");
+ConfigBool _allowRemoteFire = new ConfigBool(IniSectionMisc, "Allow remote firing", false);
+ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>(IniSectionMisc, "Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes: Meme, Empty, MissileName, MissileStatus");
 
 IConfigValue[] _config;
 
@@ -419,14 +419,14 @@ void SetupConfig()
 Program()
 {
     SetupConfig();
-    
-    _memeIndex = RNGesus.Next(_antennaMemeMessages.Length);
-    
-    _unicastListener = IGC.UnicastListener;
-    _unicastListener.SetMessageCallback(UNICAST_TAG);
 
-    _broadcastListenerRemoteFire = IGC.RegisterBroadcastListener(IGC_TAG_REMOTE_FIRE_REQUEST);
-    _broadcastListenerRemoteFire.SetMessageCallback(IGC_TAG_REMOTE_FIRE_REQUEST);
+    _memeIndex = RNGesus.Next(_antennaMemeMessages.Length);
+
+    _unicastListener = IGC.UnicastListener;
+    _unicastListener.SetMessageCallback(IgcTagUnicast);
+
+    _broadcastListenerRemoteFire = IGC.RegisterBroadcastListener(IgcTagRemoteFireRequest);
+    _broadcastListenerRemoteFire.SetMessageCallback(IgcTagRemoteFireRequest);
 
     _guidanceActivateAction = new ScheduledAction(ActivateGuidance, 0, true);
     _stage1Action = new QueuedAction(MissileStage1, 0);
@@ -441,8 +441,8 @@ Program()
 
     // Setting up scheduled tasks
     _scheduler.AddScheduledAction(_guidanceActivateAction);
-    _scheduler.AddScheduledAction(GuidanceNavAndControl, UPDATES_PER_SECOND);
-    _scheduler.AddScheduledAction(CheckProximity, UPDATES_PER_SECOND);
+    _scheduler.AddScheduledAction(GuidanceNavAndControl, UpdatesPerSecond);
+    _scheduler.AddScheduledAction(CheckProximity, UpdatesPerSecond);
     _scheduler.AddScheduledAction(PrintEcho, 1);
     _scheduler.AddScheduledAction(NetworkTargets, 6);
     _scheduler.AddScheduledAction(_randomHeadingVectorAction);
@@ -452,7 +452,7 @@ Program()
     _scheduler.AddQueuedAction(_stage2Action);
     _scheduler.AddQueuedAction(_stage3Action);
     _scheduler.AddQueuedAction(_stage4Action);
-    _scheduler.AddQueuedAction(KillPower, MAX_GUIDANCE_TIME);
+    _scheduler.AddQueuedAction(KillPower, MaxGuidanceTime);
 
     _runtimeTracker = new RuntimeTracker(this, 120, 0.005);
 
@@ -461,12 +461,12 @@ Program()
 
     // Populate guidance algos
     _guidanceAlgorithms = new Dictionary<GuidanceAlgoType, MissileGuidanceBase>()
-    {
-        { GuidanceAlgoType.ProNav, new ProNavGuidance(UPDATES_PER_SECOND, _navConstant) },
-        { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UPDATES_PER_SECOND, _navConstant) },
-        { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UPDATES_PER_SECOND, _navConstant) },
-        { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UPDATES_PER_SECOND, _navConstant) },
-    };
+{
+    { GuidanceAlgoType.ProNav, new ProNavGuidance(UpdatesPerSecond, _navConstant) },
+    { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UpdatesPerSecond, _navConstant) },
+    { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UpdatesPerSecond, _navConstant) },
+    { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UpdatesPerSecond, _navConstant) },
+};
 
     // Enable raycast spooling
     GridTerminalSystem.GetBlocksOfType<IMyCameraBlock>(null, camera =>
@@ -511,9 +511,9 @@ void Main(string arg, UpdateType updateSource)
     bool igcMsg = (updateSource & UpdateType.IGC) != 0;
     if (igcMsg)
     {
-        IgcMessageHandling(_shouldFire);    
+        IgcMessageHandling(_shouldFire);
     }
-    
+
     if (!_shouldFire)
     {
         return;
@@ -521,7 +521,7 @@ void Main(string arg, UpdateType updateSource)
 
     _scheduler.Update();
 
-    var lastRuntime = Math.Min(RUNTIME_TO_REALTIME * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0), SECONDS_PER_UPDATE);
+    var lastRuntime = Math.Min(RuntimeToRealtime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0), SecondsPerUpdate);
     _timeTotal += lastRuntime;
     _timeSpiral += lastRuntime;
     _timeSinceLastIngest += lastRuntime;
@@ -538,7 +538,7 @@ void ActiveHomingScans()
     if (_homingCameras.Count == 0 || _shipControllers.Count == 0)
         return;
 
-    _raycastHoming.Update(SECONDS_PER_UPDATE, _homingCameras, _shipControllers);
+    _raycastHoming.Update(SecondsPerUpdate, _homingCameras, _shipControllers);
 
     if (_raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
     {
@@ -586,7 +586,7 @@ void LoadIniConfig()
 
     // For backwards compat
     bool antennaMemeMode;
-    if (_myIni.Get(INI_SECTION_MISC, INI_MEME_MODE).TryGetBoolean(out antennaMemeMode))
+    if (_myIni.Get(IniSectionMisc, IniCompatMemeMode).TryGetBoolean(out antennaMemeMode))
     {
         _antennaMode.Value = antennaMemeMode ? AntennaNameMode.Meme : AntennaNameMode.Empty;
     }
@@ -598,8 +598,8 @@ void SaveIniConfig()
 {
     _myIni.Clear();
 
-    _missileGroupNameTag = string.Format(MISSILE_GROUP_PATTERN, _missileTag, _missileNumber);
-    _missileNameTag = string.Format(MISSILE_NAME_PATTERN, _missileTag, _missileNumber);
+    _missileGroupNameTag = string.Format(MissileGroupPattern, _missileTag, _missileNumber);
+    _missileNameTag = string.Format(MissileNamePattern, _missileTag, _missileNumber);
 
     foreach (IConfigValue c in _config)
     {
@@ -657,7 +657,7 @@ void SendRemoteFireResponse()
         response.Item1 = Me.GetPosition();
         response.Item2 = Me.EntityId;
 
-        IGC.SendUnicastMessage(programId, IGC_TAG_REMOTE_FIRE_RESPONSE, response);
+        IGC.SendUnicastMessage(programId, IgcTagRemoteFireResponse, response);
     }
 
     _remoteFireRequests.Clear();
@@ -706,11 +706,11 @@ void IgcMessageHandling(bool shouldFire)
         {
             MyIGCMessage message = _unicastListener.AcceptMessage();
             object data = message.Data;
-            if (message.Tag == IGC_TAG_FIRE)
+            if (message.Tag == IgcTagFire)
             {
                 fireCommanded = true;
             }
-            else if (message.Tag == IGC_TAG_REGISTER)
+            else if (message.Tag == IgcTagregister)
             {
                 if (data is long)
                 {
@@ -727,10 +727,10 @@ void IgcMessageHandling(bool shouldFire)
             InitiateSetup(remotelyFired);
             if (remotelyFired)
             {
-                IGC.SendBroadcastMessage(IGC_TAG_REMOTE_FIRE_NOTIFICATION, _missileNumber, TransmissionDistance.CurrentConstruct);
+                IGC.SendBroadcastMessage(IgcTagRemoteFireNotification, _missileNumber.Value, TransmissionDistance.CurrentConstruct);
             }
         }
-        
+
         return;
     }
     else
@@ -836,14 +836,14 @@ void RegisterBroadcastListeners()
     if (_broadcastListenersRegistered)
         return;
 
-    _broadcastListenerHoming = IGC.RegisterBroadcastListener(IGC_TAG_HOMING);
-    _broadcastListenerHoming.SetMessageCallback(IGC_TAG_HOMING);
+    _broadcastListenerHoming = IGC.RegisterBroadcastListener(IgcTagHoming);
+    _broadcastListenerHoming.SetMessageCallback(IgcTagHoming);
 
-    _broadcastListenerBeamRiding = IGC.RegisterBroadcastListener(IGC_TAG_BEAM_RIDING);
-    _broadcastListenerBeamRiding.SetMessageCallback(IGC_TAG_BEAM_RIDING);
+    _broadcastListenerBeamRiding = IGC.RegisterBroadcastListener(IgcTagBeamRiding);
+    _broadcastListenerBeamRiding.SetMessageCallback(IgcTagBeamRiding);
 
-    _broadcastListenerParameters = IGC.RegisterBroadcastListener(IGC_TAG_PARAMS);
-    _broadcastListenerParameters.SetMessageCallback(IGC_TAG_PARAMS);
+    _broadcastListenerParameters = IGC.RegisterBroadcastListener(IgcTagParams);
+    _broadcastListenerParameters.SetMessageCallback(IgcTagParams);
 
     _broadcastListenersRegistered = true;
 }
@@ -903,7 +903,7 @@ void ClearLists()
 
 string GetTitle()
 {
-    return $"Whip's Homing Adv. Missile Script\n(Version {VERSION} - {DATE})\n\nFor use with LAMP v{COMPAT_VERSION} or later.\n";
+    return $"Whip's Homing Adv. Missile Script\n(Version {Version} - {Date})\n\nFor use with LAMP v{CompatVersion} or later.\n";
 }
 
 List<IMyRadioAntenna> _broadcasters = new List<IMyRadioAntenna>();
@@ -1194,7 +1194,7 @@ bool SetupErrorChecking()
     setupFailed |= EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found");
 
     // WARNINGS
-    if(!EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching"))
+    if (!EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching"))
     {
         EchoBlockCount(_mergeBlocks.Count, "merge");
         EchoBlockCount(_rotors.Count, "rotor");
@@ -1276,17 +1276,17 @@ bool CollectBlocks(IMyTerminalBlock block)
         GetCameraOrientation(camera);
     }
     else if (AddToListIfType(block, _artMasses)
-          || AddToListIfType(block, _batteries)
-          || AddToListIfType(block, _gyros)
-          || AddToListIfType(block, _mergeBlocks)
-          || AddToListIfType(block, _shipControllers)
-          || AddToListIfType(block, _connectors)
-          || AddToListIfType(block, _rotors)
-          || AddToListIfType(block, _reactors)
-          || AddToListIfType(block, _beacons)
-          || AddToListIfType(block, _sensors)
-          || AddToListIfType(block, _timers)
-          || AddToListIfType(block, _gasTanks))
+            || AddToListIfType(block, _batteries)
+            || AddToListIfType(block, _gyros)
+            || AddToListIfType(block, _mergeBlocks)
+            || AddToListIfType(block, _shipControllers)
+            || AddToListIfType(block, _connectors)
+            || AddToListIfType(block, _rotors)
+            || AddToListIfType(block, _reactors)
+            || AddToListIfType(block, _beacons)
+            || AddToListIfType(block, _sensors)
+            || AddToListIfType(block, _timers)
+            || AddToListIfType(block, _gasTanks))
     {
         /* Nothing to do here */
     }
@@ -1450,7 +1450,7 @@ void MissileStage2()
         b.CustomName = "";
     }
 
-    ApplyThrustOverride(_sideThrusters, MIN_THRUST, false);
+    ApplyThrustOverride(_sideThrusters, MinThrust, false);
     ApplyThrustOverride(_detachThrusters, 100f);
 }
 
@@ -1459,7 +1459,7 @@ void MissileStage3()
 {
     _missileStage = 3;
 
-    ApplyThrustOverride(_detachThrusters, MIN_THRUST);
+    ApplyThrustOverride(_detachThrusters, MinThrust);
 }
 
 // Ignites main thrust.
@@ -1478,8 +1478,8 @@ void MissileStage4()
         c.Enabled = true;
     }
 
-    ApplyThrustOverride(_detachThrusters, MIN_THRUST);
-    ApplyThrustOverride(_sideThrusters, MIN_THRUST);
+    ApplyThrustOverride(_detachThrusters, MinThrust);
+    ApplyThrustOverride(_sideThrusters, MinThrust);
     ApplyThrustOverride(_mainThrusters, 100f);
 
     Me.CubeGrid.CustomName = _missileGroupNameTag;
@@ -1690,7 +1690,7 @@ Vector3D HomingGuidance(
 
     if (_topDownAttack && gravityVec.LengthSquared() > 1e-3 && !_shouldDive)
     {
-        if (VectorMath.AngleBetween(adjustedTargetPos - missilePos, gravityVec) < TOPDOWN_DESCENT_ANGLE)
+        if (VectorMath.AngleBetween(adjustedTargetPos - missilePos, gravityVec) < TopdownDescentAngle)
         {
             _shouldDive = true;
         }
@@ -1735,7 +1735,7 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
     double rollSpeed = 0;
     if (Math.Abs(_missileSpinRPM) > 1e-3 && _missileStage == 4)
     {
-        rollSpeed = _missileSpinRPM * RPM_TO_RAD;
+        rollSpeed = _missileSpinRPM * RpmToRad;
     }
     else
     {
@@ -1743,14 +1743,14 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
     }
 
     // Yaw and pitch slowdown to avoid overshoot
-    if (Math.Abs(yaw) < GYRO_SLOWDOWN_ANGLE)
+    if (Math.Abs(yaw) < GyroSlowdownAngle)
     {
-        yawSpeed = UPDATES_PER_SECOND * .5 * yaw;
+        yawSpeed = UpdatesPerSecond * .5 * yaw;
     }
 
-    if (Math.Abs(pitch) < GYRO_SLOWDOWN_ANGLE)
+    if (Math.Abs(pitch) < GyroSlowdownAngle)
     {
-        pitchSpeed = UPDATES_PER_SECOND * .5 * pitch;
+        pitchSpeed = UpdatesPerSecond * .5 * pitch;
     }
 
     ApplyGyroOverride(pitchSpeed, yawSpeed, rollSpeed, _gyros, missileMatrix);
@@ -1800,7 +1800,7 @@ void NetworkTargets()
         _messageBuilder.Add(myTuple);
     }
 
-    IGC.SendBroadcastMessage(IGC_TAG_IFF, _messageBuilder.MoveToImmutable());
+    IGC.SendBroadcastMessage(IgcTagIff, _messageBuilder.MoveToImmutable());
 }
 #endregion
 
@@ -1877,7 +1877,7 @@ void ApplySideThrust(List<IMyThrust> thrusters, Vector3D controlAccel, Vector3D 
         }
         else
         {
-            t.ThrustOverridePercentage = MIN_THRUST;
+            t.ThrustOverridePercentage = MinThrust;
         }
     }
 }
@@ -1916,7 +1916,7 @@ void CheckProximity()
             // Use bounding box estimation for detonation
             double adjustedDetonationRange = _missileReference.CubeGrid.WorldVolume.Radius + _raycastRange;
             closingSpeed = Vector3D.Dot(closingVelocity, missileToTargetNorm);
-            if (distanceToTarget < adjustedDetonationRange + closingSpeed * SECONDS_PER_UPDATE)
+            if (distanceToTarget < adjustedDetonationRange + closingSpeed * SecondsPerUpdate)
             {
                 Detonate((distanceToTarget - adjustedDetonationRange) / closingSpeed);
                 return;
@@ -2011,7 +2011,7 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
             }
 
             closingSpeed = Math.Max(0, Vector3D.Dot(closingVelocity, directionToTargetNorm));
-            var closingDisplacement = closingSpeed * SECONDS_PER_UPDATE;
+            var closingDisplacement = closingSpeed * SecondsPerUpdate;
             var scanRange = _raycastRange + closingDisplacement;
             var scanPosition = cam.GetPosition() + directionToTargetNorm * scanRange;
             if (offsetVector.HasValue)
@@ -2034,11 +2034,11 @@ bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelo
 bool IsValidTarget(MyDetectedEntityInfo targetInfo)
 {
     if (targetInfo.IsEmpty() ||
-       (targetInfo.EntityId == Me.CubeGrid.EntityId) ||
-       (!_ignoreIdForDetonation && ((_guidanceMode & GuidanceMode.Homing) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId)) ||
-       (_raycastIgnorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet) ||
-       (_raycastIgnoreFriends && (targetInfo.Relationship & (MyRelationsBetweenPlayerAndBlock.FactionShare | MyRelationsBetweenPlayerAndBlock.Owner)) != 0) ||
-       (targetInfo.BoundingBox.Size.LengthSquared() < _raycastMinimumTargetSize * _raycastMinimumTargetSize))
+        (targetInfo.EntityId == Me.CubeGrid.EntityId) ||
+        (!_ignoreIdForDetonation && ((_guidanceMode & GuidanceMode.Homing) != 0) && (targetInfo.EntityId != _raycastHoming.TargetId)) ||
+        (_raycastIgnorePlanetSurface && targetInfo.Type == MyDetectedEntityType.Planet) ||
+        (_raycastIgnoreFriends && (targetInfo.Relationship & (MyRelationsBetweenPlayerAndBlock.FactionShare | MyRelationsBetweenPlayerAndBlock.Owner)) != 0) ||
+        (targetInfo.BoundingBox.Size.LengthSquared() < _raycastMinimumTargetSize * _raycastMinimumTargetSize))
     {
         return false;
     }
@@ -2053,7 +2053,7 @@ void Detonate(double fuzeTime)
     {
         if (thisWarhead.Closed)
             continue;
-        thisWarhead.DetonationTime = Math.Max(0f, (float)fuzeTime - 1f/60f);
+        thisWarhead.DetonationTime = Math.Max(0f, (float)fuzeTime - 1f / 60f);
         thisWarhead.StartCountdown();
     }
 }
@@ -2146,7 +2146,7 @@ Vector3D SpiralTrajectory(Vector3D desiredForwardVector, Vector3D desiredUpVecto
     Vector3D right = VectorMath.SafeNormalize(Vector3D.Cross(forward, desiredUpVector));
     Vector3D up = Vector3D.Cross(right, forward);
 
-    double lateralProportion = Math.Sin(_spiralDegrees * DEG_TO_RAD);
+    double lateralProportion = Math.Sin(_spiralDegrees * DegToRad);
     double forwardProportion = Math.Sqrt(1 - lateralProportion * lateralProportion);
 
     return forward * forwardProportion + lateralProportion * (Math.Sin(angle) * up + Math.Cos(angle) * right);
