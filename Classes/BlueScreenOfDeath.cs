@@ -1,3 +1,4 @@
+//#exclude
 IMyFunctionalBlock b = null;
 
 void Main()
@@ -22,12 +23,10 @@ void Bar()
 {
     b.Enabled = false;
 }
-
-#region BSOD
-// Simple utility to display an exception on a text surface in the event of a script crash
+//#endexclude
 static class BlueScreenOfDeath 
 {
-    const int MAX_BSOD_WIDTH = 35;
+    const int MAX_BSOD_WIDTH = 50;
     const string BSOD_TEMPLATE =
     "{0} - v{1}\n\n"+ 
     "A fatal exception has occured at\n"+
@@ -53,7 +52,7 @@ static class BlueScreenOfDeath
         surface.ContentType = ContentType.TEXT_AND_IMAGE;
         surface.Alignment = TextAlignment.LEFT;
         float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
-        surface.FontSize = scaleFactor * surface.TextureSize.X / (26f * MAX_BSOD_WIDTH);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
         surface.FontColor = Color.White;
         surface.BackgroundColor = Color.Blue;
         surface.Font = "Monospace";
@@ -75,10 +74,11 @@ static class BlueScreenOfDeath
                     lineLength += word.Length;
                     if (lineLength >= MAX_BSOD_WIDTH)
                     {
-                        lineLength = 0;
                         bsodBuilder.Append("\n");
+                        lineLength = word.Length;
                     }
                     bsodBuilder.Append(word).Append(" ");
+                    lineLength += 1;
                 }
                 bsodBuilder.Append("\n");
             }
@@ -91,4 +91,3 @@ static class BlueScreenOfDeath
                                         bsodBuilder));
     }
 }
-#endregion
