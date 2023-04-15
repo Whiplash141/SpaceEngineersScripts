@@ -50,8 +50,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.5",
-                    Date = "2023/03/15",
+public const string Version = "1.8.8",
+                    Date = "2023/04/15",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -68,10 +68,10 @@ long _runCount = 0;
 
 IConfigValue[] _config;
 ConfigString _groupNameTag = new ConfigString(IniSectionGeneral, IniKeyGroupNameTag, "TCES");
-public ConfigString AzimuthName { get; } = new ConfigString(IniSectionGeneral, IniKeyAzimuthName, "Azimuth");
-public ConfigString ElevationName { get; } = new ConfigString(IniSectionGeneral, IniKeyElevationName, "Elevation");
-public ConfigBool AutomaticRest { get; } = new ConfigBool(IniSectionGeneral, IniKeyAutoRestAngle, true);
-public ConfigFloat AutomaticRestDelay { get; } = new ConfigFloat(IniSectionGeneral, IniKeyAutoRestDelay, 2f);
+public ConfigString AzimuthName = new ConfigString(IniSectionGeneral, IniKeyAzimuthName, "Azimuth");
+public ConfigString ElevationName = new ConfigString(IniSectionGeneral, IniKeyElevationName, "Elevation");
+public ConfigBool AutomaticRest = new ConfigBool(IniSectionGeneral, IniKeyAutoRestAngle, true);
+public ConfigFloat AutomaticRestDelay = new ConfigFloat(IniSectionGeneral, IniKeyAutoRestDelay, 2f);
 ConfigBool _drawTitleScreen = new ConfigBool(IniSectionGeneral, IniKeyDrawTitleScreen, true);
 
 TCESTitleScreen _titleScreen;
@@ -79,55 +79,6 @@ TCESTitleScreen _titleScreen;
 List<CustomTurretController> _turretControllers = new List<CustomTurretController>();
 
 MyIni _ini = new MyIni();
-
-public class StabilizedRotor
-{
-    public float Velocity { get; private set; }
-
-    MatrixD _lastOrientation = MatrixD.Identity;
-    IMyMotorStator _rotor = null;
-    public IMyMotorStator Rotor
-    {
-        get
-        {
-            return _rotor;
-        }
-        set
-        {
-            if (value != _rotor)
-            {
-                _rotor = value;
-                if (_rotor != null)
-                {
-                    _lastOrientation = _rotor.WorldMatrix;
-                }
-            }
-        }
-    }
-
-    double CalculateAngularVelocity(double dt)
-    {
-        var axis = Vector3D.Cross(_lastOrientation.Forward, Rotor.WorldMatrix.Forward);
-        double mag = axis.Length();
-        double angle = MathHelper.Clamp(Math.Asin(mag), -1.0, 1.0);
-        axis = mag < 1e-12 ? Vector3D.Zero : axis / mag * angle / dt;
-        return Vector3D.Dot(axis, Rotor.WorldMatrix.Up);
-    }
-
-    public float Update(double dt)
-    {
-        if (Rotor == null)
-        {
-            Velocity = 0f;
-        }
-        else
-        {
-            Velocity = (float)(CalculateAngularVelocity(dt) * MathHelper.RadiansPerSecondToRPM);
-            _lastOrientation = Rotor.WorldMatrix.GetOrientation();
-        }
-        return Velocity;
-    }
-}
 
 class CustomTurretController
 {
@@ -138,7 +89,7 @@ class CustomTurretController
 
         public ConfigRotorAngle(string section, string name) : base(section, name, -1f, null) { }
 
-        protected override string GetIniString()
+        public override string ToString()
         {
             return HasValue ? Value.ToString() : DefaultString;
         }
@@ -218,7 +169,7 @@ class CustomTurretController
     {
         get
         {
-            return _controller != null && (_controller.HasTarget || _controller.IsUnderControl);
+            return _controller != null && (_controller.HasTarget || _controller.IsUnderControl || _controller.IsSunTrackerEnabled);
         }
     }
 
@@ -842,44 +793,6 @@ class CustomTurretController
 
         return belowTolerance;
     }
-
-    static double VectorAngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-    }
-
-    static Vector3D VectorRejection(Vector3D a, Vector3D b) //reject a on b
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
-
-    static double GetAllowedRotationAngle(double desiredDelta, IMyMotorStator rotor)
-    {
-        double desiredAngle = rotor.Angle + desiredDelta;
-        if ((desiredAngle < rotor.LowerLimitRad && desiredAngle + MathHelper.TwoPi < rotor.UpperLimitRad)
-            || (desiredAngle > rotor.UpperLimitRad && desiredAngle - MathHelper.TwoPi > rotor.LowerLimitRad))
-        {
-            return -Math.Sign(desiredDelta) * (MathHelper.TwoPi - Math.Abs(desiredDelta));
-        }
-        return desiredDelta;
-    }
-
-    void AimRotorAtPosition(IMyMotorStator rotor, Vector3D desiredDirection, Vector3D currentDirection, float rotationScale = 1f)
-    {
-        Vector3D desiredDirectionFlat = VectorRejection(desiredDirection, rotor.WorldMatrix.Up);
-        Vector3D currentDirectionFlat = VectorRejection(currentDirection, rotor.WorldMatrix.Up);
-        double angle = VectorAngleBetween(desiredDirectionFlat, currentDirectionFlat);
-        Vector3D axis = Vector3D.Cross(desiredDirection, currentDirection);
-        angle *= Math.Sign(Vector3D.Dot(axis, rotor.WorldMatrix.Up));
-        angle = GetAllowedRotationAngle(angle, rotor);
-        rotor.TargetVelocityRad = rotationScale * (float)angle / (10f / 60f);
-    }
     #endregion
 }
 
@@ -1360,7 +1273,7 @@ public class RuntimeTracker
 
 static class BlueScreenOfDeath 
 {
-    const int MAX_BSOD_WIDTH = 35;
+    const int MAX_BSOD_WIDTH = 50;
     const string BSOD_TEMPLATE =
     "{0} - v{1}\n\n"+ 
     "A fatal exception has occured at\n"+
@@ -1386,7 +1299,7 @@ static class BlueScreenOfDeath
         surface.ContentType = ContentType.TEXT_AND_IMAGE;
         surface.Alignment = TextAlignment.LEFT;
         float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
-        surface.FontSize = scaleFactor * surface.TextureSize.X / (26f * MAX_BSOD_WIDTH);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
         surface.FontColor = Color.White;
         surface.BackgroundColor = Color.Blue;
         surface.Font = "Monospace";
@@ -1408,10 +1321,11 @@ static class BlueScreenOfDeath
                     lineLength += word.Length;
                     if (lineLength >= MAX_BSOD_WIDTH)
                     {
-                        lineLength = 0;
                         bsodBuilder.Append("\n");
+                        lineLength = word.Length;
                     }
                     bsodBuilder.Append(word).Append(" ");
+                    lineLength += 1;
                 }
                 bsodBuilder.Append("\n");
             }
@@ -1445,7 +1359,7 @@ public abstract class ConfigValue<T> : IConfigValue
         return cfg.Value;
     }
 
-    public ConfigValue(string section, string name, T defaultValue = default(T), string comment = null)
+    public ConfigValue(string section, string name, T defaultValue, string comment)
     {
         Section = section;
         Name = name;
@@ -1454,7 +1368,7 @@ public abstract class ConfigValue<T> : IConfigValue
         _comment = comment;
     }
 
-    protected virtual string GetIniString()
+    public override string ToString()
     {
         return Value.ToString();
     }
@@ -1467,7 +1381,7 @@ public abstract class ConfigValue<T> : IConfigValue
 
     public void WriteToIni(MyIni ini)
     {
-        ini.Set(Section, Name, GetIniString());
+        ini.Set(Section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(_comment))
         {
             ini.SetComment(Section, Name, _comment);
@@ -1511,5 +1425,186 @@ public class ConfigFloat : ConfigValue<float>
 {
     public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
     protected override void SetValue(ref MyIniValue val) { if (!val.TryGetSingle(out Value)) SetDefault(); }
+}
+
+public class StabilizedRotor
+{
+    public float Velocity { get; private set; }
+
+    MatrixD _lastOrientation = MatrixD.Identity;
+
+    IMyMotorStator _rotor = null;
+    public IMyMotorStator Rotor
+    {
+        get
+        {
+            return _rotor;
+        }
+        set
+        {
+            if (value != _rotor)
+            {
+                _rotor = value;
+                if (_rotor != null)
+                {
+                    _lastOrientation = _rotor.WorldMatrix;
+                }
+            }
+        }
+    }
+
+    public StabilizedRotor(IMyMotorStator rotor = null)
+    {
+        Rotor = rotor;
+    }
+
+    double CalculateAngularVelocity(double dt)
+    {
+        var axis = Vector3D.Cross(_lastOrientation.Forward, Rotor.WorldMatrix.Forward);
+        double mag = axis.Length();
+        double angle = Math.Asin(MathHelper.Clamp(mag, -1.0, 1.0));
+        axis = mag < 1e-12 ? Vector3D.Zero : axis / mag * angle / dt;
+        return Vector3D.Dot(axis, Rotor.WorldMatrix.Up);
+    }
+
+    public float Update(double dt)
+    {
+        if (Rotor == null)
+        {
+            Velocity = 0f;
+        }
+        else
+        {
+            Velocity = (float)(CalculateAngularVelocity(dt) * MathHelper.RadiansPerSecondToRPM);
+            _lastOrientation = Rotor.WorldMatrix.GetOrientation();
+        }
+        return Velocity;
+    }
+}
+
+
+public static class VectorMath
+{
+    /// <summary>
+    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// </summary>
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return Vector3D.Zero;
+
+        if (Vector3D.IsUnit(ref a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+
+    /// <summary>
+    /// Reflects vector a over vector b with an optional rejection factor
+    /// </summary>
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    {
+        Vector3D proj = Projection(a, b);
+        Vector3D rej = a - proj;
+        return proj - rej * rejectionFactor;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Scalar projection of a onto b
+    /// </summary>
+    public static double ScalarProjection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b);
+
+        return a.Dot(b) / b.Length();
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+    }
+
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors.
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
+
+    /// <summary>
+    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
+    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
+    /// </summary>
+    /// <param name="a">First vector</param>
+    /// <param name="b">Second vector</param>
+    /// <param name="tolerance">Cosine of maximum angle</param>
+    /// <returns></returns>
+    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
+    {
+        double dot = Vector3D.Dot(a, b);
+        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
+        return Math.Abs(dot) * dot > num;
+    }
+}
+
+public static double GetAllowedRotationAngle(double desiredDelta, IMyMotorStator rotor)
+{
+    double desiredAngle = rotor.Angle + desiredDelta;
+    if ((desiredAngle < rotor.LowerLimitRad && desiredAngle + MathHelper.TwoPi < rotor.UpperLimitRad)
+        || (desiredAngle > rotor.UpperLimitRad && desiredAngle - MathHelper.TwoPi > rotor.LowerLimitRad))
+    {
+        return -Math.Sign(desiredDelta) * (MathHelper.TwoPi - Math.Abs(desiredDelta));
+    }
+    return desiredDelta;
+}
+
+public static void AimRotorAtPosition(IMyMotorStator rotor, Vector3D desiredDirection, Vector3D currentDirection, float rotationScale = 1f, float timeStep = 1f/6f)
+{
+    Vector3D desiredDirectionFlat = VectorMath.Rejection(desiredDirection, rotor.WorldMatrix.Up);
+    Vector3D currentDirectionFlat = VectorMath.Rejection(currentDirection, rotor.WorldMatrix.Up);
+    double angle = VectorMath.AngleBetween(desiredDirectionFlat, currentDirectionFlat);
+    Vector3D axis = Vector3D.Cross(desiredDirection, currentDirection);
+    angle *= Math.Sign(Vector3D.Dot(axis, rotor.WorldMatrix.Up));
+    angle = GetAllowedRotationAngle(angle, rotor);
+    rotor.TargetVelocityRad = rotationScale * (float)angle / timeStep;
 }
 #endregion
