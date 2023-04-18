@@ -21,8 +21,8 @@ All subgrid wheels to the left of the seat you are controlling will be treated a
 // DOING SO WILL VOID YOUR WARRANTY
 //=============================================
 */
-const string VERSION = "11.7.2";
-const string DATE = "2022/07/09";
+const string VERSION = "11.7.3";
+const string DATE = "2023/04/18";
 
 const string INI_SECTION_SWCS = "SWCS Config";
 const string INI_KEY_IGNORE_TAG = "Wheel ignore name tag";
@@ -214,6 +214,7 @@ void ControlSubgridWheels()
 
     foreach (var wheel in subgridWheels)
     {
+        if (!GridTerminalSystem.CanAccess(wheel)) { continue; }
         var steerMult = Math.Sign(Math.Round(Vector3D.Dot(wheel.WorldMatrix.Forward, referenceController.WorldMatrix.Up), 2)) * Math.Sign(Vector3D.Dot(wheel.GetPosition() - avgWheelPosition, referenceController.WorldMatrix.Forward));
         var propulsionMult = -Math.Sign(Math.Round(Vector3D.Dot(wheel.WorldMatrix.Up, referenceController.WorldMatrix.Right), 2));
         var steerValue = steerMult * wasdInput.X;
@@ -276,6 +277,11 @@ Vector3D GetSubgridWheels(IMyTerminalBlock reference)
     
     foreach (IMyMotorSuspension block in wheels)
     {
+        if (!GridTerminalSystem.CanAccess(block))
+        {
+            continue;
+        }
+        
         summedWheelPosition += block.GetPosition();
 
         if (reference.CubeGrid != block.CubeGrid)

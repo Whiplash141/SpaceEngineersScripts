@@ -43,8 +43,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.2.1";
-const string DATE = "2022/05/13";
+const string VERSION = "42.2.2";
+const string DATE = "2023/04/18";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -301,6 +301,10 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
     onGridList.Clear();
     foreach (var t in sourceList)
     {
+        if (!GridTerminalSystem.CanAccess(t))
+        {
+            continue;
+        }
         if (grid != t.CubeGrid && !t.CustomName.Contains(ignoredThrustNameTag))
         {
             offGridList.Add(t);
@@ -454,6 +458,7 @@ void CancelGravity(List<IMyThrust> offGridThrusters, List<IMyThrust> onGridThrus
     {
         foreach (var block in offGridThrusters)
         {
+            if (!GridTerminalSystem.CanAccess(block)) { continue; }
             SetThrusterOverride(block, 0f); //.0001f
         }
         return;
@@ -473,6 +478,7 @@ void CancelGravity(List<IMyThrust> offGridThrusters, List<IMyThrust> onGridThrus
     double maxThrustSum = 0;
     foreach (var block in offGridThrusters)
     {
+        if (!GridTerminalSystem.CanAccess(block)) { continue; }
         if (!block.IsWorking || !block.Enabled)
             continue;
 
@@ -508,6 +514,7 @@ void CancelGravity(List<IMyThrust> offGridThrusters, List<IMyThrust> onGridThrus
     //Echo($"Hover Thrust Output: {(thrustProportion * 100):N1}%");
     foreach (var block in upwardThrusters)
     {
+        if (!GridTerminalSystem.CanAccess(block)) { continue; }
         SetThrusterOverride(block, 100f * (float)thrustProportion);
     }
 }
@@ -518,6 +525,7 @@ void ApplyThrust(List<IMyThrust> thrusters, Vector3D travelVec, double speed, Ve
     {
         foreach (IMyThrust thisThrust in thrusters)
         {
+            if (!GridTerminalSystem.CanAccess(thisThrust)) { continue; }
             SetThrusterOverride(thisThrust, 0.000001f);
         }
         return;
@@ -525,6 +533,7 @@ void ApplyThrust(List<IMyThrust> thrusters, Vector3D travelVec, double speed, Ve
 
     foreach (IMyThrust thisThrust in thrusters)
     {
+        if (!GridTerminalSystem.CanAccess(thisThrust)) { continue; }
         var thrustDirection = thisThrust.WorldMatrix.Forward; //gets the direction that the thruster flame fires
         float scale = -(float)thrustDirection.Dot(desiredDirectionVec); //projection of the thruster's direction onto the desired direction 
 
@@ -557,7 +566,6 @@ void ApplyThrust(List<IMyThrust> thrusters, Vector3D travelVec, double speed, Ve
         }
         else //disables thruster
         {
-            //thisThrust.Enabled = false;
             if (!upwardThrusters.Contains(thisThrust) || thrustDirection.Dot(desiredDirectionVec) > minDampeningDotProduct || !dampenersOn)
                 SetThrusterOverride(thisThrust, 0.000001f);
         }

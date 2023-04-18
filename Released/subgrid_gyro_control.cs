@@ -56,8 +56,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 const string NAME = "Whip's Subgrid Gyro Manager (SuGMa)";
-const string VERSION = "1.3.3";
-const string DATE = "2022/12/27";
+const string VERSION = "1.3.4";
+const string DATE = "2023/04/18";
 
 const string INI_SECTION_SGCS = "Subgrid Gyro Config";
 const string INI_KEY_IGNORE_TAG = "Gyro ignore name tag";
@@ -233,6 +233,7 @@ void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, Lis
     
     foreach (var thisGyro in gyroList)
     {
+        if (!GridTerminalSystem.CanAccess(thisGyro)) { continue; }
         var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(thisGyro.WorldMatrix));
         thisGyro.Pitch = (float)transformedRotationVec.X;
         thisGyro.Yaw = (float)transformedRotationVec.Y;
@@ -252,6 +253,11 @@ void GetOffGridGyros(IMyCubeGrid grid, List<IMyGyro> sourceList, List<IMyGyro> r
     resultList.Clear();
     foreach (IMyGyro gyro in sourceList)
     {
+        if (!GridTerminalSystem.CanAccess(gyro))
+        {
+            continue;
+        }
+        
         if (grid != gyro.CubeGrid)
         {
             resultList.Add(gyro);
