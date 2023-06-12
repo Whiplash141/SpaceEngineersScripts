@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.6.0";
-const string DATE = "2022/10/16";
+const string VERSION = "1.6.2";
+const string DATE = "2023/06/12";
 
 // Configurable
 string _textSurfaceGroupName = "SIMPL";
@@ -310,20 +310,28 @@ bool CollectScreens(IMyTerminalBlock b)
     float legendScale;
     bool invert;
     bool autoscale;
-    bool parsed = false;
     bool multiscreen;
     int rows;
     int cols;
 
-
-    if (b is IMyTextPanel)
+    var tp = b as IMyTextPanel;
+    var tsp = b as IMyTextSurfaceProvider;
+    if (tp == null && tsp == null)
     {
-        _ini.Clear();
-        parsed = _ini.TryParse(b.CustomData);
+        return false;
+    }
 
+    _ini.Clear();
+    bool parsed = _ini.TryParse(b.CustomData);
+    if (!parsed && !string.IsNullOrWhiteSpace(b.CustomData))
+    {
+        _ini.EndContent = b.CustomData;
+    }
+
+    if (tp != null)
+    {
         GetSurfaceConfigValues(parsed, b, false, 0, out normal, out rotation, out scale, out legendScale, out invert, out autoscale, out multiscreen, out rows, out cols);
         ISpriteSurface surf;
-        var tp = (IMyTextPanel)b;
         if (multiscreen && (rows > 1 || cols > 1))
         {
             surf = new MultiScreenSpriteSurface(tp, rows, cols, this);
@@ -335,25 +343,14 @@ bool CollectScreens(IMyTerminalBlock b)
 
         _textSurfaces.Add(new TextSurfaceConfig(surf, normal, rotation, scale, legendScale, invert, autoscale));
 
-        if (!parsed && !string.IsNullOrWhiteSpace(b.CustomData))
-        {
-            _ini.EndContent = b.CustomData;
-        }
-
         string output = _ini.ToString();
         if (!string.Equals(output, b.CustomData))
             b.CustomData = output;
 
         return false;
     }
-
-    if (b is IMyTextSurfaceProvider)
+    else if (tsp != null)
     {
-        _ini.Clear();
-        parsed = _ini.TryParse(b.CustomData);
-
-        var tsp = (IMyTextSurfaceProvider)b;
-
         int surfaceCount = tsp.SurfaceCount;
         for (int i = 0; i < surfaceCount; ++i)
         {
@@ -2396,5 +2393,3 @@ public class MultiScreenSpriteSurface : ISpriteSurface
 }
 #endregion
 #endregion
-
-
