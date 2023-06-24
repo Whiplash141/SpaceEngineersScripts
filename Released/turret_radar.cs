@@ -50,13 +50,15 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.4.0";
-const string Date = "2023/01/23";
+const string Version = "35.5.3";
+const string Date = "2023/06/22";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
 readonly MyIni _ini = new MyIni();
 readonly MyIni _textSurfaceIni = new MyIni();
+
+IConfigValue[] _generalConfig;
 
 ConfigString
     _textPanelName,
@@ -64,11 +66,15 @@ ConfigString
 ConfigBool
     _broadcastIFF,
     _networkTargets,
-    _useRangeOverride,
     _drawRunningScreen;
 ConfigFloat
-    _rangeOverride,
     _fadeOutInterval;
+ConfigDeprecated<bool, ConfigBool>
+    _deprecatedUseRangeOverride;
+ConfigDeprecated<float, ConfigFloat>
+    _deprecatedRangeOverride;
+ConfigNullable<float, ConfigFloat>
+    _rangeOverride;
 ConfigColor
     _enemyIconColor,
     _enemyElevationColor,
@@ -81,8 +87,6 @@ ConfigColor
 ConfigInt
     _rows,
     _cols;
-
-IConfigValue[] _generalConfig;
 
 const string IniSectionGeneral = "Radar - General";
 const string IniSectionColors = "Radar - Colors";
@@ -97,7 +101,7 @@ float MaxRange
 {
     get
     {
-        return Math.Max(1, _useRangeOverride ? _rangeOverride : (_turrets.Count == 0 ? _rangeOverride : _turretMaxRange));
+        return Math.Max(1, _rangeOverride.HasValue ? _rangeOverride.Value : _turretMaxRange);
     }
 }
 
@@ -123,6 +127,7 @@ List<ISpriteSurface> _surfaces = new List<ISpriteSurface>();
 List<IMyShipController> _taggedControllers = new List<IMyShipController>();
 List<IMyShipController> _allControllers = new List<IMyShipController>();
 HashSet<long> _myGridIds = new HashSet<long>();
+HashSet<long> _connectedGridIds = new HashSet<long>();
 IMyTerminalBlock _reference;
 IMyShipController _lastActiveShipController = null;
 
@@ -144,11 +149,12 @@ Program()
 
     _generalConfig = new IConfigValue[]
     {
+        _deprecatedUseRangeOverride = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(IniSectionGeneral, "Use radar range override")),
+        
         _textPanelName = new ConfigString(IniSectionGeneral, "Text surface name tag", "Radar"),
         _broadcastIFF = new ConfigBool(IniSectionGeneral, "Share own position", true),
         _networkTargets = new ConfigBool(IniSectionGeneral, "Share targets", true),
-        _useRangeOverride = new ConfigBool(IniSectionGeneral, "Use radar range override", false),
-        _rangeOverride = new ConfigFloat(IniSectionGeneral, "Radar range override (m)", 1000f),
+        _rangeOverride = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(IniSectionGeneral, "Radar range (m)"), "auto"),
         _radarSurface.ProjectionAngleDeg = new ConfigFloat(IniSectionGeneral, "Radar projection angle in degrees (0 is flat)", 55f),
         _radarSurface.DrawQuadrants = new ConfigBool(IniSectionGeneral, "Draw quadrants", true),
         _referenceName = new ConfigString(IniSectionGeneral, "Optional reference block name", "Reference"),
@@ -170,6 +176,20 @@ Program()
         _asteroidColor = new ConfigColor(IniSectionColors, "Asteroid icon", new Color(50, 50, 50, 255)),
         _asteroidElevationColor = new ConfigColor(IniSectionColors, "Asteroid elevation", new Color(25, 25, 25, 255)),
         _radarSurface.RadarLockWarningColor = new ConfigColor(IniSectionColors, "Lock on warning", new Color(150, 0, 0, 255)),
+    };
+
+    _deprecatedRangeOverride = new ConfigDeprecated<float, ConfigFloat>(new ConfigFloat(IniSectionGeneral, "Radar range override (m)"));
+
+    // If range override is true, check if the deprecated range override float is also set. If it is, set the current range override
+    _deprecatedUseRangeOverride.Callback = (v) => {
+        if (v)
+        {
+            _deprecatedRangeOverride.Update(_ini);
+        }
+    };
+
+    _deprecatedRangeOverride.Callback = (v) => {
+        _rangeOverride.Value = v;
     };
 
     _rows = new ConfigInt(IniSectionMultiscreen, "Screen rows", 1);
@@ -258,27 +278,13 @@ void HandleArguments()
             float range = 0;
             if (float.TryParse(_commandLine.Argument(1), out range))
             {
-                _useRangeOverride.Value = true;
                 _rangeOverride.Value = range;
-
                 UpdateRadarRange();
-
-                _ini.Clear();
-                _ini.TryParse(Me.CustomData);
-                _useRangeOverride.WriteToIni(_ini);
-                _rangeOverride.WriteToIni(_ini);
-                Me.CustomData = _ini.ToString();
             }
-            else if (string.Equals(_commandLine.Argument(1), "default"))
+            else if (string.Equals(_commandLine.Argument(1), "default") || string.Equals(_commandLine.Argument(1), "auto"))
             {
-                _useRangeOverride.Value = false;
-
+                _rangeOverride.Nullify();
                 UpdateRadarRange();
-
-                _ini.Clear();
-                _ini.TryParse(Me.CustomData);
-                _useRangeOverride.WriteToIni(_ini);
-                Me.CustomData = _ini.ToString();
             }
             return;
 
@@ -333,6 +339,11 @@ void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entity
         {
             _radarSurface.RadarLockWarning = true;
         }
+        return;
+    }
+
+    if (_connectedGridIds.Contains(entityId))
+    {
         return;
     }
 
@@ -1375,25 +1386,20 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
 void ParseCustomDataIni()
 {
     _ini.Clear();
+    bool parsed = _ini.TryParse(Me.CustomData);
 
-    if (_ini.TryParse(Me.CustomData))
-    {
-        foreach (var c in _generalConfig)
-        {
-            c.ReadFromIni(_ini);
-        }
-        _radarSurface.FadeOutInterval = _fadeOutInterval;
-    }
-    else if (!string.IsNullOrWhiteSpace(Me.CustomData))
+    if (!parsed && !string.IsNullOrWhiteSpace(Me.CustomData))
     {
         _ini.EndContent = Me.CustomData;
     }
 
     foreach (var c in _generalConfig)
     {
-        c.WriteToIni(_ini);
+        c.Update(_ini);
     }
+
     _ini.SetSectionComment(IniSectionColors, " Colors are defined with R,G,B,A color codes where\n values can range from 0,0,0,0 [transparent] to 255,255,255,255 [white].");
+    _radarSurface.FadeOutInterval = _fadeOutInterval;
 
     string output = _ini.ToString();
     if (!string.Equals(output, Me.CustomData))
@@ -1406,13 +1412,13 @@ void ParseCustomDataIni()
 #region General Functions
 float GetMaxTurretRange(List<TurretInterface> turrets)
 {
-    float maxRange = 0;
+    float maxRange = 1f;
     foreach (var block in turrets)
     {
         if (block.Closed)
             continue;
 
-        if (!block.IsWorking)
+        if (!block.IsFunctional)
             continue;
 
         float thisRange = block.Range;
@@ -1429,7 +1435,10 @@ float GetMaxTurretRange(List<TurretInterface> turrets)
 bool PopulateLists(IMyTerminalBlock block)
 {
     if (!block.IsSameConstructAs(Me))
+    {
+        _connectedGridIds.Add(block.CubeGrid.EntityId);
         return false;
+    }
 
     _myGridIds.Add(block.CubeGrid.EntityId);
 
@@ -1477,6 +1486,7 @@ void GrabBlocks()
     _clearSpriteCache = !_clearSpriteCache;
 
     _myGridIds.Clear();
+    _connectedGridIds.Clear();
     _sensors.Clear();
     _turrets.Clear();
     _allControllers.Clear();
@@ -2265,6 +2275,14 @@ public class TurretInterface
         }
     }
 
+    public bool IsFunctional
+    {
+        get
+        {
+            return T != null ? T.IsFunctional : TCB.IsFunctional && (TCB.AzimuthRotor != null || TCB.ElevationRotor != null) && (_tools.Count > 0 || TCB.Camera != null);
+        }
+    }
+
     public bool IsWorking
     {
         get
@@ -2720,85 +2738,151 @@ public class MultiScreenSpriteSurface : ISpriteSurface
 }
 #endregion
 
-interface IConfigValue
+public interface IConfigValue
 {
-    string Section { get; set; }
     void WriteToIni(MyIni ini);
-    void ReadFromIni(MyIni ini, bool setDefault = false);
+    bool ReadFromIni(MyIni ini);
+    bool Update(MyIni ini);
 }
 
 public abstract class ConfigValue<T> : IConfigValue
 {
-    public T Value;
-    public string Section { get; set; }
-    readonly string _name;
-    readonly string _comment;
+    public string Section;
+    public string Name;
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
     readonly T _defaultValue;
+    readonly string _comment;
+    bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
     {
         return cfg.Value;
     }
 
-    public ConfigValue(string section, string name, T value = default(T), string comment = null)
+    public ConfigValue(string section, string name, T defaultValue, string comment)
     {
-        Value = value;
         Section = section;
-        _name = name;
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
         _comment = comment;
-        _defaultValue = value;
     }
 
-    protected virtual string GetIniString()
+    public override string ToString()
     {
         return Value.ToString();
     }
 
-    public void WriteToIni(MyIni ini)
+    public bool Update(MyIni ini)
     {
-        ini.Set(Section, _name, GetIniString());
-        if (!string.IsNullOrWhiteSpace(_comment))
-        {
-            ini.SetComment(Section, _name, _comment);
-        }
+        bool read = ReadFromIni(ini);
+        WriteToIni(ini);
+        return read;
     }
 
-    protected abstract void UpdateValue(ref MyIniValue val);
-
-    public void ReadFromIni(MyIni ini, bool setDefault = false)
+    public bool ReadFromIni(MyIni ini)
     {
-        if (setDefault) { Value = _defaultValue; }
-        MyIniValue val = ini.Get(Section, _name);
-        UpdateValue(ref val);
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(Section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(MyIni ini)
+    {
+        ini.Set(Section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(_comment))
+        {
+            ini.SetComment(Section, Name, _comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
     }
 }
 
 public class ConfigString : ConfigValue<string>
 {
     public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
-    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToString(Value); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class ConfigBool : ConfigValue<bool>
 {
     public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
-    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToBoolean(Value); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class ConfigFloat : ConfigValue<float>
 {
     public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
-    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToSingle(Value); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetSingle(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class ConfigColor : ConfigValue<Color>
 {
     public ConfigColor(string section, string name, Color value = default(Color), string comment = null) : base(section, name, value, comment) { }
-    protected override string GetIniString()
+    public override string ToString()
     {
         return string.Format("{0}, {1}, {2}, {3}", Value.R, Value.G, Value.B, Value.A);
     }
-    protected override void UpdateValue(ref MyIniValue val)
+    protected override bool SetValue(ref MyIniValue val)
     {
         string rgbString = val.ToString("");
         string[] rgbSplit = rgbString.Split(',');
@@ -2809,7 +2893,8 @@ public class ConfigColor : ConfigValue<Color>
             !int.TryParse(rgbSplit[1].Trim(), out g) ||
             !int.TryParse(rgbSplit[2].Trim(), out b))
         {
-            return;
+            SetDefault();
+            return false;
         }
 
         bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
@@ -2822,14 +2907,128 @@ public class ConfigColor : ConfigValue<Color>
         g = MathHelper.Clamp(g, 0, 255);
         b = MathHelper.Clamp(b, 0, 255);
         a = MathHelper.Clamp(a, 0, 255);
-        Value = new Color(r, g, b, a);
+        _value = new Color(r, g, b, a);
+        return true;
     }
 }
 
 public class ConfigInt : ConfigValue<int>
 {
     public ConfigInt(string section, string name, int value = 0, string comment = null) : base(section, name, value, comment) { }
-    protected override void UpdateValue(ref MyIniValue val) { Value = val.ToInt32(Value); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue 
+    where ConfigImplementation : ConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Nullify()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(MyIni ini)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ini);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(MyIni ini)
+    {
+        Implementation.WriteToIni(ini);
+        if (!HasValue)
+        {
+            ini.Set(Implementation.Section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(MyIni ini)
+    {
+        bool read = ReadFromIni(ini);
+        WriteToIni(ini);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
+    }
+}
+public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : ConfigValue<T>, IConfigValue
+{
+    public readonly ConfigImplementation Implementation;
+    public Action<T> Callback;
+
+    public ConfigDeprecated(ConfigImplementation impl)
+    {
+        Implementation = impl;
+    }
+
+    public bool ReadFromIni(MyIni ini)
+    {
+        bool read = Implementation.ReadFromIni(ini);
+        if (read)
+        {
+            Callback?.Invoke(Implementation.Value);
+        }
+        return read;
+    }
+
+    public void WriteToIni(MyIni ini)
+    {
+        ini.Delete(Implementation.Section, Implementation.Name);
+    }
+
+    public bool Update(MyIni ini)
+    {
+        bool read = ReadFromIni(ini);
+        WriteToIni(ini);
+        return read;
+    }
 }
 
 public static class StringExtensions
