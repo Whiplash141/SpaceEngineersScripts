@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.5.3";
-const string Date = "2023/06/22";
+const string Version = "35.5.4";
+const string Date = "2023/07/02";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -1317,8 +1317,6 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
     {
         bool multiscreen = false;
 
-        _rows.Value = 1;
-        _cols.Value = 1;
         _textSurfaceIni.Clear();
         parsed = _textSurfaceIni.TryParse(block.CustomData);
 
