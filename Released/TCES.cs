@@ -50,8 +50,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.8.8",
-                    Date = "2023/04/15",
+public const string Version = "1.9.3",
+                    Date = "2023/07/03",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -94,10 +94,10 @@ class CustomTurretController
             return HasValue ? Value.ToString() : DefaultString;
         }
 
-        protected override void SetValue(ref MyIniValue val)
+        protected override bool SetValue(ref MyIniValue val)
         {
             HasValue = true;
-            base.SetValue(ref val);
+            return base.SetValue(ref val);
         }
         protected override void SetDefault()
         {
@@ -132,15 +132,33 @@ class CustomTurretController
     Dictionary<IMyCubeGrid, IMyFunctionalBlock> _gridToToolDict = new Dictionary<IMyCubeGrid, IMyFunctionalBlock>();
     long _updateCount = 0;
 
-    bool _wasActive = false;
     bool _wasShooting = false;
     bool _wasManuallyControlled = false;
-    bool _shouldRest = false;
     MyIni _ini = new MyIni();
     float _idleTime = 0f;
+    float _cachedElevationBrakingTorque = 0;
 
     const float RestSpeed = 10f;
     const float PlayerInputMultiplier = 1f/50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
+
+    enum ControlState
+    {
+        ManualControl,
+        AiControl,
+        WaitForRest,
+        MoveToRest,
+        Idle
+    }
+
+    enum AiTargetingState
+    {
+        Idle,
+        BothRotors,
+        AzimuthOnly,
+    }
+
+    StateMachine _rotorControlSM = new StateMachine();
+    StateMachine _aiControlSM = new StateMachine();
 
     enum ReturnCode
     {
@@ -156,6 +174,8 @@ class CustomTurretController
         MissingToolAndCamera = MissingTools | MissingCamera,
     }
     ReturnCode _setupReturnCode = ReturnCode.None;
+
+    ControlState _lastState = ControlState.Idle;
 
     public bool IsManuallyControlled
     {
@@ -175,6 +195,18 @@ class CustomTurretController
 
     public CustomTurretController(Program p, IMyBlockGroup group)
     {
+        _rotorControlSM.AddState(new State(ControlState.ManualControl, onUpdate: OnUpdateManualControl));
+        _rotorControlSM.AddState(new State(ControlState.AiControl, onUpdate: OnUpdateAiControl, onEnter: OnEnterAiControl, onLeave: OnAiControlBothRotors));
+        _rotorControlSM.AddState(new State(ControlState.WaitForRest, onUpdate: OnUpdateRestWait, onEnter: OnEnterRestWait));
+        _rotorControlSM.AddState(new State(ControlState.MoveToRest, onUpdate: OnUpdateMoveToRest));
+        _rotorControlSM.AddState(new State(ControlState.Idle, onEnter: ResetRotors));
+        _rotorControlSM.Initialize(ControlState.MoveToRest);
+
+        _aiControlSM.AddState(new State(AiTargetingState.Idle));
+        _aiControlSM.AddState(new State(AiTargetingState.BothRotors, onEnter: OnAiControlBothRotors));
+        _aiControlSM.AddState(new State(AiTargetingState.AzimuthOnly, onEnter: OnAiControlAzimuthOnly));
+        _aiControlSM.Initialize(AiTargetingState.Idle);
+
         _rotorConfig = new IConfigValue[]
         {
             _restAngle,
@@ -186,13 +218,18 @@ class CustomTurretController
         _groupName = group.Name;
         Setup();
         SetBlocks();
+
+        if (_elevationStabilizer.Rotor != null)
+        {
+            _cachedElevationBrakingTorque = _elevationStabilizer.Rotor.BrakingTorque;
+        }
     }
 
     public void GoToRest()
     {
-        if (_controller != null && !IsActive)
+        if (_p.AutomaticRest && _controller != null && !IsActive)
         {
-            _shouldRest = true;
+            _rotorControlSM.SetState(ControlState.MoveToRest);
         }
     }
 
@@ -208,59 +245,165 @@ class CustomTurretController
     }
 
     static float MouseInputToRotorVelocityRpm(float input, float multiplierRpm, IMyMotorStator rotor)
-    {   
+    {
         return input * PlayerInputMultiplier * multiplierRpm * GetRotorMultiplier(rotor);
     }
 
-    public void Update1()
+    #region Rotor Control State Machine
+    void ResetRotors()
     {
-
-        if (IsManuallyControlled)
+        if (BlockValid(_azimuthStabilizer.Rotor))
         {
-            if (_stabilizeAzimuth) 
-            { 
+            _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
+            _azimuthStabilizer.Rotor.TargetVelocityRad = 0;
+        }
+
+        if (BlockValid(_elevationStabilizer.Rotor))
+        {
+            _controller.ElevationRotor = _elevationStabilizer.Rotor;
+            _elevationStabilizer.Rotor.TargetVelocityRad = 0;
+        }
+
+        foreach (var r in _extraRotors)
+        {
+            r.TargetVelocityRad = 0f;
+        }
+    }
+
+    void OnUpdateManualControl()
+    {
+        _controller.AzimuthRotor = null;
+        if (BlockValid(_azimuthStabilizer.Rotor))
+        {
+            if (_stabilizeAzimuth)
+            {
                 _azimuthStabilizer.Update(1f / 60f);
             }
-            _controller.AzimuthRotor = null;
-            if (BlockValid(_azimuthStabilizer.Rotor))
-            {
-                _azimuthStabilizer.Rotor.TargetVelocityRPM =
-                    MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
-                    (_stabilizeAzimuth && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
-            }
+            _azimuthStabilizer.Rotor.TargetVelocityRPM =
+                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
+                (_stabilizeAzimuth && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
+        }
 
-            _controller.ElevationRotor = null;
-            if (BlockValid(_elevationStabilizer.Rotor))
+        _controller.ElevationRotor = null;
+        if (BlockValid(_elevationStabilizer.Rotor))
+        {
+            if (_stabilizeElevation)
             {
-                if (_stabilizeElevation)
-                {
-                    _elevationStabilizer.Update(1f / 60f);
-                }
-                _elevationStabilizer.Rotor.TargetVelocityRPM =
-                    MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
-                    (_stabilizeElevation && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
+                _elevationStabilizer.Update(1f / 60f);
             }
-            _wasManuallyControlled = true;
+            _elevationStabilizer.Rotor.TargetVelocityRPM =
+                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
+                (_stabilizeElevation && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
+        }
+
+        _wasManuallyControlled = true;
+    }
+
+    void OnEnterAiControl()
+    {
+        ResetRotors();
+        _aiControlSM.SetState(AiTargetingState.Idle);
+    }
+
+    void OnUpdateAiControl()
+    {
+        MyDetectedEntityInfo info = _controller.GetTargetedEntity();
+        if (info.IsEmpty() || !info.HitPosition.HasValue)
+        {
+            return;
+        }
+
+        IMyTerminalBlock aimRef = _controller.GetDirectionSource();
+        if (aimRef == null)
+        {
+            return;
+        }
+
+        Vector3D aimDirection = aimRef.WorldMatrix.Forward;
+        Vector3D targetDirection = info.HitPosition.Value - aimRef.WorldMatrix.Translation;
+        double cosBtwn = VectorMath.CosBetween(aimDirection, targetDirection);
+        if (cosBtwn > 0.7071)
+        {
+            _aiControlSM.SetState(AiTargetingState.BothRotors);
         }
         else
         {
-            if (_wasManuallyControlled)
-            {
-                if (BlockValid(_azimuthStabilizer.Rotor))
-                {
-                    _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
-                    _azimuthStabilizer.Rotor.TargetVelocityRad = 0;
-                }
-                if (BlockValid(_elevationStabilizer.Rotor))
-                {
-                    _controller.ElevationRotor = _elevationStabilizer.Rotor;
-                    _elevationStabilizer.Rotor.TargetVelocityRad = 0;
-                }
-            }
+            _aiControlSM.SetState(AiTargetingState.AzimuthOnly);
+        }
+    }
+    
+    void OnAiControlBothRotors()
+    {
+        if (BlockValid(_elevationStabilizer.Rotor))
+        {
+            _elevationStabilizer.Rotor.BrakingTorque = _cachedElevationBrakingTorque;
+            _elevationStabilizer.Rotor.Enabled = true;
+        }
+    }
 
-            _wasManuallyControlled = false;
+    void OnAiControlAzimuthOnly()
+    {
+        if (BlockValid(_elevationStabilizer.Rotor))
+        {
+            _elevationStabilizer.Rotor.BrakingTorque = _elevationStabilizer.Rotor.Torque;
+            _elevationStabilizer.Rotor.Enabled = false;
+        }
+    }
+
+    void OnEnterRestWait()
+    {
+        ResetRotors();
+        _idleTime = 0f;
+    }
+
+    void OnUpdateRestWait()
+    {
+        _idleTime += (1f / 6f);
+        if (_idleTime >= _p.AutomaticRestDelay)
+        {
+            _rotorControlSM.SetState(ControlState.MoveToRest);
+        }
+    }
+
+    void OnUpdateMoveToRest()
+    {
+        bool done = HandleAzimuthAndElevationRestAngles();
+        if (done)
+        {
+            _rotorControlSM.SetState(ControlState.Idle);
+        }
+    }
+    #endregion
+
+    public void Update1()
+    {
+        if (_controller == null)
+        {
+            return;
         }
 
+        if (IsManuallyControlled)
+        {
+            _rotorControlSM.SetState(ControlState.ManualControl);
+        }
+        else if (IsActive)
+        {
+            _rotorControlSM.SetState(ControlState.AiControl);
+        }
+        else if (_lastState == ControlState.ManualControl || _lastState == ControlState.AiControl)
+        {
+            if (_p.AutomaticRest)
+            {
+                _rotorControlSM.SetState(ControlState.WaitForRest);
+            }
+            else
+            {
+                _rotorControlSM.SetState(ControlState.Idle);
+            }
+        }
+
+        _rotorControlSM.Update();
+        _lastState = (ControlState)_rotorControlSM.StateId;
     }
 
     public void Update10()
@@ -279,73 +422,34 @@ class CustomTurretController
 
         Update1();
 
-        if (IsActive)
-        {
-            _idleTime = 0f;
-
-            if (_shouldRest)
-            {
-                if (BlockValid(_azimuthStabilizer.Rotor))
-                {
-                    _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
-                    _azimuthStabilizer.Rotor.TargetVelocityRad = 0;
-                }
-                if (BlockValid(_elevationStabilizer.Rotor))
-                {
-                    _controller.ElevationRotor = _elevationStabilizer.Rotor;
-                    _elevationStabilizer.Rotor.TargetVelocityRad = 0;
-                }
-                _shouldRest = false;
-            }
-        }
-        else
-        {
-            _idleTime += (1f / 6f);
-            if (_wasActive)
-            {
-                foreach (var r in _extraRotors)
-                {
-                    r.TargetVelocityRad = 0f;
-                }
-            }
-            if (_p.AutomaticRest && _idleTime >= _p.AutomaticRestDelay)
-            {
-                _shouldRest = true;
-            }
-        }
-
-        if (_shouldRest)
-        {
-            bool done = HandleAzimuthAndElevationRestAngles();
-            HandleExtraRotors();
-            _shouldRest = !done;
-        }
-        else if (_extraRotors.Count > 0)
+        if (_extraRotors.Count > 0)
         {
             HandleExtraRotors();
-            bool shouldShoot = IsShooting();
-            if (shouldShoot != _wasShooting)
-            {
-                foreach (var t in _otherTools)
-                {
-                    var tool = t as IMyShipToolBase;
-                    if (tool != null)
-                    {
-                        tool.Enabled = shouldShoot;
-                    }
+            SyncWeaponFiring();
+        }
+    }
 
-                    var gun = t as IMyUserControllableGun;
-                    if (gun != null)
-                    {
-                        gun.Shoot = shouldShoot;
-                    }
+    void SyncWeaponFiring()
+    {
+        bool shouldShoot = IsShooting();
+        if (shouldShoot != _wasShooting)
+        {
+            foreach (var t in _otherTools)
+            {
+                var tool = t as IMyShipToolBase;
+                if (tool != null)
+                {
+                    tool.Enabled = shouldShoot;
+                }
+
+                var gun = t as IMyUserControllableGun;
+                if (gun != null)
+                {
+                    gun.Shoot = shouldShoot;
                 }
             }
-            _wasShooting = shouldShoot;
         }
-
-
-        _wasActive = IsActive;
+        _wasShooting = shouldShoot;
     }
 
     #region Setup
@@ -492,7 +596,9 @@ class CustomTurretController
 
     bool BlockValid(IMyTerminalBlock b)
     {
-        return (b != null) && !b.Closed;
+        IMyMotorStator r = b as IMyMotorStator;
+        if (r != null && r.TopGrid == null) return false;
+        return (b != null) &&  _p.Me.IsSameConstructAs(b);
     }
 
     void SetBlocks()
@@ -513,7 +619,7 @@ class CustomTurretController
                 }
             }
         }
-        if (!_shouldRest)
+        if ((ControlState)_rotorControlSM.StateId != ControlState.MoveToRest)
         {
             if (BlockValid(_azimuthStabilizer.Rotor))
             {
@@ -710,7 +816,7 @@ class CustomTurretController
         {
             return;
         }
-        
+
         var directionSource = _controller.GetDirectionSource();
         if (directionSource == null)
         {
@@ -1342,17 +1448,27 @@ static class BlueScreenOfDeath
 public interface IConfigValue
 {
     void WriteToIni(MyIni ini);
-    void ReadFromIni(MyIni ini);
-    void Update(MyIni ini);
+    bool ReadFromIni(MyIni ini);
+    bool Update(MyIni ini);
 }
 
 public abstract class ConfigValue<T> : IConfigValue
 {
-    public T Value;
-    public string Section { get; set; }
-    public string Name { get; set; }
-    T DefaultValue { get; }
+    public string Section;
+    public string Name;
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
     readonly string _comment;
+    bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
     {
@@ -1363,8 +1479,8 @@ public abstract class ConfigValue<T> : IConfigValue
     {
         Section = section;
         Name = name;
-        Value = defaultValue;
-        DefaultValue = defaultValue;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
         _comment = comment;
     }
 
@@ -1373,10 +1489,31 @@ public abstract class ConfigValue<T> : IConfigValue
         return Value.ToString();
     }
 
-    public void Update(MyIni ini)
+    public bool Update(MyIni ini)
     {
-        ReadFromIni(ini);
+        bool read = ReadFromIni(ini);
         WriteToIni(ini);
+        return read;
+    }
+
+    public bool ReadFromIni(MyIni ini)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(Section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
     }
 
     public void WriteToIni(MyIni ini)
@@ -1386,45 +1523,63 @@ public abstract class ConfigValue<T> : IConfigValue
         {
             ini.SetComment(Section, Name, _comment);
         }
+        _skipRead = false;
     }
 
-    protected abstract void SetValue(ref MyIniValue val);
-
-    protected virtual void SetDefault() 
+    public void Reset()
     {
-        Value = DefaultValue;
+        SetDefault();
+        _skipRead = false;
     }
 
-    public void ReadFromIni(MyIni ini)
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
     {
-        MyIniValue val = ini.Get(Section, Name);
-        if (!val.IsEmpty)
-        {
-            SetValue(ref val);
-        }
-        else
-        {
-            SetDefault();
-        }
+        _value = _defaultValue;
     }
 }
 
 public class ConfigString : ConfigValue<string>
 {
     public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetString(out Value)) SetDefault(); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class ConfigBool : ConfigValue<bool>
 {
     public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetBoolean(out Value)) SetDefault(); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class ConfigFloat : ConfigValue<float>
 {
     public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetSingle(out Value)) SetDefault(); }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetSingle(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
 }
 
 public class StabilizedRotor
@@ -1479,6 +1634,101 @@ public class StabilizedRotor
             _lastOrientation = Rotor.WorldMatrix.GetOrientation();
         }
         return Velocity;
+    }
+}
+
+public class StateMachine
+{
+    public Enum StateId
+    {
+        get
+        {
+            return State.Id;
+        }
+    }
+    public IState State { get; private set; } = null;
+
+    Dictionary<Enum, IState> _states = new Dictionary<Enum, IState>();
+    bool _initialized = false;
+
+    public void AddStates(params IState[] states)
+    {
+        foreach (IState state in states)
+        {
+            AddState(state);
+        }
+    }
+
+    public void AddState(IState state)
+    {
+        if (_initialized)
+        {
+            throw new InvalidOperationException("StateMachine.AddState can not be called after initialization");
+        }
+        bool uniqueState = !_states.ContainsKey(state.Id);
+        if (uniqueState)
+        {
+            _states[state.Id] = state;
+        }
+        else
+        {
+            throw new ArgumentException($"Input state does not have a unique id (id: {state.Id})");
+        }
+    }
+
+    public bool SetState(Enum stateID)
+    {
+        IState oldState = State;
+        IState newState;
+        bool validState = _states.TryGetValue(stateID, out newState) && (oldState == null || oldState.Id != newState.Id);
+        if (validState)
+        {
+            oldState?.OnLeave?.Invoke();
+            newState?.OnEnter?.Invoke();
+            State = newState;
+        }
+        return validState;
+    }
+
+    public void Initialize(Enum stateId)
+    {
+        _initialized = SetState(stateId);
+        if (!_initialized)
+        {
+            throw new ArgumentException($"stateId {stateId} does not correspond to any registered state");
+        }
+    }
+
+    public void Update()
+    {
+        if (!_initialized)
+        {
+            throw new Exception($"StateMachine has not been initialized");
+        }
+        State?.OnUpdate?.Invoke();
+    }
+}
+
+public interface IState
+{
+    Enum Id { get; }
+    Action OnUpdate { get; }
+    Action OnEnter { get; }
+    Action OnLeave { get; }
+}
+
+class State : IState
+{
+    public Enum Id { get; }
+    public Action OnUpdate { get; }
+    public Action OnEnter { get; }
+    public Action OnLeave { get; }
+    public State(Enum id, Action onUpdate = null, Action onEnter = null, Action onLeave = null)
+    {
+        Id = id;
+        OnUpdate = onUpdate;
+        OnEnter = onEnter;
+        OnLeave = onLeave;
     }
 }
 
