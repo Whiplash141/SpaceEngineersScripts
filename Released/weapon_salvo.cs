@@ -106,8 +106,8 @@ If you have any questions feel free to post them on the workshop page!
 //=================================================
 
 #region DONT FREAKING TOUCH THESE
-const string VERSION = "45.1.5";
-const string DATE = "2023/07/02";
+const string VERSION = "45.1.6";
+const string DATE = "2023/07/03";
 #endregion
 
 string _salvoGroupNameTag = "Salvo Group";
@@ -632,7 +632,7 @@ class WeaponSalvoGroup
         
         if (weaponToFire.Weapon.Closed)
         {
-            _weapons.RemoveAt(_weaponCount);
+            _weapons.Remove(weaponToFire);
         }
         else if (!weaponToFire.Weapon.IsFunctional)
         {
