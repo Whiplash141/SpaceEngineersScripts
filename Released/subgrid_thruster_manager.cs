@@ -1,3 +1,5 @@
+
+#region Subgrid Thrust
 /*   
 / //// / Whip's Subgrid Thruster Manager / //// /  
 ________________________________________________  
@@ -43,8 +45,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.2.2";
-const string DATE = "2023/04/18";
+const string VERSION = "42.3.0";
+const string DATE = "2023/07/05";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -305,9 +307,12 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
         {
             continue;
         }
-        if (grid != t.CubeGrid && !t.CustomName.Contains(ignoredThrustNameTag))
+        if (grid != t.CubeGrid)
         {
-            offGridList.Add(t);
+            if (!t.CustomName.Contains(ignoredThrustNameTag))
+            {
+                offGridList.Add(t);
+            }
         }
         else
         {
@@ -406,44 +411,6 @@ void GrabBlocks()
     {
         referenceList = unnamedReferences;
     }
-}
-
-IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastControlled = null)
-{
-    /*
-    Priority:
-    1. Main controller
-    2. Oldest controlled ship controller
-    */
-    IMyShipController firstControlled = null;
-    foreach (IMyShipController ctrl in controllers)
-    {
-        if (ctrl.IsMainCockpit)
-        {
-            return ctrl;
-        }
-
-        if (ctrl.IsUnderControl && ctrl.CanControlShip)
-        {
-            // Grab the first seat that has a player sitting in it
-            // and save it away in-case we don't have a main contoller
-            if (firstControlled == null)
-            {
-                firstControlled = ctrl;
-            }
-        }
-    }
-    
-    // We did not find a main controller, so if the first controlled controller
-    // from last cycle if it is still controlled
-    if (lastControlled != null && (lastControlled.IsUnderControl && lastControlled.CanControlShip))
-    {
-        return lastControlled;
-    }
-
-    // Otherwise we return the first ship controller that we 
-    // found that was controlled.
-    return firstControlled;
 }
 
 List<IMyThrust> upwardThrusters = new List<IMyThrust>();
@@ -582,209 +549,6 @@ float GetThrusterOverride(IMyThrust thruster)
 {
     return thruster.ThrustOverridePercentage * 100f;
 }
-
-#region Scheduler
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
-public class Scheduler
-{
-    public double CurrentTimeSinceLastRun = 0;
-    
-    ScheduledAction _currentlyQueuedAction = null;
-    bool _firstRun = true;
-    bool _inUpdate = false;
-    
-    readonly bool _ignoreFirstRun;
-    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
-    readonly Program _program;
-    
-    const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
-
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
-    public Scheduler(Program program, bool ignoreFirstRun = false)
-    {
-        _program = program;
-        _ignoreFirstRun = ignoreFirstRun;
-    }
-
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
-    public void Update()
-    {
-        _inUpdate = true;
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * RUNTIME_TO_REALTIME);
-        
-        if (_ignoreFirstRun && _firstRun)
-            deltaTime = 0;
-
-        _firstRun = false;
-        _actionsToDispose.Clear();
-        foreach (ScheduledAction action in _scheduledActions)
-        {
-            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTime;
-            action.Update(deltaTime);
-            if (action.JustRan && action.DisposeAfterRun)
-            {
-                _actionsToDispose.Add(action);
-            }
-        }
-
-        // Remove all actions that we should dispose
-        _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
-
-        if (_currentlyQueuedAction == null)
-        {
-            // If queue is not empty, populate current queued action
-            if (_queuedActions.Count != 0)
-                _currentlyQueuedAction = _queuedActions.Dequeue();
-        }
-
-        // If queued action is populated
-        if (_currentlyQueuedAction != null)
-        {
-            _currentlyQueuedAction.Update(deltaTime);
-            if (_currentlyQueuedAction.JustRan)
-            {
-                // Set the queued action to null for the next cycle
-                _currentlyQueuedAction = null;
-            }
-        }
-        _inUpdate = false;
-        
-        if (_actionsToAdd.Count > 0)
-        {
-            _scheduledActions.AddRange(_actionsToAdd);
-            _actionsToAdd.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
-    {
-        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(ScheduledAction scheduledAction)
-    {
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
-    {
-        if (updateInterval <= 0)
-        {
-            updateInterval = 0.001; // avoids divide by zero
-        }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, true);
-        _queuedActions.Enqueue(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
-    {
-        _queuedActions.Enqueue(scheduledAction);
-    }
-}
-
-public class ScheduledAction
-{
-    public bool JustRan { get; private set; } = false;
-    public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public double RunInterval
-    {
-        get
-        {
-            return _runInterval;
-        }
-        set
-        {
-            if (value == _runInterval)
-                return;
-
-            _runInterval = value < Epsilon ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : 1.0 / _runInterval;
-        }
-    }
-    public double RunFrequency
-    {
-        get
-        {
-            return _runFrequency;
-        }
-        set
-        {
-            if (value == _runFrequency)
-                return;
-
-            if (value == 0)
-                RunInterval = double.MaxValue;
-            else
-                RunInterval = 1.0 / value;
-        }
-    }
-
-    double _runInterval = -1e9;
-    double _runFrequency = -1e9;
-    readonly Action _action;
-
-    const double Epsilon = 1e-12;
-
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
-    public ScheduledAction(Action action, double runFrequency = 0, bool removeAfterRun = false, double timeOffset = 0)
-    {
-        _action = action;
-        RunFrequency = runFrequency; // Implicitly sets RunInterval
-        DisposeAfterRun = removeAfterRun;
-        TimeSinceLastRun = timeOffset;
-    }
-
-    public void Update(double deltaTime)
-    {
-        TimeSinceLastRun += deltaTime;
-
-        if (TimeSinceLastRun + Epsilon >= RunInterval)
-        {
-            _action.Invoke();
-            TimeSinceLastRun = 0;
-
-            JustRan = true;
-        }
-        else
-        {
-            JustRan = false;
-        }
-    }
-}
-#endregion
 
 #region Screen Manager
 class SubgridThrustScreenManager
@@ -957,5 +721,288 @@ class SubgridThrustScreenManager
     }
 
     #endregion
+}
+#endregion
+#endregion
+
+#region INCLUDES
+
+#region Scheduler
+/// <summary>
+/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
+/// </summary>
+public class Scheduler
+{
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
+    QueuedAction _currentlyQueuedAction = null;
+    bool _firstRun = true;
+    bool _inUpdate = false;
+
+    readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
+    readonly Program _program;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
+
+    /// <summary>
+    /// Constructs a scheduler object with timing based on the runtime of the input program.
+    /// </summary>
+    public Scheduler(Program program, bool ignoreFirstRun = false)
+    {
+        _program = program;
+        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Updates all ScheduledAcions in the schedule and the queue.
+    /// </summary>
+    public void Update()
+    {
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
+
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
+        _actionsToDispose.Clear();
+        foreach (ScheduledAction action in _scheduledActions)
+        {
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
+            if (action.JustRan && action.DisposeAfterRun)
+            {
+                _actionsToDispose.Add(action);
+            }
+        }
+
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
+
+        if (_currentlyQueuedAction == null)
+        {
+            // If queue is not empty, populate current queued action
+            if (_queuedActions.Count != 0)
+                _currentlyQueuedAction = _queuedActions.Dequeue();
+        }
+
+        // If queued action is populated
+        if (_currentlyQueuedAction != null)
+        {
+            _currentlyQueuedAction.Update(deltaTicks);
+            if (_currentlyQueuedAction.JustRan)
+            {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
+                // Set the queued action to null for the next cycle
+                _currentlyQueuedAction = null;
+            }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Adds an Action to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
+    {
+        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(ScheduledAction scheduledAction)
+    {
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds an Action to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
+    {
+        if (updateInterval <= 0)
+        {
+            updateInterval = 0.001; // avoids divide by zero
+        }
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
+        _queuedActions.Enqueue(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(QueuedAction scheduledAction)
+    {
+        _queuedActions.Enqueue(scheduledAction);
+    }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
+}
+
+public class ScheduledAction
+{
+    public bool JustRan { get; private set; } = false;
+    public bool DisposeAfterRun { get; private set; } = false;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
+
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
+    readonly Action _action;
+
+    /// <summary>
+    /// Class for scheduling an action to occur at a specified frequency (in Hz).
+    /// </summary>
+    /// <param name="action">Action to run</param>
+    /// <param name="runFrequency">How often to run in Hz</param>
+    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
+    {
+        _action = action;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
+        DisposeAfterRun = removeAfterRun;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
+    }
+
+    public void Update(long deltaTicks)
+    {
+        TicksSinceLastRun += deltaTicks;
+
+        if (TicksSinceLastRun >= RunIntervalTicks)
+        {
+            _action.Invoke();
+            TicksSinceLastRun = 0;
+
+            JustRan = true;
+        }
+        else
+        {
+            JustRan = false;
+        }
+    }
+}
+#endregion
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
 }
 #endregion
