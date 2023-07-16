@@ -45,7 +45,7 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.3.2";
+const string VERSION = "42.3.3";
 const string DATE = "2023/07/16";
 
 //-----------------------------------------------
@@ -54,6 +54,8 @@ const string DATE = "2023/07/16";
 
 const string
     IniSectionGeneral = "Subgrid Thruster Config",
+    IniSectionThrust = "Subgrid Thruster Info",
+    IniKeyControlled = "Controlled",
 
     IniKeyDetectOverConnectors = "Detect blocks over connectors",
     IniKeyControlSeatNameTag = "Control seat name tag",
@@ -306,17 +308,30 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
             continue;
         }
 
+        _ini.Clear();
+        _ini.TryParse(t.CustomData);
+
         if (grid != t.CubeGrid)
         {
             if (!t.CustomName.Contains(ignoredThrustNameTag))
             {
                 offGridList.Add(t);
+                if (!_ini.ContainsSection(IniSectionThrust))
+                {
+                    _ini.Set(IniSectionThrust, IniKeyControlled, true);
+                    t.CustomData = _ini.ToString();
+                }
             }
         }
         else
         {
             onGridList.Add(t);
-            t.ThrustOverridePercentage = 0f;
+            if (_ini.ContainsSection(IniSectionThrust))
+            {
+                t.ThrustOverridePercentage = 0f;
+                _ini.Delete(IniSectionThrust, IniKeyControlled);
+                t.CustomData = _ini.ToString();
+            }
         }
     }
     lastCubeGridId = grid.EntityId;
