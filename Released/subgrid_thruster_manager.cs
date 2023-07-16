@@ -45,7 +45,7 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.3.3";
+const string VERSION = "42.3.4";
 const string DATE = "2023/07/16";
 
 //-----------------------------------------------
@@ -329,7 +329,7 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
             if (_ini.ContainsSection(IniSectionThrust))
             {
                 t.ThrustOverridePercentage = 0f;
-                _ini.Delete(IniSectionThrust, IniKeyControlled);
+                _ini.DeleteSection(IniSectionThrust);
                 t.CustomData = _ini.ToString();
             }
         }
