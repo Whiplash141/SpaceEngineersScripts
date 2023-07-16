@@ -45,8 +45,8 @@ Author's Notes
 - Whiplash141   
 */
 
-const string VERSION = "42.3.0";
-const string DATE = "2023/07/05";
+const string VERSION = "42.3.2";
+const string DATE = "2023/07/16";
 
 //-----------------------------------------------
 //         CONFIGURABLE VARIABLES
@@ -254,11 +254,9 @@ void HandleSubgridThrust()
     thisReferenceBlock = GetControlledShipController(referenceList, lastReference);
     if (thisReferenceBlock == null)
     {
-        if (lastReference != null)
-            thisReferenceBlock = lastReference;
-        else
-            thisReferenceBlock = referenceList[0];
+        thisReferenceBlock = referenceList[0];
     }
+    lastReference = thisReferenceBlock;
     
     GetOffGridThrust(thisReferenceBlock.CubeGrid, allThrust, offGridThrust, onGridThrust);
 
@@ -303,10 +301,11 @@ void GetOffGridThrust(IMyCubeGrid grid, List<IMyThrust> sourceList, List<IMyThru
     onGridList.Clear();
     foreach (var t in sourceList)
     {
-        if (!GridTerminalSystem.CanAccess(t))
+        if (!GridTerminalSystem.CanAccess(t) || !t.IsFunctional)
         {
             continue;
         }
+
         if (grid != t.CubeGrid)
         {
             if (!t.CustomName.Contains(ignoredThrustNameTag))
