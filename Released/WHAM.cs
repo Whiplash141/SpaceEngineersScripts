@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.8.6";
-const string Date = "2023/03/20";
+const string Version = "170.12.3";
+const string Date = "2023/08/07";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -88,9 +88,7 @@ double
     _timeTotal = 0,
     _timeSinceLastIngest = 0;
 
-int
-    _setupTicks = 0,
-    _missileStage = 0;
+int _setupTicks = 0;
 
 bool
     _shouldFire = false,
@@ -112,7 +110,7 @@ bool
     _retask = false;
 
 #region Meme Mode Stuff
-enum AntennaNameMode { Meme, Empty, MissileName, MissileStatus };
+enum AntennaNameMode { Meme, Empty, Custom, MissileName, MissileStatus };
 
 int _memeIndex;
 string[] _antennaMemeMessages = new string[]
@@ -234,14 +232,15 @@ DynamicCircularBuffer<IMyCameraBlock>
 ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
 List<MyTuple<Vector3D, long>> _remoteFireRequests = new List<MyTuple<Vector3D, long>>();
 
-HashSet<long> _savedKeycodes = new HashSet<long>();
+long _senderKeycode = 0;
 
 IMyShipController _missileReference = null;
 
 enum PostSetupAction { None = 0, Fire = 1, FireRequestResponse = 2 };
 PostSetupAction _postSetupAction = PostSetupAction.None;
 
-const int MAX_INSTRUCTIONS_PER_SETUP_RUN = 5000;
+const int MaxInstructionsPerRun = 5000;
+const double Tick = 1.0 / 60.0;
 
 const double
     UpdatesPerSecond = 10.0,
@@ -250,7 +249,7 @@ const double
     RpmToRad = Math.PI / 30,
     TopdownDescentAngle = Math.PI / 6,
     MaxGuidanceTime = 180,
-    RuntimeToRealtime = (1.0 / 60.0) / 0.0166666,
+    RuntimeToRealtime = Tick / 0.0166666,
     GyroSlowdownAngle = Math.PI / 36;
 
 const float MinThrust = 1e-9f;
@@ -283,133 +282,177 @@ const string
     IgcTagRemoteFireRequest = "IGC_MSL_REM_REQ",
     IgcTagRemoteFireResponse = "IGC_MSL_REM_RSP",
     IgcTagRemoteFireNotification = "IGC_MSL_REM_NTF",
-    IgcTagregister = "IGC_MSL_REG_MSG",
-    IgcTagUnicast = "UNICAST";
-
-QueuedAction
-    _stage1Action,
-    _stage2Action,
-    _stage3Action,
-    _stage4Action;
+    IgcTagRegister = "IGC_MSL_REG_MSG",
+    IgcTagUnicast = "UNICAST",
+    IniSectionMisc = "Misc.",
+    IniCompatMemeMode = "Antenna meme mode";
 
 ScheduledAction
     _guidanceActivateAction,
     _randomHeadingVectorAction;
 
+enum LaunchStage { Idle = 0, Intiate = 1, Detach = 2, Drift = 3, Flight = 4 }
+StateMachine _launchSM = new StateMachine();
+LaunchState _initiateState, _detachState, _driftState;
+State _flightState;
+
+bool InFlight
+{
+    get
+    {
+        return (LaunchStage)_launchSM.StateId == LaunchStage.Flight;
+    }
+}
+
 #region Custom Data Ini
-readonly MyIni _myIni = new MyIni();
+MyIni _ini = new MyIni();
 
-const string
-    IniSectionNames = "Names",
-    IniSectionDelays = "Delays",
-    IniSectionGyro = "Gyros",
-    IniSectionHoming = "Homing Parameters",
-    IniSectionBeamRide = "Beam Riding Parameters",
-    IniSectionEvasion = "Evasion Parameters",
-    IniSectionSpiral = "Spiral Parameters",
-    IniSectionRandom = "Random Fligh Path Parameters",
-    IniSectionRaycast = "Raycast/Sensors",
-    IniSectionMisc = "Misc.",
-    IniCompatMemeMode = "Antenna meme mode";
+ConfigSection _namesConfig = new ConfigSection("Names");
+ConfigBool _autoConfigure = new ConfigBool("Auto-configure missile name", true);
+ConfigString _missileTag = new ConfigString("Missile name tag", "Missile");
+ConfigInt _missileNumber = new ConfigInt("Missile number", 1);
+ConfigString _fireControlGroupNameTag = new ConfigString("Fire control group name", "Fire Control");
+ConfigString _detachThrustTag = new ConfigString("Detach thruster name tag", "Detach");
 
-ConfigBool _autoConfigure = new ConfigBool(IniSectionNames, "Auto-configure missile name", true);
-ConfigString _missileTag = new ConfigString(IniSectionNames, "Missile name tag", "Missile");
-ConfigInt _missileNumber = new ConfigInt(IniSectionNames, "Missile number", 1);
-ConfigString _fireControlGroupNameTag = new ConfigString(IniSectionNames, "Fire control group name", "Fire Control");
-ConfigString _detachThrustTag = new ConfigString(IniSectionNames, "Detach thruster name tag", "Detach");
+ConfigSection _delaysConfig = new ConfigSection("Delays");
+ConfigDouble
+    _guidanceDelay = new ConfigDouble("Guidance delay (s)", 1),
+    _disconnectDelay = new ConfigDouble("Stage 1: Disconnect delay (s)", 0),
+    _detachDuration = new ConfigDouble("Stage 2: Detach duration (s)", 0),
+    _mainIgnitionDelay = new ConfigDouble("Stage 3: Main ignition delay (s)", 0);
 
-ConfigDouble _disconnectDelay = new ConfigDouble(IniSectionDelays, "Stage 1: Disconnect delay (s)", 0);
-ConfigDouble _guidanceDelay = new ConfigDouble(IniSectionDelays, "Guidance delay (s)", 1);
-ConfigDouble _detachDuration = new ConfigDouble(IniSectionDelays, "Stage 2: Detach duration (s)", 0);
-ConfigDouble _mainIgnitionDelay = new ConfigDouble(IniSectionDelays, "Stage 3: Main ignition delay (s)", 0);
+ConfigSection _gyrosConfig = new ConfigSection("Gyros");
+ConfigDouble
+    _gyroProportionalGain = new ConfigDouble("Proportional gain", 10),
+    _gyroIntegralGain = new ConfigDouble("Integral gain", 0),
+    _gyroDerivativeGain = new ConfigDouble("Derivative gain", 10);
 
-ConfigDouble _gyroProportionalGain = new ConfigDouble(IniSectionGyro, "Proportional gain", 10);
-ConfigDouble _gyroIntegralGain = new ConfigDouble(IniSectionGyro, "Integral gain", 0);
-ConfigDouble _gyroDerivativeGain = new ConfigDouble(IniSectionGyro, "Derivative gain", 10);
+ConfigSection _homingConfig = new ConfigSection("Homing Parameters");
+ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>("Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms:\n ProNav, WhipNav, HybridNav, ZeroEffortMiss");
+ConfigDouble
+    _navConstant = new ConfigDouble("Navigation constant", 3),
+    _accelNavConstant = new ConfigDouble("Acceleration constant", 1.5),
+    _maxAimDispersion = new ConfigDouble("Max aim dispersion (m)", 0),
+    _topDownAttackHeight = new ConfigDouble("Topdown attack height (m)", 1500);
 
-ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>(IniSectionHoming, "Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms: ProNav, WhipNav, HybridNav, ZeroEffortMiss");
-ConfigDouble _navConstant = new ConfigDouble(IniSectionHoming, "Navigation constant", 3);
-ConfigDouble _accelNavConstant = new ConfigDouble(IniSectionHoming, "Acceleration constant", 1.5);
-ConfigDouble _maxAimDispersion = new ConfigDouble(IniSectionHoming, "Max aim dispersion (m)", 0);
-ConfigDouble _topDownAttackHeight = new ConfigDouble(IniSectionHoming, "Topdown attack height (m)", 1500);
+ConfigSection _beamRideConfig = new ConfigSection("Beam Riding Parameters");
+ConfigDouble
+    _offsetUp = new ConfigDouble("Hit offset up (m)", 0),
+    _offsetLeft = new ConfigDouble("Hit offset left (m)", 0);
 
-ConfigDouble _offsetUp = new ConfigDouble(IniSectionBeamRide, "Hit offset up (m)", 0);
-ConfigDouble _offsetLeft = new ConfigDouble(IniSectionBeamRide, "Hit offset left (m)", 0);
+ConfigSection _evasionConfig = new ConfigSection("Evasion Parameters");
+ConfigDouble _missileSpinRPM = new ConfigDouble("Spin rate (RPM)", 0);
+ConfigBool
+    _evadeWithSpiral = new ConfigBool("Use spiral", false),
+    _evadeWithRandomizedHeading = new ConfigBool("Use random flight path", true, " AKA \"Drunken Missile Mode\"");
 
-ConfigDouble _missileSpinRPM = new ConfigDouble(IniSectionEvasion, "Spin rate (RPM)", 0);
-ConfigBool _evadeWithSpiral = new ConfigBool(IniSectionEvasion, "Use spiral", false);
-ConfigBool _evadeWithRandomizedHeading = new ConfigBool(IniSectionEvasion, "Use random flight path", true, " AKA \"Drunken Missile Mode\"");
+ConfigSection _spiralConfig = new ConfigSection("Spiral Parameters");
+ConfigDouble
+    _spiralDegrees = new ConfigDouble("Spiral angle (deg)", 15),
+    _timeMaxSpiral = new ConfigDouble("Spiral time (sec)", 3),
+    _spiralActivationRange = new ConfigDouble("Spiral activation range (m)", 1000);
 
-ConfigDouble _spiralDegrees = new ConfigDouble(IniSectionSpiral, "Spiral angle (deg)", 15);
-ConfigDouble _timeMaxSpiral = new ConfigDouble(IniSectionSpiral, "Spiral time (sec)", 3);
-ConfigDouble _spiralActivationRange = new ConfigDouble(IniSectionSpiral, "Spiral activation range (m)", 1000);
+ConfigSection _randomConfig = new ConfigSection("Random Fligh Path Parameters");
+ConfigDouble
+    _randomVectorInterval = new ConfigDouble("Direction change interval (sec)", 0.5),
+    _maxRandomAccelRatio = new ConfigDouble("Max acceleration ratio", 0.25);
 
-ConfigDouble _randomVectorInterval = new ConfigDouble(IniSectionRandom, "Direction change interval (sec)", 0.5);
-ConfigDouble _maxRandomAccelRatio = new ConfigDouble(IniSectionRandom, "Max acceleration ratio", 0.25);
+ConfigSection _raycastConfig = new ConfigSection("Raycast/Sensors");
+ConfigBool _useCamerasForHoming = new ConfigBool("Use cameras for homing", true);
+ConfigDouble
+    _raycastRange = new ConfigDouble("Tripwire range (m)", 0.25),
+    _raycastMinimumTargetSize = new ConfigDouble("Minimum target size (m)", 0),
+    _minimumArmingRange = new ConfigDouble("Minimum warhead arming range (m)", 100);
+ConfigBool
+    _raycastIgnoreFriends = new ConfigBool("Ignore friendlies", false),
+    _raycastIgnorePlanetSurface = new ConfigBool("Ignore planets", true),
+    _ignoreIdForDetonation = new ConfigBool("Ignore target ID for detonation", false);
 
-ConfigBool _useCamerasForHoming = new ConfigBool(IniSectionRaycast, "Use cameras for homing", true);
-ConfigDouble _raycastRange = new ConfigDouble(IniSectionRaycast, "Tripwire range (m)", 0.25);
-ConfigDouble _raycastMinimumTargetSize = new ConfigDouble(IniSectionRaycast, "Minimum target size (m)", 0);
-ConfigDouble _minimumArmingRange = new ConfigDouble(IniSectionRaycast, "Minimum warhead arming range (m)", 100);
-ConfigBool _raycastIgnoreFriends = new ConfigBool(IniSectionRaycast, "Ignore friendlies", false);
-ConfigBool _raycastIgnorePlanetSurface = new ConfigBool(IniSectionRaycast, "Ignore planets", true);
-ConfigBool _ignoreIdForDetonation = new ConfigBool(IniSectionRaycast, "Ignore target ID for detonation", false);
+ConfigSection _miscConfig = new ConfigSection(IniSectionMisc);
+ConfigBool
+    _allowRemoteFire = new ConfigBool("Allow remote firing", false),
+    _requireAntenna = new ConfigBool("Require antenna on missile", true,
+        " Recommended value is true.\n" +
+        " Setting this to false *will* result in degraded reliability\n" +
+        " and will prevent missiles from receiving mid-course corrections\n" +
+        " or commands from the firing ship.\n" +
+        " If remote fire is enabled, this will be forced to true.");
+ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>("Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes:\n Meme, Empty, Custom, MissileName, MissileStatus");
 
-ConfigBool _allowRemoteFire = new ConfigBool(IniSectionMisc, "Allow remote firing", false);
-ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>(IniSectionMisc, "Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes: Meme, Empty, MissileName, MissileStatus");
-
-IConfigValue[] _config;
+ConfigSection[] _config;
 
 void SetupConfig()
 {
-    _config = new IConfigValue[]
+    _config = new ConfigSection[]
     {
+        _namesConfig,
+        _delaysConfig,
+        _gyrosConfig,
+        _homingConfig,
+        _beamRideConfig,
+        _evasionConfig,
+        _spiralConfig,
+        _randomConfig,
+        _raycastConfig,
+        _miscConfig,
+    };
+
+    _namesConfig.AddValues(
         _autoConfigure,
         _missileTag,
         _missileNumber,
         _fireControlGroupNameTag,
-        _detachThrustTag,
+        _detachThrustTag);
 
-        _disconnectDelay,
+    _delaysConfig.AddValues(
         _guidanceDelay,
+        _disconnectDelay,
         _detachDuration,
-        _mainIgnitionDelay,
+        _mainIgnitionDelay);
 
+    _gyrosConfig.AddValues(
         _gyroProportionalGain,
         _gyroIntegralGain,
-        _gyroDerivativeGain,
+        _gyroDerivativeGain);
 
+    _homingConfig.AddValues(
         _guidanceAlgoType,
         _navConstant,
         _accelNavConstant,
         _maxAimDispersion,
-        _topDownAttackHeight,
+        _topDownAttackHeight);
 
+    _beamRideConfig.AddValues(
         _offsetUp,
-        _offsetLeft,
+        _offsetLeft);
 
+    _evasionConfig.AddValues(
         _missileSpinRPM,
         _evadeWithSpiral,
-        _evadeWithRandomizedHeading,
+        _evadeWithRandomizedHeading);
 
+    _spiralConfig.AddValues(
         _spiralDegrees,
         _timeMaxSpiral,
-        _spiralActivationRange,
+        _spiralActivationRange);
 
+    _randomConfig.AddValues(
         _randomVectorInterval,
-        _maxRandomAccelRatio,
+        _maxRandomAccelRatio);
 
+    _raycastConfig.AddValues(
         _useCamerasForHoming,
         _raycastRange,
         _raycastMinimumTargetSize,
         _minimumArmingRange,
         _raycastIgnoreFriends,
         _raycastIgnorePlanetSurface,
-        _ignoreIdForDetonation,
+        _ignoreIdForDetonation);
 
+    _miscConfig.AddValues(
         _allowRemoteFire,
         _antennaMode,
-    };
+        _requireAntenna);
 }
 #endregion
 
@@ -419,6 +462,7 @@ void SetupConfig()
 Program()
 {
     SetupConfig();
+    SetupLaunchStages();
 
     _memeIndex = RNGesus.Next(_antennaMemeMessages.Length);
 
@@ -429,17 +473,13 @@ Program()
     _broadcastListenerRemoteFire.SetMessageCallback(IgcTagRemoteFireRequest);
 
     _guidanceActivateAction = new ScheduledAction(ActivateGuidance, 0, true);
-    _stage1Action = new QueuedAction(MissileStage1, 0);
-    _stage2Action = new QueuedAction(MissileStage2, 0);
-    _stage3Action = new QueuedAction(MissileStage3, 0);
-    _stage4Action = new QueuedAction(MissileStage4, 0);
     _randomHeadingVectorAction = new ScheduledAction(ComputeRandomHeadingVector, 0, false);
-    _stage1Action.RunInterval = 0;
 
     // Scheduler assignment
     _scheduler = new Scheduler(this, true);
 
     // Setting up scheduled tasks
+    _scheduler.AddScheduledAction(_launchSM.Update, UpdatesPerSecond);
     _scheduler.AddScheduledAction(_guidanceActivateAction);
     _scheduler.AddScheduledAction(GuidanceNavAndControl, UpdatesPerSecond);
     _scheduler.AddScheduledAction(CheckProximity, UpdatesPerSecond);
@@ -448,10 +488,6 @@ Program()
     _scheduler.AddScheduledAction(_randomHeadingVectorAction);
 
     // Setting up sequential tasks
-    _scheduler.AddQueuedAction(_stage1Action);
-    _scheduler.AddQueuedAction(_stage2Action);
-    _scheduler.AddQueuedAction(_stage3Action);
-    _scheduler.AddQueuedAction(_stage4Action);
     _scheduler.AddQueuedAction(KillPower, MaxGuidanceTime);
 
     _runtimeTracker = new RuntimeTracker(this, 120, 0.005);
@@ -461,12 +497,12 @@ Program()
 
     // Populate guidance algos
     _guidanceAlgorithms = new Dictionary<GuidanceAlgoType, MissileGuidanceBase>()
-{
-    { GuidanceAlgoType.ProNav, new ProNavGuidance(UpdatesPerSecond, _navConstant) },
-    { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UpdatesPerSecond, _navConstant) },
-    { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UpdatesPerSecond, _navConstant) },
-    { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UpdatesPerSecond, _navConstant) },
-};
+    {
+        { GuidanceAlgoType.ProNav, new ProNavGuidance(UpdatesPerSecond, _navConstant) },
+        { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UpdatesPerSecond, _navConstant) },
+        { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UpdatesPerSecond, _navConstant) },
+        { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UpdatesPerSecond, _navConstant) },
+    };
 
     // Enable raycast spooling
     GridTerminalSystem.GetBlocksOfType<IMyCameraBlock>(null, camera =>
@@ -569,9 +605,9 @@ void PrintEcho()
 #region Ini Configuration
 void LoadIniConfig()
 {
-    _myIni.Clear();
+    _ini.Clear();
 
-    bool parsed = _myIni.TryParse(Me.CustomData);
+    bool parsed = _ini.TryParse(Me.CustomData);
     if (!parsed)
     {
         SaveIniConfig();
@@ -579,14 +615,19 @@ void LoadIniConfig()
         return;
     }
 
-    foreach (IConfigValue c in _config)
+    foreach (var c in _config)
     {
-        c.ReadFromIni(_myIni);
+        c.ReadFromIni(ref _ini);
+    }
+
+    if (_allowRemoteFire && !_requireAntenna)
+    {
+        _requireAntenna.Value = true;
     }
 
     // For backwards compat
     bool antennaMemeMode;
-    if (_myIni.Get(IniSectionMisc, IniCompatMemeMode).TryGetBoolean(out antennaMemeMode))
+    if (_ini.Get(IniSectionMisc, IniCompatMemeMode).TryGetBoolean(out antennaMemeMode))
     {
         _antennaMode.Value = antennaMemeMode ? AntennaNameMode.Meme : AntennaNameMode.Empty;
     }
@@ -596,26 +637,26 @@ void LoadIniConfig()
 
 void SaveIniConfig()
 {
-    _myIni.Clear();
+    _ini.Clear();
 
     _missileGroupNameTag = string.Format(MissileGroupPattern, _missileTag, _missileNumber);
     _missileNameTag = string.Format(MissileNamePattern, _missileTag, _missileNumber);
 
-    foreach (IConfigValue c in _config)
+    foreach (var c in _config)
     {
-        c.WriteToIni(_myIni);
+        c.WriteToIni(ref _ini);
     }
 
     _timeMaxSpiral.Value = Math.Max(_timeMaxSpiral, 0.1);
     _maxRandomAccelRatio.Value = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
 
     _guidanceActivateAction.RunInterval = _guidanceDelay;
-    _stage2Action.RunInterval = _disconnectDelay;
-    _stage3Action.RunInterval = _detachDuration;
-    _stage4Action.RunInterval = _mainIgnitionDelay;
     _randomHeadingVectorAction.RunInterval = _randomVectorInterval;
+    _initiateState.Duration = _disconnectDelay;
+    _detachState.Duration = _detachDuration;
+    _driftState.Duration = _mainIgnitionDelay;
 
-    Me.CustomData = _myIni.ToString();
+    Me.CustomData = _ini.ToString();
 }
 #endregion
 
@@ -705,19 +746,18 @@ void IgcMessageHandling(bool shouldFire)
         while (_unicastListener.HasPendingMessage)
         {
             MyIGCMessage message = _unicastListener.AcceptMessage();
-            object data = message.Data;
             if (message.Tag == IgcTagFire)
             {
                 fireCommanded = true;
-            }
-            else if (message.Tag == IgcTagregister)
-            {
-                if (data is long)
+                if (!remotelyFired && GridTerminalSystem.GetBlockWithId(message.Source) != null)
                 {
-                    long keycode = (long)data;
-                    _savedKeycodes.Add(keycode);
-                    remotelyFired = true;
+                    _senderKeycode = message.Source;
                 }
+            }
+            else if (message.Tag == IgcTagRegister)
+            {
+                _senderKeycode = message.Source;
+                remotelyFired = true;
             }
         }
 
@@ -738,16 +778,16 @@ void IgcMessageHandling(bool shouldFire)
         // Handle broadcast listeners
         while (_broadcastListenerParameters.HasPendingMessage)
         {
-            object messageData = _broadcastListenerParameters.AcceptMessage().Data;
+            MyIGCMessage message = _broadcastListenerParameters.AcceptMessage();
+            long keycode = message.Source; //payload.Item2;
+            if (_senderKeycode != keycode)
+                continue;
 
+            object messageData = message.Data;
             if (!(messageData is MyTuple<byte, long>))
                 continue;
 
             var payload = (MyTuple<byte, long>)messageData;
-            long keycode = payload.Item2;
-
-            if (!_savedKeycodes.Contains(keycode))
-                continue;
 
             byte packedBools = payload.Item1;
             if (_killAllowed && !_shouldKill)
@@ -767,8 +807,12 @@ void IgcMessageHandling(bool shouldFire)
 
         while (_broadcastListenerBeamRiding.HasPendingMessage)
         {
-            object messageData = _broadcastListenerBeamRiding.AcceptMessage().Data;
+            MyIGCMessage message = _broadcastListenerBeamRiding.AcceptMessage();
+            long keycode = message.Source; //payload.Item5;
+            if (_senderKeycode != keycode)
+                continue;
 
+            object messageData = message.Data;
             if (_guidanceMode == GuidanceMode.Active && !_retask)
                 continue;
 
@@ -776,9 +820,6 @@ void IgcMessageHandling(bool shouldFire)
                 continue;
 
             var payload = (MyTuple<Vector3, Vector3, Vector3, Vector3, long>)messageData;
-            long keycode = payload.Item5;
-            if (!_savedKeycodes.Contains(keycode))
-                continue;
 
             _retask = false;
             _shooterForwardVec = payload.Item1;
@@ -800,33 +841,54 @@ void IgcMessageHandling(bool shouldFire)
         /* Item5:      Key code */
         while (_broadcastListenerHoming.HasPendingMessage)
         {
-            object messageData = _broadcastListenerHoming.AcceptMessage().Data;
+            MyIGCMessage message = _broadcastListenerHoming.AcceptMessage();
+            long keycode = message.Source; //payload.Item5;
+            if (_senderKeycode != keycode)
+                continue;
 
+            object messageData = message.Data;
             if (!(messageData is MyTuple<Matrix3x3, Matrix3x3, float, long, long>))
                 continue;
 
             var payload = (MyTuple<Matrix3x3, Matrix3x3, float, long, long>)messageData;
-            long keycode = payload.Item5;
-            if (!_savedKeycodes.Contains(keycode))
-                continue;
 
             _shooterPosCached = payload.Item2.Col1;
+            double timeSinceLock = payload.Item3 + Tick;
+            long targetId = payload.Item4;
 
-            if (_guidanceMode == GuidanceMode.Active && !_retask)
-                continue;
+            if (_guidanceMode == GuidanceMode.Active)
+            {
+                if (_retask)
+                {
+                    _guidanceMode = GuidanceMode.SemiActive;
+                }
+                else if (targetId != _raycastHoming.TargetId ||
+                    timeSinceLock > _raycastHoming.TimeSinceLastLock)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                _guidanceMode = GuidanceMode.SemiActive;
+            }
 
             _retask = false;
             Vector3D hitPos = payload.Item1.Col0;
-            Vector3D offset = payload.Item2.Col0;
             _targetPos = payload.Item1.Col1;
             _targetVel = payload.Item1.Col2;
-            _timeSinceLastLock = payload.Item3;
-            long targetId = payload.Item4;
-            _timeSinceLastIngest = 1.0 / 60.0; // IGC messages are always a tick delayed
+            _timeSinceLastIngest = Tick; // IGC messages are always a tick delayed
+            _timeSinceLastLock = timeSinceLock;
 
-            _guidanceMode = GuidanceMode.SemiActive;
-
-            _raycastHoming.SetInitialLockParameters(hitPos, _targetVel, offset, _timeSinceLastLock, targetId);
+            if (_guidanceMode == GuidanceMode.Active)
+            {
+                _raycastHoming.UpdateTargetStateVectors(_targetPos, hitPos, _targetVel, _timeSinceLastLock);
+            }
+            else
+            {
+                Vector3D offset = payload.Item2.Col0;
+                _raycastHoming.SetInitialLockParameters(hitPos, _targetVel, offset, _timeSinceLastLock, targetId);
+            }
         }
     }
 }
@@ -998,6 +1060,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
 
     #region Ignore own grids with raycast
     _mechConnections.Clear();
+    GridTerminalSystem.GetBlocksOfType(_mechConnections);
     _raycastHoming.ClearIgnoredGridIDs();
     _raycastHoming.AddIgnoredGridID(Me.CubeGrid.EntityId);
     foreach (var mc in _mechConnections)
@@ -1055,12 +1118,6 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         }
         else
         {
-            foreach (IMyRadioAntenna a in _broadcasters)
-            {
-                //x.IsSameConstructAs(Me))? Check if missile has connectors before this?
-                _savedKeycodes.Add(a.EntityId);
-                if (AtInstructionLimit()) { yield return SetupStatus.Running; }
-            }
             _setupBuilder.Append($"> Info: Found antenna(s) on firing ship\n");
             _foundLampAntennas = true;
         }
@@ -1136,6 +1193,7 @@ public void RunSetupStateMachine()
             {
                 _shouldFire = true;
                 RegisterBroadcastListeners();
+                _launchSM.SetState(LaunchStage.Intiate);
                 Runtime.UpdateFrequency = UpdateFrequency.Update1;
             }
             if ((_postSetupAction & PostSetupAction.FireRequestResponse) != 0)
@@ -1176,14 +1234,14 @@ void InitiateSetup(bool reload = false)
 
 public bool AtInstructionLimit()
 {
-    return Runtime.CurrentInstructionCount >= MAX_INSTRUCTIONS_PER_SETUP_RUN;
+    return Runtime.CurrentInstructionCount >= MaxInstructionsPerRun;
 }
 
 bool SetupErrorChecking()
 {
     bool setupFailed = false;
     // ERRORS
-    setupFailed |= EchoIfTrue(_antennas.Count == 0, ">> ERR: No antennas found");
+    setupFailed |= EchoIfTrue(_requireAntenna && _antennas.Count == 0, ">> ERR: No antennas found");
     setupFailed |= EchoIfTrue(_gyros.Count == 0, ">> ERR: No gyros found");
     setupFailed |= EchoIfTrue(_shipControllers.Count == 0, ">> ERR: No remotes found");
     if (_shipControllers.Count > 0)
@@ -1192,6 +1250,8 @@ bool SetupErrorChecking()
     }
     setupFailed |= EchoIfTrue(_mainThrusters.Count == 0, ">> ERR: No main thrusters found");
     setupFailed |= EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found");
+
+    EchoIfTrue(!_requireAntenna && _antennas.Count == 0, "> WARN: No antennas found");
 
     // WARNINGS
     if (!EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching"))
@@ -1367,11 +1427,59 @@ void GetCameraOrientation(IMyCameraBlock c)
 #endregion
 
 #region Missile Launch Sequence
-// Prepares missile for launch by activating power sources.
-void MissileStage1()
+class LaunchState : IState
 {
-    _missileStage = 1;
+    public Enum Id { get; }
+    public Action OnUpdate { get; }
+    public Action OnEnter { get; }
+    public Action OnLeave { get; }
+    public double Duration;
+    public double ElapsedTime = 0;
 
+    readonly StateMachine _parent;
+    readonly Enum _nextState;
+    readonly Action _update;
+    readonly double _timeStep;
+
+    public LaunchState(Enum id, Enum nextStateId, StateMachine sm, double duration, double dt, Action onUpdate = null, Action onEnter = null, Action onLeave = null)
+    {
+        _parent = sm;
+        Id = id;
+        _nextState = nextStateId;
+        Duration = duration;
+        _timeStep = dt;
+        _update = onUpdate;
+        OnEnter = onEnter;
+        OnLeave = onLeave;
+
+        OnUpdate = DoUpdate;
+    }
+
+    void DoUpdate()
+    {
+        _update?.Invoke();
+        ElapsedTime += _timeStep;
+        if (ElapsedTime >= Duration)
+        {
+            _parent.SetState(_nextState);
+        }
+    }
+}
+
+void SetupLaunchStages()
+{
+    _launchSM.AddState(new State(LaunchStage.Idle));
+    _initiateState = new LaunchState(LaunchStage.Intiate, LaunchStage.Detach, _launchSM, _disconnectDelay, SecondsPerUpdate, onEnter: OnInitiate);
+    _detachState = new LaunchState(LaunchStage.Detach, LaunchStage.Drift, _launchSM, _detachDuration, SecondsPerUpdate, onEnter: OnDetach);
+    _driftState = new LaunchState(LaunchStage.Drift, LaunchStage.Flight, _launchSM, _mainIgnitionDelay, SecondsPerUpdate, onEnter: OnDrift);
+    _flightState = new State(LaunchStage.Flight, onEnter: OnFlight);
+    _launchSM.AddStates(_initiateState, _detachState, _driftState, _flightState);
+    _launchSM.Initialize(LaunchStage.Idle);
+}
+
+// Prepares missile for launch by activating power sources.
+void OnInitiate()
+{
     foreach (var b in _batteries)
     {
         b.Enabled = true;
@@ -1410,10 +1518,8 @@ void MissileStage1()
 }
 
 // Detaches missile from the firing ship.
-void MissileStage2()
+void OnDetach()
 {
-    _missileStage = 2;
-
     foreach (var m in _artMasses)
     {
         m.Enabled = true;
@@ -1439,15 +1545,14 @@ void MissileStage2()
         a.Radius = 1f;
         a.Enabled = false;
         a.EnableBroadcasting = false;
-        a.Enabled = true; //this used to be a bug workaround, not sure if it is still needed tbh
-        a.CustomName = "";
+        a.Enabled = true; // TODO: this used to be a bug workaround, not sure if it is still needed tbh
+        a.HudText = GetAntennaName(a.HudText);
     }
 
     foreach (var b in _beacons)
     {
         b.Radius = 1f;
         b.Enabled = true;
-        b.CustomName = "";
     }
 
     ApplyThrustOverride(_sideThrusters, MinThrust, false);
@@ -1455,18 +1560,14 @@ void MissileStage2()
 }
 
 // Disables missile thrust for drifting.
-void MissileStage3()
+void OnDrift()
 {
-    _missileStage = 3;
-
     ApplyThrustOverride(_detachThrusters, MinThrust);
 }
 
 // Ignites main thrust.
-void MissileStage4()
+void OnFlight()
 {
-    _missileStage = 4;
-
     foreach (var m in _artMasses)
     {
         m.Enabled = false;
@@ -1488,7 +1589,7 @@ void MissileStage4()
 }
 #endregion
 
-#region Missile Guidance
+#region Missile Nav, Guidance, and Control
 // Delays GuideMissile until the guidance delay is finished.
 void ActivateGuidance()
 {
@@ -1533,8 +1634,9 @@ void GuidanceNavAndControl()
         shouldSpiral,
         out _shouldProximityScan);
 
+    ScaleAntennaRange(_distanceFromShooter + 100);
+
     Control(missileMatrix, accelCmd, gravityVec, missileVel, missileMass);
-    #endregion
 }
 
 void Navigation(
@@ -1561,7 +1663,6 @@ void Navigation(
     gravity = _missileReference.GetNaturalGravity();
 
     distanceFromShooter = Vector3D.Distance(_shooterPos, missilePos);
-    ScaleAntennaRange(distanceFromShooter + 100);
 
     // Computing mass, thrust, and acceleration
     double missileThrust = CalculateMissileThrust(_mainThrusters);
@@ -1662,7 +1763,7 @@ Vector3D BeamRideGuidance(
     Vector3D missileToTargetVec = destinationVec - missilePos;
 
     Vector3D accelCmd;
-    if (_missileStage == 4)
+    if (InFlight)
     {
         accelCmd = CalculateDriftCompensation(missileVel, missileToTargetVec, missileAcceleration, 0.5, gravity, 60);
     }
@@ -1715,7 +1816,7 @@ Vector3D HomingGuidance(
 
 void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vector3D velocityVec, double mass)
 {
-    if (_missileStage == 4)
+    if (InFlight)
     {
         var headingDeviation = VectorMath.CosBetween(accelCmd, missileMatrix.Forward);
         ApplyThrustOverride(_mainThrusters, (float)MathHelper.Clamp(headingDeviation, 0.25f, 1f) * 100f);
@@ -1733,7 +1834,7 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
 
     // Handle roll more simply
     double rollSpeed = 0;
-    if (Math.Abs(_missileSpinRPM) > 1e-3 && _missileStage == 4)
+    if (Math.Abs(_missileSpinRPM) > 1e-3 && InFlight)
     {
         rollSpeed = _missileSpinRPM * RpmToRad;
     }
@@ -1755,6 +1856,8 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
 
     ApplyGyroOverride(pitchSpeed, yawSpeed, rollSpeed, _gyros, missileMatrix);
 }
+
+#endregion
 
 #region Broadcast Missile IFF
 void NetworkTargets()
@@ -1805,7 +1908,7 @@ void NetworkTargets()
 #endregion
 
 #region Block Property Functions
-string GetAntennaName()
+string GetAntennaName(string customName)
 {
     switch (_antennaMode.Value)
     {
@@ -1814,10 +1917,12 @@ string GetAntennaName()
         case AntennaNameMode.MissileName:
             return _missileNameTag;
         case AntennaNameMode.MissileStatus:
-            return $"{_missileNameTag} / Mode: {_guidanceMode} / Age: {(_guidanceMode == GuidanceMode.BeamRiding ? 0 : _timeSinceLastLock):0.0}";
+            return $"{_missileNameTag} / Mode: {_guidanceMode} / Age: {(_guidanceMode == GuidanceMode.BeamRiding ? 0 : _timeSinceLastLock):0.000}";
+        case AntennaNameMode.Custom:
+            return customName;
         default:
         case AntennaNameMode.Empty:
-            return "";
+            return " ";
     }
 }
 
@@ -1829,7 +1934,7 @@ void ScaleAntennaRange(double dist)
             continue;
         a.Radius = (float)dist;
         a.EnableBroadcasting = !_shouldStealth;
-        a.CustomName = GetAntennaName();
+        a.HudText = GetAntennaName(a.HudText);
     }
 
     foreach (IMyBeacon thisBeacon in _beacons)
@@ -2083,7 +2188,6 @@ double CalculateMissileThrust(List<IMyThrust> mainThrusters)
 #endregion
 
 #region Vector Math Functions
-
 // Computes optimal drift compensation vector to eliminate drift in a specified time
 static Vector3D CalculateDriftCompensation(Vector3D velocity, Vector3D directHeading, double accel, double timeConstant, Vector3D gravityVec, double maxDriftAngle = 60)
 {
@@ -2128,8 +2232,8 @@ void ComputeRandomHeadingVector()
 Vector3D ComputeRandomDispersion()
 {
     Vector3D direction = new Vector3D(2 * _bellCurveRandom.NextDouble() - 1,
-                                      2 * _bellCurveRandom.NextDouble() - 1,
-                                      2 * _bellCurveRandom.NextDouble() - 1);
+                                        2 * _bellCurveRandom.NextDouble() - 1,
+                                        2 * _bellCurveRandom.NextDouble() - 1);
     return _maxAimDispersion * direction;
 }
 
@@ -2152,26 +2256,22 @@ Vector3D SpiralTrajectory(Vector3D desiredForwardVector, Vector3D desiredUpVecto
     return forward * forwardProportion + lateralProportion * (Math.Sin(angle) * up + Math.Cos(angle) * right);
 }
 
-
-Vector3D[] _corners = new Vector3D[8];
 double CalculateGridRadiusFromAxis(IMyCubeGrid grid, Vector3D axis)
 {
     var axisLocal = VectorMath.SafeNormalize(Vector3D.Rotate(axis, MatrixD.Transpose(grid.WorldMatrix)));
     var min = ((Vector3D)grid.Min - 0.5) * grid.GridSize;
     var max = ((Vector3D)grid.Max + 0.5) * grid.GridSize;
     var bb = new BoundingBoxD(min, max);
-    bb.GetCorners(_corners);
 
     double maxLenSq = 0;
-    var point = _corners[0];
-    foreach (var corner in _corners)
+    for (int ii = 0; ii < 8; ++ii)
     {
+        var corner = bb.GetCorner(ii);
         var dirn = corner - bb.Center;
         var rej = dirn - dirn.Dot(axisLocal) * axisLocal;
         var lenSq = rej.LengthSquared();
         if (lenSq > maxLenSq)
         {
-            point = corner;
             maxLenSq = lenSq;
         }
     }
@@ -2180,53 +2280,73 @@ double CalculateGridRadiusFromAxis(IMyCubeGrid grid, Vector3D axis)
 #endregion
 
 #region Storage Parsing/Saving
-void ParseStorage() //TODO: Add proper ini save/parse for Active guidance
+const string StorageKey = "WHAM";
+void ParseStorage()
 {
-    if (GridTerminalSystem.GetBlockGroupWithName(_fireControlGroupNameTag) != null)
+    _ini.Clear();
+    _ini.TryParse(Storage);
+    int i = 0;
+    var launchStage = (LaunchStage)_ini.Get(StorageKey, $"{i++}").ToInt32();
+    if (launchStage == LaunchStage.Idle)
     {
-        // This means missile is still attached to firing ship
-        Storage = "";
+        return;
+    }
+    _launchSM.SetState(launchStage);
+
+    _enableGuidance = _ini.Get(StorageKey, $"{i++}").ToBoolean();
+    _senderKeycode = _ini.Get(StorageKey, $"{i++}").ToInt64();
+
+    if (!_ini.Get(StorageKey, $"{i++}").ToBoolean())
+    {
         return;
     }
 
-    var storageSplit = Storage.Split('\n');
-    foreach (var line in storageSplit)
-    {
-        if (line.StartsWith("@"))
-        {
-            var trimmedLine = line.Replace("@", "");
-            bool parsed = int.TryParse(trimmedLine, out _missileStage);
-            if (parsed && _missileStage == 0)
-            {
-                _savedKeycodes.Clear();
-                return;
-            }
-            continue;
-        }
+    Vector3D pos, vel, offset;
+    pos.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    pos.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    pos.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    var age = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    var id = _ini.Get(StorageKey, $"{i++}").ToInt64();
 
-        long code = 0;
-        if (!string.IsNullOrWhiteSpace(line) && long.TryParse(line, out code))
-            _savedKeycodes.Add(code);
-    }
-
-    if (_savedKeycodes.Count != 0 && _missileStage != 0)
-    {
-        _postSetupAction = PostSetupAction.Fire;
-        InitiateSetup(true);
-    }
+    _raycastHoming.SetInitialLockParameters(pos, vel, offset, age, id);
+    _postSetupAction = PostSetupAction.Fire;
+    InitiateSetup(true);
 
     Echo("Storage parsed");
 }
 
 void Save()
 {
-    _saveSB.Clear();
-    foreach (var id in _savedKeycodes)
-        _saveSB.Append($"{id}\n");
+    if ((LaunchStage)_launchSM.StateId == LaunchStage.Idle)
+    {
+        Storage = "";
+        return;
+    }
 
-    _saveSB.Append($"@{_missileStage}");
-
-    Storage = _saveSB.ToString();
+    _ini.Clear();
+    int i = 0;
+    _ini.Set(StorageKey, $"{i++}", (int)(LaunchStage)_launchSM.StateId);
+    _ini.Set(StorageKey, $"{i++}", _enableGuidance);
+    _ini.Set(StorageKey, $"{i++}", _senderKeycode);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.IsScanning);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TimeSinceLastLock);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetId);
+    Storage = _ini.ToString();
 }
 #endregion
 #endregion
@@ -2234,6 +2354,109 @@ void Save()
 #region INCLUDES
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
+
+public static class VectorMath
+{
+    /// <summary>
+    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// </summary>
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return Vector3D.Zero;
+
+        if (Vector3D.IsUnit(ref a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+
+    /// <summary>
+    /// Reflects vector a over vector b with an optional rejection factor
+    /// </summary>
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    {
+        Vector3D proj = Projection(a, b);
+        Vector3D rej = a - proj;
+        return proj - rej * rejectionFactor;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Scalar projection of a onto b
+    /// </summary>
+    public static double ScalarProjection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b);
+
+        return a.Dot(b) / b.Length();
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+    }
+
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors.
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
+
+    /// <summary>
+    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
+    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
+    /// </summary>
+    /// <param name="a">First vector</param>
+    /// <param name="b">Second vector</param>
+    /// <param name="tolerance">Cosine of maximum angle</param>
+    /// <returns></returns>
+    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
+    {
+        double dot = Vector3D.Dot(a, b);
+        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
+        return Math.Abs(dot) * dot > num;
+    }
+}
 
 public static class VectorMath
 {
@@ -2876,9 +3099,15 @@ class RaycastHoming
             return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
         }
     }
-    public double SearchScanSpread {get; set; } = 0;
+    public double SearchScanSpread { get; set; } = 0;
     public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
-    public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
+    public Vector3D OffsetTargetPosition
+    {
+        get
+        {
+            return TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
+        }
+    }
     public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
     public Vector3D HitPosition { get; private set; } = Vector3D.Zero;
     public Vector3D PreciseModeOffset { get; private set; } = Vector3D.Zero;
@@ -2905,14 +3134,12 @@ class RaycastHoming
     readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
     readonly Random _rngeesus = new Random();
 
-    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
     MatrixD _targetOrientation;
-    Vector3D _targetPositionOverride;
     HashSet<long> _gridIDsToIgnore = new HashSet<long>();
     double _timeSinceLastScan = 0;
     bool _manualLockOverride = false;
     bool _fudgeVectorSwitch = false;
-    
+
     double AutoScanScaleFactor
     {
         get
@@ -2931,10 +3158,8 @@ class RaycastHoming
 
     public void SetInitialLockParameters(Vector3D hitPosition, Vector3D targetVelocity, Vector3D offset, double timeSinceLastLock, long targetId)
     {
-        _targetPositionOverride = hitPosition;
         TargetCenter = hitPosition;
         HitPosition = hitPosition;
-        OffsetTargetPosition = hitPosition;
         PreciseModeOffset = offset;
         TargetVelocity = targetVelocity;
         TimeSinceLastLock = timeSinceLastLock;
@@ -2981,7 +3206,6 @@ class RaycastHoming
 
     void ClearLockInternal()
     {
-        _info = default(MyDetectedEntityInfo);
         IsScanning = false;
         Status = TargetingStatus.NotLocked;
         MissedLastScan = false;
@@ -2994,12 +3218,12 @@ class RaycastHoming
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
     }
-    
+
     double RndDbl()
     {
         return 2 * _rngeesus.NextDouble() - 1;
     }
-    
+
     double GaussRnd()
     {
         return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
@@ -3020,7 +3244,7 @@ class RaycastHoming
         var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
         return randomVector * fudgeFactor * TimeSinceLastLock;
     }
-    
+
     Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
     {
         Vector3D scanPos = origin + direction * MaxRange;
@@ -3029,6 +3253,208 @@ class RaycastHoming
             return scanPos;
         }
         return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
+    }
+
+    IMyTerminalBlock GetReference(List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock)
+    {
+        /*
+         * References are prioritized in this order:
+         * 1. Currently used camera
+         * 2. Reference block
+         * 3. Currently used control seat
+         */
+        IMyTerminalBlock controlledCam = GetControlledCamera(cameraList);
+        if (controlledCam != null)
+            return controlledCam;
+
+        if (referenceBlock != null)
+            return referenceBlock;
+
+        return GetControlledShipController(shipControllers);
+    }
+
+    IMyCameraBlock SelectCamera()
+    {
+        // Check for transition between faces
+        if (_availableCameras.Count == 0)
+        {
+            _timeSinceLastScan = 100000;
+            MissedLastScan = true;
+            return null;
+        }
+
+        return GetCameraWithMaxRange(_availableCameras);
+    }
+
+    void SetAutoScanInterval(double scanRange, IMyCameraBlock camera)
+    {
+        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
+    }
+
+    bool DoLockScan(List<IMyCameraBlock> cameraList, out MyDetectedEntityInfo info, out IMyCameraBlock camera)
+    {
+        info = default(MyDetectedEntityInfo);
+
+        #region Scan position selection
+        Vector3D scanPosition;
+        switch (_currentAimMode)
+        {
+            case AimMode.Offset:
+                scanPosition = HitPosition;
+                break;
+            case AimMode.OffsetRelative:
+                scanPosition = OffsetTargetPosition;
+                break;
+            default:
+                scanPosition = TargetCenter;
+                break;
+        }
+        scanPosition += TargetVelocity * TimeSinceLastLock;
+
+        if (MissedLastScan)
+        {
+            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
+        }
+        #endregion
+
+        #region Camera selection
+        GetCamerasInDirection(cameraList, _availableCameras, scanPosition, true);
+
+        camera = SelectCamera();
+        if (camera == null)
+        {
+            return false;
+        }
+        #endregion
+
+        #region Scanning
+        // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
+        Vector3D adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - camera.GetPosition()) * 2 * TargetSize;
+        double scanRange = (adjustedTargetPos - camera.GetPosition()).Length();
+
+        SetAutoScanInterval(scanRange, camera);
+
+        if (camera.AvailableScanRange >= scanRange &&
+            _timeSinceLastScan >= AutoScanInterval)
+        {
+            info = camera.Raycast(adjustedTargetPos);
+            return true;
+        }
+        return false;
+        #endregion
+    }
+
+    bool DoSearchScan(List<IMyCameraBlock> cameraList, IMyTerminalBlock reference, out MyDetectedEntityInfo info, out IMyCameraBlock camera)
+    {
+        info = default(MyDetectedEntityInfo);
+
+        #region Camera selection
+        if (reference != null)
+        {
+            GetCamerasInDirection(cameraList, _availableCameras, reference.WorldMatrix.Forward);
+        }
+        else
+        {
+            _availableCameras.Clear();
+            _availableCameras.AddRange(cameraList);
+        }
+
+        camera = SelectCamera();
+        if (camera == null)
+        {
+            return false;
+        }
+        #endregion
+
+        #region Scanning
+        SetAutoScanInterval(MaxRange, camera);
+
+        if (camera.AvailableScanRange >= MaxRange &&
+            _timeSinceLastScan >= AutoScanInterval)
+        {
+            if (reference != null)
+            {
+                info = camera.Raycast(GetSearchPos(reference.GetPosition(), reference.WorldMatrix.Forward, camera));
+            }
+            else
+            {
+                info = camera.Raycast(MaxRange);
+            }
+
+            return true;
+        }
+        return false;
+        #endregion
+    }
+
+    public void UpdateTargetStateVectors(Vector3D position, Vector3D hitPosition, Vector3D velocity, double timeSinceLock = 0)
+    {
+        TargetCenter = position;
+        HitPosition = hitPosition;
+        TargetVelocity = velocity;
+        TimeSinceLastLock = timeSinceLock;
+    }
+
+    void ProcessScanData(MyDetectedEntityInfo info, IMyTerminalBlock reference, Vector3D scanOrigin)
+    {
+        // Validate target and assign values
+        if (info.IsEmpty() ||
+            _targetFilter.Contains(info.Type) ||
+            _gridIDsToIgnore.Contains(info.EntityId))
+        {
+            MissedLastScan = true;
+            CycleAimMode();
+        }
+        else
+        {
+            if (Vector3D.DistanceSquared(info.Position, scanOrigin) < MinRange * MinRange && Status != TargetingStatus.Locked)
+            {
+                Status = TargetingStatus.TooClose;
+                return;
+            }
+
+            if (info.EntityId != TargetId)
+            {
+                if (Status == TargetingStatus.Locked)
+                {
+                    MissedLastScan = true;
+                    CycleAimMode();
+                    return;
+                }
+                else if (_manualLockOverride)
+                {
+                    MissedLastScan = true;
+                    return;
+                }
+            }
+
+            MissedLastScan = false;
+            UpdateTargetStateVectors(info.Position, info.HitPosition.Value, info.Velocity);
+            TargetSize = info.BoundingBox.Size.Length();
+            _targetOrientation = info.Orientation;
+
+            if (Status != TargetingStatus.Locked) // Initial lockon
+            {
+                Status = TargetingStatus.Locked;
+                TargetId = info.EntityId;
+                TargetRelation = info.Relationship;
+                TargetType = info.Type;
+
+                // Compute aim offset
+                if (!_manualLockOverride)
+                {
+                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorRejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
+                    PreciseModeOffset = Vector3D.TransformNormal(info.HitPosition.Value + hitPosOffset - TargetCenter, MatrixD.Transpose(_targetOrientation));
+                }
+            }
+
+            _manualLockOverride = false;
+        }
+    }
+
+    void CycleAimMode()
+    {
+        _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
     }
 
     public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
@@ -3040,209 +3466,41 @@ class RaycastHoming
 
         TimeSinceLastLock += timeStep;
 
-        _info = default(MyDetectedEntityInfo);
-        _availableCameras.Clear();
+        if (cameraList.Count == 0)
+            return;
 
-        //Check for lock lost
-        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && Status == TargetingStatus.Locked)
+        // Check for lock lost
+        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && (Status == TargetingStatus.Locked || _manualLockOverride))
         {
-            LockLost = true;
+            LockLost = true; // TODO: Change this to a callback
             ClearLockInternal();
             return;
         }
 
-        // Determine where to scan next
-        var scanPosition = Vector3D.Zero;
-        switch (_currentAimMode)
-        {
-            case AimMode.Offset:
-                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            case AimMode.OffsetRelative:
-                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            default:
-                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
-                break;
-        }
+        IMyTerminalBlock reference = GetReference(cameraList, shipControllers, referenceBlock);
 
-        if (MissedLastScan && cameraList.Count > 0)
-        {
-            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
-        }
-
-        // Trim out cameras that cant see our next scan position
-        Vector3D testDirection = Vector3D.Zero;
-        IMyTerminalBlock reference = null;
+        MyDetectedEntityInfo info;
+        IMyCameraBlock camera;
+        bool scanned;
         if (Status == TargetingStatus.Locked || _manualLockOverride)
         {
-            GetAvailableCameras(cameraList, _availableCameras, scanPosition, true);
+            scanned = DoLockScan(cameraList, out info, out camera);
         }
         else
         {
-            /*
-             * The following prioritizes references in the following hierarchy:
-             * 1. Currently used camera
-             * 2. Reference block
-             * 3. Currently used control seat
-             */
-            if (reference == null)
-                reference = GetControlledCamera(cameraList);
-            
-            if (reference == null)
-                reference = referenceBlock;
-
-            if (reference == null)
-                reference = GetControlledShipController(shipControllers);
-
-            if (reference != null)
-            {
-                testDirection = reference.WorldMatrix.Forward;
-                GetAvailableCameras(cameraList, _availableCameras, testDirection);
-            }
-            else
-            {
-                _availableCameras.AddRange(cameraList);
-            }
+            scanned = DoSearchScan(cameraList, reference, out info, out camera);
         }
 
-        // Check for transition between faces
-        if (_availableCameras.Count == 0)
-        {
-            _timeSinceLastScan = 100000;
-            MissedLastScan = true;
-            return;
-        }
-
-        var camera = GetCameraWithMaxRange(_availableCameras);
-        var cameraMatrix = camera.WorldMatrix;
-
-        double scanRange;
-        Vector3D adjustedTargetPos = Vector3D.Zero;
-        if (Status == TargetingStatus.Locked || _manualLockOverride)
-        {
-            // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
-            adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - cameraMatrix.Translation) * 2 * TargetSize;
-            scanRange = (adjustedTargetPos - cameraMatrix.Translation).Length();
-        }
-        else
-        {
-            scanRange = MaxRange;
-        }
-
-        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
-
-        //Attempt to scan adjusted target position
-        if (camera.AvailableScanRange >= scanRange &&
-            _timeSinceLastScan >= AutoScanInterval)
-        {
-            if (Status == TargetingStatus.Locked || _manualLockOverride)
-                _info = camera.Raycast(adjustedTargetPos);
-            else if (!Vector3D.IsZero(testDirection))
-                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
-            else
-                _info = camera.Raycast(MaxRange);
-
-            _timeSinceLastScan = 0;
-        }
-        else // Not enough charge stored up yet
+        if (!scanned)
         {
             return;
         }
+        _timeSinceLastScan = 0;
 
-        // Validate target and assign values
-        if (!_info.IsEmpty() &&
-            !_targetFilter.Contains(_info.Type) &&
-            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
-        {
-            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
-            {
-                Status = TargetingStatus.TooClose;
-                return;
-            }
-            else if (Status == TargetingStatus.Locked) // Target already locked
-            {
-                if (_info.EntityId == TargetId)
-                {
-                    TargetCenter = _info.Position;
-                    HitPosition = _info.HitPosition.Value;
-
-                    _targetOrientation = _info.Orientation;
-                    OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
-
-                    TargetVelocity = _info.Velocity;
-                    TargetSize = _info.BoundingBox.Size.Length();
-                    TimeSinceLastLock = 0;
-
-                    _manualLockOverride = false;
-                    
-                    MissedLastScan = false;
-                    TargetRelation = _info.Relationship;
-                    TargetType = _info.Type;
-                }
-                else
-                {
-                    MissedLastScan = true;
-                }
-            }
-            else // Target not yet locked: initial lockon
-            {
-                if (_manualLockOverride && TargetId != _info.EntityId)
-                    return;
-
-                Status = TargetingStatus.Locked;
-                TargetId = _info.EntityId;
-                TargetCenter = _info.Position;
-                HitPosition = _info.HitPosition.Value;
-                TargetVelocity = _info.Velocity;
-                TargetSize = _info.BoundingBox.Size.Length();
-                TimeSinceLastLock = 0;
-
-                var aimingCamera = GetControlledCamera(_availableCameras);
-                Vector3D hitPosOffset = Vector3D.Zero;
-                if (aimingCamera != null)
-                {
-                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
-                }
-                else if (reference != null)
-                {
-                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
-                }
-                if (!Vector3D.IsZero(hitPosOffset))
-                {
-                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
-                }
-
-                var hitPos = _info.HitPosition.Value + hitPosOffset;
-                _targetOrientation = _info.Orientation;
-
-                if (_manualLockOverride)
-                {
-                    _manualLockOverride = false;
-                }
-                else
-                {
-                    PreciseModeOffset = Vector3D.TransformNormal(hitPos - TargetCenter, MatrixD.Transpose(_targetOrientation));
-                    OffsetTargetPosition = hitPos;
-                }
-
-                MissedLastScan = false;
-                TargetRelation = _info.Relationship;
-                TargetType = _info.Type;
-            }
-        }
-        else
-        {
-            MissedLastScan = true;
-        }
-
-        if (MissedLastScan)
-        {
-            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
-        }
+        ProcessScanData(info, reference, camera.GetPosition());
     }
 
-    void GetAvailableCameras(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
+    void GetCamerasInDirection(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
     {
         availableCameras.Clear();
 
@@ -3341,6 +3599,109 @@ class RaycastHoming
     }
 }
 #endregion
+
+public static class VectorMath
+{
+    /// <summary>
+    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// </summary>
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return Vector3D.Zero;
+
+        if (Vector3D.IsUnit(ref a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+
+    /// <summary>
+    /// Reflects vector a over vector b with an optional rejection factor
+    /// </summary>
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    {
+        Vector3D proj = Projection(a, b);
+        Vector3D rej = a - proj;
+        return proj - rej * rejectionFactor;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Scalar projection of a onto b
+    /// </summary>
+    public static double ScalarProjection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b);
+
+        return a.Dot(b) / b.Length();
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
+    }
+
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors.
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
+
+    /// <summary>
+    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
+    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
+    /// </summary>
+    /// <param name="a">First vector</param>
+    /// <param name="b">Second vector</param>
+    /// <param name="tolerance">Cosine of maximum angle</param>
+    /// <returns></returns>
+    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
+    {
+        double dot = Vector3D.Dot(a, b);
+        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
+        return Math.Abs(dot) * dot > num;
+    }
+}
 
 #region MissileGuidanceBase
 abstract class MissileGuidanceBase
@@ -3581,31 +3942,47 @@ class BatesDistributionRandom
 
 public interface IConfigValue
 {
-    void WriteToIni(MyIni ini);
-    void ReadFromIni(MyIni ini);
-    void Update(MyIni ini);
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
 }
 
-public abstract class ConfigValue<T> : IConfigValue
+public interface IConfigValue<T> : IConfigValue
 {
-    public T Value;
-    public string Section { get; set; }
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
     public string Name { get; set; }
-    T DefaultValue { get; }
-    readonly string _comment;
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
     {
         return cfg.Value;
     }
 
-    public ConfigValue(string section, string name, T defaultValue, string comment)
+    public ConfigValue(string name, T defaultValue, string comment)
     {
-        Section = section;
         Name = name;
-        Value = defaultValue;
-        DefaultValue = defaultValue;
-        _comment = comment;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
     }
 
     public override string ToString()
@@ -3613,81 +3990,892 @@ public abstract class ConfigValue<T> : IConfigValue
         return Value.ToString();
     }
 
-    public void Update(MyIni ini)
+    public bool Update(ref MyIni ini, string section)
     {
-        ReadFromIni(ini);
-        WriteToIni(ini);
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
     }
 
-    public void WriteToIni(MyIni ini)
+    public bool ReadFromIni(ref MyIni ini, string section)
     {
-        ini.Set(Section, Name, this.ToString());
-        if (!string.IsNullOrWhiteSpace(_comment))
+        if (_skipRead)
         {
-            ini.SetComment(Section, Name, _comment);
+            _skipRead = false;
+            return true;
         }
-    }
-
-    protected abstract void SetValue(ref MyIniValue val);
-
-    protected virtual void SetDefault() 
-    {
-        Value = DefaultValue;
-    }
-
-    public void ReadFromIni(MyIni ini)
-    {
-        MyIniValue val = ini.Get(Section, Name);
-        if (!val.IsEmpty)
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
         {
-            SetValue(ref val);
+            read = SetValue(ref val);
         }
         else
         {
             SetDefault();
         }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
     }
 }
 
 public class ConfigString : ConfigValue<string>
 {
-    public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetString(out Value)) SetDefault(); }
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
 }
 
 public class ConfigDouble : ConfigValue<double>
 {
-    public ConfigDouble(string section, string name, double value = 0, string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetDouble(out Value)) SetDefault(); }
+    public ConfigDouble(string name, double value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetDouble(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
 }
 
 public class ConfigBool : ConfigValue<bool>
 {
-    public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetBoolean(out Value)) SetDefault(); }
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
 }
 
 public class ConfigInt : ConfigValue<int>
 {
-    public ConfigInt(string section, string name, int value = 0, string comment = null) : base(section, name, value, comment) { }
-    protected override void SetValue(ref MyIniValue val) { if (!val.TryGetInt32(out Value)) SetDefault(); }
+    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
 }
 
 public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
 {
-    public ConfigEnum(string section, string name, TEnum defaultValue = default(TEnum), string comment = null)
-    : base (section, name, defaultValue, comment) 
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
     {}
-    
-    protected override void SetValue(ref MyIniValue val)
+
+    protected override bool SetValue(ref MyIniValue val)
     {
-        string antennaModeStr;
-        if (!val.TryGetString(out antennaModeStr) || 
-            !Enum.TryParse(antennaModeStr, true, out Value) ||
-            !Enum.IsDefined(typeof(TEnum), Value))
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
         {
             SetDefault();
+            return false;
         }
+        return true;
+    }
+}
+
+public class StateMachine
+{
+    public Enum StateId
+    {
+        get
+        {
+            return State.Id;
+        }
+    }
+    public IState State { get; private set; } = null;
+
+    Dictionary<Enum, IState> _states = new Dictionary<Enum, IState>();
+    bool _initialized = false;
+
+    public void AddStates(params IState[] states)
+    {
+        foreach (IState state in states)
+        {
+            AddState(state);
+        }
+    }
+
+    public void AddState(IState state)
+    {
+        if (_initialized)
+        {
+            throw new InvalidOperationException("StateMachine.AddState can not be called after initialization");
+        }
+        bool uniqueState = !_states.ContainsKey(state.Id);
+        if (uniqueState)
+        {
+            _states[state.Id] = state;
+        }
+        else
+        {
+            throw new ArgumentException($"Input state does not have a unique id (id: {state.Id})");
+        }
+    }
+
+    public bool SetState(Enum stateID)
+    {
+        IState oldState = State;
+        IState newState;
+        bool validState = _states.TryGetValue(stateID, out newState) && (oldState == null || oldState.Id != newState.Id);
+        if (validState)
+        {
+            oldState?.OnLeave?.Invoke();
+            newState?.OnEnter?.Invoke();
+            State = newState;
+        }
+        return validState;
+    }
+
+    public void Initialize(Enum stateId)
+    {
+        _initialized = SetState(stateId);
+        if (!_initialized)
+        {
+            throw new ArgumentException($"stateId {stateId} does not correspond to any registered state");
+        }
+    }
+
+    public void Update()
+    {
+        if (!_initialized)
+        {
+            throw new Exception($"StateMachine has not been initialized");
+        }
+        State?.OnUpdate?.Invoke();
+    }
+}
+
+public interface IState
+{
+    Enum Id { get; }
+    Action OnUpdate { get; }
+    Action OnEnter { get; }
+    Action OnLeave { get; }
+}
+
+class State : IState
+{
+    public Enum Id { get; }
+    public Action OnUpdate { get; }
+    public Action OnEnter { get; }
+    public Action OnLeave { get; }
+    public State(Enum id, Action onUpdate = null, Action onEnter = null, Action onLeave = null)
+    {
+        Id = id;
+        OnUpdate = onUpdate;
+        OnEnter = onEnter;
+        OnLeave = onLeave;
     }
 }
 #endregion
