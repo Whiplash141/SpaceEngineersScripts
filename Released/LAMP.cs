@@ -1,9 +1,10 @@
+
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string VERSION = "95.7.0";
-const string DATE = "2022/12/31";
-const string COMPAT_VERSION = "170.0.0";
+const string Version = "95.12.0";
+const string Date = "2023/07/13";
+const string CompatVersion = "170.0.0";
 #endregion
 
 /*
@@ -86,26 +87,13 @@ ___________________________________________________________________
 */
 
 #region Fields
-string 
-    _missileNameTag = "Missile",
-    _fireControlGroupName = "Fire Control",
-    _referenceNameTag = "Reference";
-
-double 
-    _autoFireInterval = 1,
-    _timeSinceAutoFire = 141,
-    _idleAntennaRange = 800,
-    _activeAntennaRange = 5000,
-    _minRaycastRange = 50,
+double
+    _timeSinceAutofire = 141,
     _maxRaycastRange = 5000,
     _maxTimeForLockBreak = 3,
-    _timeSinceTurretLock = 0,
-    _searchScanRandomSpread = 0;
+    _timeSinceTurretLock = 0;
 
-bool 
-    _autoFire = false,
-    _autoFireRemote = false,
-    _stealthySemiActiveAntenna = false,
+bool
     _usePreciseAiming = false,
     _fireEnabled = true,
     _retask = false,
@@ -116,92 +104,105 @@ bool
     _killGuidance = false,
     _hasKilled = false,
     _inGravity = false,
-    _showBSOD = false,
     _broadcastRangeOverride = false;
-    
-int _autofireLimitPerTarget = 0;
 
-const string IGC_TAG_IFF = "IGC_IFF_PKT",
-    IGC_TAG_PARAMS = "IGC_MSL_PAR_MSG",
-    IGC_TAG_HOMING = "IGC_MSL_HOM_MSG",
-    IGC_TAG_BEAM_RIDING = "IGC_MSL_OPT_MSG",
-    IGC_TAG_FIRE = "IGC_MSL_FIRE_MSG",
-    IGC_TAG_REMOTE_FIRE_REQUEST = "IGC_MSL_REM_REQ",
-    IGC_TAG_REMOTE_FIRE_RESPONSE = "IGC_MSL_REM_RSP",
-    IGC_TAG_REMOTE_FIRE_NOTIFICATION = "IGC_MSL_REM_NTF",
-    IGC_TAG_REGISTER = "IGC_MSL_REG_MSG",
-    UNICAST_TAG = "UNICAST",
-// General config
-    INI_SECTION_GENERAL = "LAMP - General Config",
-    INI_FIRE_GROUP_NAME = "Fire control group name",
-    INI_MSL_NAME = "Missile group name tag",
-    INI_REFERENCE_NAME = "Optional reference block name tag",
-    INI_PREFERRED_GUID = "Preferred guidance mode",
-    INI_PREFERRED_GUID_COMMENT = " Accepted guidance modes are: CAMERA, TURRET, or BEAMRIDE",
-    INI_AUTO_FIRE = "Enable auto-fire",
-    INI_AUTO_FIRE_INTERVAL = "Auto-fire interval (s)",
-    INI_AUTO_FIRE_REMOTE = "Auto-fire remote missiles",
-    INI_AUTO_MSL_LIMIT = "Auto-fire missile limit per target",
-    INI_ANTENNA_RANGE_IDLE = "Antenna range - Idle (m)",
-    INI_ANTENNA_RANGE_ACTIVE = "Antenna range - Active (m)",
-    INI_ANTENNA_RANGE_DYNAMIC = "Use dynamic active antenna range",
-    INI_MIN_RAYCAST_RANGE = "Minimum allowed lock on range (m)",
-    INI_SEARCH_SCAN_SPREAD = "Randomized raycast scan spread (m)",
-    INI_FIRE_ORDER = "Fire order",
-    INI_FIRE_ORDER_COMMENT = " Accepted values are: NUMBER, ANGLE, or DISTANCE\n Missiles will be fired smallest to largest value",
-// Sound config
-    INI_SECTION_SOUND_LOCK_SEARCH = "LAMP - Sound Config - Lock Search",
-    INI_SECTION_SOUND_LOCK_GOOD = "LAMP - Sound Config - Lock Good",
-    INI_SECTION_SOUND_LOCK_LOST = "LAMP - Sound Config - Lock Lost/Abort",
-    INI_SECTION_SOUND_LOCK_BAD = "LAMP - Sound Config - Lock Bad",
-// Status screen config
-    INI_SECTION_COLORS = "LAMP - Status Screen Colors",
-    INI_COLOR_TOP_BAR = "Title bar background color",
-    INI_COLOR_TITLE_TEXT = "Title text color",
-    INI_COLOR_BACKGROUND = "Background color",
-    INI_COLOR_TEXT = "Primary text color",
-    INI_COLOR_TEXT_SECONDARY = "Secondary text color",
-    INI_COLOR_TEXT_STATUS = "Status text color",
-    INI_COLOR_STATUS_BACKGROUND = "Status bar background color",
-    INI_COLOR_GUID_SELECTED = "Selected guidance outline color",
-    INI_COLOR_GUID_ALLOWED = "Allowed guidance text color",
-    INI_COLOR_GUID_DISALLOWED = "Disallowed guidance text color",
-// Text surface config
-    INI_SECTION_TEXT_SURF = "LAMP - Text Surface Config",
-    INI_TEXT_SURF_TEMPLATE = "Show on screen {0}",
-// Silo door config
-    INI_SECTION_SILO_DOOR = "LAMP - Silo Door Config",
-    INI_SILO_NUMBER_COMMENT = " This door will be opened when this specified missile is fired",
-    INI_SILO_NUMBER = "Missile number",
-// Fire timer config
-    INI_SECTION_FIRE_TIMER = "LAMP - Fire Timer Config",
-    INI_FIRE_TIMER_NUMBER_COMMENT = " This timer will be triggered when this specified missile is fired",
-    INI_FIRE_TIMER_NUMBER = "Missile number",
-    INI_FIRE_TIMER_ANY_COMMENT = " If this timer should be triggered ANY time a missile is fired",
-    INI_FIRE_TIMER_ANY = "Trigger on any fire",
-    INI_FIRE_TIMER_TRIGGER_ON_STATE = "Trigger on targeting state",
-    INI_FIRE_TIMER_TRIGGER_ON_STATE_COMMENT = " This timer will be triggered when the script enters one of the following\n targeting states:\n"+
-                                              "   None, Idle, Searching, Targeting\n"+
-                                              " The \"Targeting\" state is triggered when a homing lock is established\n OR when beam ride mode is activated.",
-// Display screen constants
-    TARGET_LOCKED_TEXT = "Target Locked",
-    TARGET_NOT_LOCKED_TEXT = "No Target",
-    TARGET_TOO_CLOSE_TEXT = "Target Too Close",
-    TARGET_SEARCHING_TEXT = "Searching",
-    BEAM_RIDE_ACTIVE = "Active",
-    DEFAULT_MISSILE_LIMIT = "none";
+const string IgcTagIff = "IGC_IFF_PKT",
+    IgcTagParams = "IGC_MSL_PAR_MSG",
+    IgcTagHoming = "IGC_MSL_HOM_MSG",
+    IgcTagBeamRide = "IGC_MSL_OPT_MSG",
+    IgcTagFire = "IGC_MSL_FIRE_MSG",
+    IgcTagRemoteFireRequest = "IGC_MSL_REM_REQ",
+    IgcTagRemoteFireResponse = "IGC_MSL_REM_RSP",
+    IgcTagRemoteFireNotification = "IGC_MSL_REM_NTF",
+    IgcTagRegister = "IGC_MSL_REG_MSG",
+    UnicastTag = "UNICAST",
+    IniSectionSoundBase = "LAMP - Sound Config - Lock ",
+    IniSectionTextSurf = "LAMP - Text Surface Config",
+    IniTextSurfTemplate = "Show on screen {0}",
+    MissileNumberText = "Missile number",
+    TargetLockedText = "Target Locked",
+    TargetNotLockedText = "No Target",
+    TargetTooCloseText = "Target Too Close",
+    TargetSearchingText = "Searching",
+    ActiveText = "Active";
 
-const double 
+ConfigSection[] _config;
+
+ConfigSection 
+    _generalSection = new ConfigSection("LAMP - General Config"),
+    _colorSection = new ConfigSection("LAMP - Status Screen Colors"),
+    _siloDoorSection = new ConfigSection("LAMP - Silo Door Config"),
+    _timerConfig = new ConfigSection("LAMP - Fire Timer Config");
+
+ConfigString
+    _fireControlGroupName = new ConfigString("Fire control group name", "Fire Control"),
+    _missileNameTag = new ConfigString("Missile group name tag", "Missile"),
+    _referenceNameTag = new ConfigString("Optional reference block name tag", "Reference");
+
+ConfigBool
+    _autofire = new ConfigBool("Enable auto-fire", false),
+    _autoFireRemote = new ConfigBool("Auto-fire remote missiles", false),
+    _stealthySemiActiveAntenna = new ConfigBool("Use dynamic active antenna range", false);
+
+ConfigDouble
+    _autoFireInterval = new ConfigDouble("Auto-fire interval (s)", 1),
+    _idleAntennaRange = new ConfigDouble("Antenna range - Idle (m)", 800),
+    _activeAntennaRange = new ConfigDouble("Antenna range - Active (m)", 5000),
+    _minRaycastRange = new ConfigDouble("Minimum allowed lock on range (m)", 50),
+    _searchScanRandomSpread = new ConfigDouble("Randomized raycast scan spread (m)", 0);
+
+ConfigNullable<int, ConfigInt>
+    _autofireLimitPerTarget = new ConfigNullable<int, ConfigInt>(new ConfigInt("Auto-fire missile limit per target")),
+    _siloDoorNumber = new ConfigNullable<int, ConfigInt>(new ConfigInt(MissileNumberText, comment: " This door will be opened when this specified missile is fired")),
+    _timerMissileNumber = new ConfigNullable<int, ConfigInt>(new ConfigInt(MissileNumberText, comment: " This timer will be triggered when this specified missile is fired"));
+
+ConfigEnum<GuidanceMode> _preferredGuidanceMode = new ConfigEnum<GuidanceMode>("Preferred guidance mode", GuidanceMode.Camera, " Accepted guidance modes are:\n   Camera, Turret, or BeamRiding");
+ConfigEnum<FireOrder> _fireOrder = new ConfigEnum<FireOrder>("Fire order", FireOrder.LowestMissileNumber, " Accepted values are:\n   LowestMissileNumber, SmallestAngleToTarget,\n   or SmallestDistanceToTarget\n Missiles will be fired smallest to largest value");
+ConfigEnum<TriggerState>
+    _timerTriggerState = new ConfigEnum<TriggerState>("Trigger on state", TriggerState.None,
+        " This timer will be triggered when the script enters one (or more) of\n" +
+        " the following states:\n" +
+        "   None, Idle, Searching, Targeting, AnyFire\n" +
+        " The \"Targeting\" state is triggered when a homing lock is established\n" +
+        " OR when beam ride mode is activated. To trigger on multiple states\n" +
+        " simply separate each state with commas (Ex: Idle,Targeting).");
+
+ConfigDeprecated<bool, ConfigBool>
+    _compatTimerTriggerAnyMissile = new ConfigDeprecated<bool, ConfigBool>(
+        new ConfigBool("Trigger on any fire", false));
+
+ConfigDeprecated<TriggerState, ConfigEnum<TriggerState>>
+    _compatTimerTriggerState = new ConfigDeprecated<TriggerState, ConfigEnum<TriggerState>>(
+        new ConfigEnum<TriggerState>("Trigger on targeting state", TriggerState.None));
+
+
+public ConfigColor
+    TopBarColor = new ConfigColor("Title bar background color", new Color(25, 25, 25)),
+    TitleTextColor = new ConfigColor("Title text color", new Color(150, 150, 150)),
+    BackgroundColor = new ConfigColor("Background color", new Color(0, 0, 0)),
+    TextColor = new ConfigColor("Primary text color", new Color(150, 150, 150)),
+    SecondaryTextColor = new ConfigColor("Secondary text color", new Color(75, 75, 75)),
+    StatusTextColor = new ConfigColor("Status text color", new Color(150, 150, 150)),
+    StatusBarBackgroundColor = new ConfigColor("Status bar background color", new Color(25, 25, 25)),
+    GuidanceSelectedColor = new ConfigColor("Selected guidance outline color", new Color(0, 50, 0)),
+    GuidanceAllowedColor = new ConfigColor("Allowed guidance text color", new Color(150, 150, 150)),
+    GuidanceDisallowedColor = new ConfigColor("Disallowed guidance text color", new Color(25, 25, 25)),
+    LockStatusGoodColor = new ConfigColor("Lock status good color", new Color(0, 50, 0)),
+    LockStatusBadColor = new ConfigColor("Lock status bad color", new Color(50, 0, 0)),
+    FireDisabledColor = new ConfigColor("Fire disabled text color", new Color(75, 75, 0)),
+    FireDisabledBackgroundColor = new ConfigColor("Fire disabled background color", new Color(10, 10, 10, 200));
+
+const double
     RuntimeToRealTime = (1.0 / 60.0) / 0.0166666,
     UpdatesPerSecond = 10,
     UpdateTime = 1.0 / UpdatesPerSecond;
 
-readonly Color 
-    DefaultTextColor = new Color(150, 150, 150),
-    TargetLockedColor = new Color(150, 150, 150),
-    TargetNotLockedColor = new Color(100, 0, 0),
-    TargetSearchingColor = new Color(100, 100, 0),
-    TargetTooCloseColor = new Color(100, 100, 0);
+Color
+    _defaultTextColor = new Color(150, 150, 150),
+    _targetLockedColor = new Color(150, 150, 150),
+    _targetNotLockedColor = new Color(100, 0, 0),
+    _targetSearchingColor = new Color(100, 100, 0),
+    _targetTooCloseColor = new Color(100, 100, 0);
 
 string _statusText = "";
 Color _statusColor;
@@ -212,25 +213,12 @@ ArgumentParser _args = new ArgumentParser();
 public enum GuidanceMode : int { None = 0, BeamRiding = 1, Camera = 1 << 1, Turret = 1 << 2 };
 enum TargetingStatus { Idle, Searching, Targeting };
 enum FireOrder { LowestMissileNumber, SmallestDistanceToTarget, SmallestAngleToTarget };
+[Flags] enum TriggerState { None = 0, Idle = 1, Searching = 1 << 1, Targeting = 1 << 2, AnyFire = 1 << 3 };
 
-static Dictionary<string, GuidanceMode> _guidanceModeDict = new Dictionary<string, GuidanceMode>()
-{
-{"CAMERA", GuidanceMode.Camera},
-{"TURRET", GuidanceMode.Turret},
-{"BEAMRIDE", GuidanceMode.BeamRiding},
-};
-
-static Dictionary<string, FireOrder> _fireOrderDict = new Dictionary<string, FireOrder>()
-{
-{"NUMBER", FireOrder.LowestMissileNumber},
-{"DISTANCE", FireOrder.SmallestDistanceToTarget},
-{"ANGLE", FireOrder.SmallestAngleToTarget},
-};
+TriggerState[] _triggerStateValues;
 
 Dictionary<long, int> _autofiredMissiles = new Dictionary<long, int>();
 
-GuidanceMode _preferredGuidanceMode = _guidanceModeDict.Values.First();
-FireOrder _fireOrder = _fireOrderDict.Values.First();
 GuidanceMode _designationMode = GuidanceMode.None;
 public GuidanceMode DesignationMode
 {
@@ -247,36 +235,48 @@ public GuidanceMode DesignationMode
         }
     }
 }
-TargetingStatus _targetingStatus = TargetingStatus.Idle;
-TargetingStatus _lastTargetingStatus = TargetingStatus.Idle;
 
-const double BsodShowTime = 5 * 60;
-double _currentBsodShowTime = 0;
+TargetingStatus _currentTargetingStatus = TargetingStatus.Idle;
+TargetingStatus CurrentTargetingStatus
+{
+    get
+    {
+        return _currentTargetingStatus;
+    }
+    set
+    {
+        if (_currentTargetingStatus != value)
+        {
+            _currentTargetingStatus = value;
+            OnNewTargetingStatus();
+        }
+    }
+}
+
 GuidanceMode _allowedGuidanceEnum = GuidanceMode.None;
 IMyTerminalBlock _lastControlledReference = null;
 List<GuidanceMode> _allowedGuidanceModes = new List<GuidanceMode>();
-List<IMyTerminalBlock> _shooterReferences = new List<IMyTerminalBlock>();
 List<IMySoundBlock> _soundBlocks = new List<IMySoundBlock>();
 List<IMyCameraBlock> _cameraList = new List<IMyCameraBlock>();
 List<IMyRadioAntenna> _broadcastList = new List<IMyRadioAntenna>();
 List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 List<IMyShipController> _shipControllers = new List<IMyShipController>();
+List<IMyMechanicalConnectionBlock> _mech = new List<IMyMechanicalConnectionBlock>();
 List<IMyLargeTurretBase> _turrets = new List<IMyLargeTurretBase>();
 List<IMyTurretControlBlock> _turretControlBlocks = new List<IMyTurretControlBlock>();
-List<IMyTimerBlock> _timersTriggerOnAnyFire = new List<IMyTimerBlock>(),
-                    _idleTimers = new List<IMyTimerBlock>(),
-                    _searchTimers = new List<IMyTimerBlock>(),
-                    _lockTimers = new List<IMyTimerBlock>();
-Dictionary<string, List<IMyTimerBlock>> _statusTimers;
-Dictionary<int, IMyDoor> _siloDoorDict = new Dictionary<int, IMyDoor>();
-Dictionary<int, IMyTimerBlock> _fireTimerDict = new Dictionary<int, IMyTimerBlock>();
+List<IMyTimerBlock> _statusTimersAnyFire = new List<IMyTimerBlock>(),
+                    _statusTimersIdle = new List<IMyTimerBlock>(),
+                    _statusTimersSearch = new List<IMyTimerBlock>(),
+                    _statusTimersTargeting = new List<IMyTimerBlock>();
+Dictionary<TriggerState, List<IMyTimerBlock>> _statusTimerMap;
+Dictionary<int, List<IMyDoor>> _siloDoorDict = new Dictionary<int, List<IMyDoor>>();
+Dictionary<int, List<IMyTimerBlock>> _fireTimerDict = new Dictionary<int, List<IMyTimerBlock>>();
 StringBuilder _setupStringbuilder = new StringBuilder();
 RuntimeTracker _runtimeTracker;
 RaycastHoming _raycastHoming;
 MissileStatusScreenHandler _screenHandler;
 SoundBlockManager _soundManager = new SoundBlockManager();
-MyIni _textSurfaceIni = new MyIni();
-MyIni _setupIni = new MyIni();
+MyIni _ini = new MyIni();
 Scheduler _scheduler;
 ScheduledAction _scheduledSetup;
 StringBuilder _echoBuilder = new StringBuilder();
@@ -289,78 +289,112 @@ ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = 
 
 bool _clearSpriteCache = false;
 
-SoundConfig 
-    _lockSearchSound = new SoundConfig("ArcSoundBlockAlert2", 0.5f, 1f, true),
-    _lockGoodSound = new SoundConfig("ArcSoundBlockAlert2", 0.2f, 1f, true),
-    _lockBadSound = new SoundConfig("ArcSoundBlockAlert1", 0.15f, 1f, true),
-    _lockLostSound = new SoundConfig("ArcSoundBlockAlert1", 0.5f, 0f, false);
+SoundConfig
+    _lockSearchSound = new SoundConfig(IniSectionSoundBase + "Search", "ArcSoundBlockAlert2", 0.5f, 1f, true),
+    _lockGoodSound = new SoundConfig(IniSectionSoundBase + "Good", "ArcSoundBlockAlert2", 0.2f, 1f, true),
+    _lockBadSound = new SoundConfig(IniSectionSoundBase + "Bad", "ArcSoundBlockAlert1", 0.15f, 1f, true),
+    _lockLostSound = new SoundConfig(IniSectionSoundBase + "Lost/Abort", "ArcSoundBlockAlert1", 0.5f, 0f, false);
 
-public struct SoundConfig
+public class SoundConfig
 {
-    public string Name;
-    public float Duration;
-    public float Interval;
-    public bool Loop;
-    
-    const string 
-        INI_SOUND_NAME = "Sound name",
-        INI_SOUND_DURATION = "Duration (s)",
-        INI_SOUND_INTERVAL = "Loop interval (s)",
-        INI_SOUND_SHOULD_LOOP = "Should loop";
-    
-    public SoundConfig(string name, float duration, float interval, bool loop)
-    {
-        Name = name;
-        Duration = duration;
-        Interval = interval;
-        Loop = loop;
-    }
-    
-    public void UpdateFromIni(string section, MyIni ini)
-    {
-        // Read
-        Name = ini.Get(section, INI_SOUND_NAME).ToString(Name);
-        Duration = ini.Get(section, INI_SOUND_DURATION).ToSingle(Duration);
-        Interval = ini.Get(section, INI_SOUND_INTERVAL).ToSingle(Interval);
-        Loop = ini.Get(section, INI_SOUND_SHOULD_LOOP).ToBoolean(Loop);
-        
-        // Write
-        ini.Set(section, INI_SOUND_NAME, Name);
-        ini.Set(section, INI_SOUND_DURATION, Duration);
-        ini.Set(section, INI_SOUND_INTERVAL, Interval);
-        ini.Set(section, INI_SOUND_SHOULD_LOOP, Loop);
-    }
-}
+    public ConfigString Name;
+    public ConfigFloat Duration;
+    public ConfigFloat Interval;
+    public ConfigBool Loop;
 
-public Color 
-    TopBarColor = new Color(25, 25, 25),
-    TitleTextColor = new Color(150, 150, 150),
-    BackgroundColor = new Color(0, 0, 0),
-    TextColor = new Color(150, 150, 150),
-    SecondaryTextColor = new Color(75, 75, 75),
-    StatusTextColor = new Color(150, 150, 150),
-    StatusBarBackgroundColor = new Color(25, 25, 25),
-    GuidanceSelectedColor = new Color(0, 50, 0),
-    GuidanceAllowedColor = new Color(150, 150, 150),
-    GuidanceDisallowedColor = new Color(25, 25, 25);
+    ConfigSection _soundConfig;
+
+    public SoundConfig(string section, string name, float duration, float interval, bool loop)
+    {
+        _soundConfig = new ConfigSection(section);
+        _soundConfig.AddValues(
+            Name = new ConfigString("Sound name", name),
+            Duration = new ConfigFloat("Duration (s)", duration),
+            Interval = new ConfigFloat("Loop interval (s)", interval),
+            Loop = new ConfigBool("Should loop", loop)
+        );
+
+    }
+
+    public void UpdateFrom(MyIni ini)
+    {
+        _soundConfig.Update(ref ini);
+    }
+};
 
 #endregion
 
 #region Main Methods
 Program()
-{   
-    _statusTimers = new Dictionary<string, List<IMyTimerBlock>>()
-    {
-        {"IDLE", _idleTimers},
-        {"SEARCHING", _searchTimers},
-        {"TARGETING", _lockTimers},
+{
+    _compatTimerTriggerAnyMissile.Callback = (v) => {
+        if (v)
+        {
+            _timerTriggerState.Value |= TriggerState.AnyFire;
+        }
+    };
+
+    _compatTimerTriggerState.Callback = (v) => {
+        _timerTriggerState.Value |= v;
     };
     
+    _config = new ConfigSection[]
+    {
+        _generalSection,
+        _colorSection,
+    };
+        
+    _generalSection.AddValues(
+        _fireControlGroupName,
+        _missileNameTag,
+        _referenceNameTag,
+        _preferredGuidanceMode,
+        _autofire,
+        _autoFireInterval,
+        _autoFireRemote,
+        _autofireLimitPerTarget,
+        _fireOrder,
+        _idleAntennaRange,
+        _activeAntennaRange,
+        _stealthySemiActiveAntenna,
+        _minRaycastRange,
+        _searchScanRandomSpread);
+
+    _colorSection.AddValues(
+        TopBarColor,
+        TitleTextColor,
+        BackgroundColor,
+        TextColor,
+        SecondaryTextColor,
+        StatusTextColor,
+        StatusBarBackgroundColor,
+        GuidanceSelectedColor,
+        GuidanceAllowedColor,
+        GuidanceDisallowedColor);
+
+    _siloDoorSection.AddValue(_siloDoorNumber);
+
+    _timerConfig.AddValues(
+        _compatTimerTriggerAnyMissile,
+        _compatTimerTriggerState,
+        _timerMissileNumber,
+        _timerTriggerState);
+
+    _statusTimerMap = new Dictionary<TriggerState, List<IMyTimerBlock>>()
+    {
+        {TriggerState.Idle, _statusTimersIdle},
+        {TriggerState.Searching, _statusTimersSearch},
+        {TriggerState.Targeting, _statusTimersTargeting},
+        {TriggerState.AnyFire, _statusTimersAnyFire},
+    };
+
+    _triggerStateValues = (TriggerState[])Enum.GetValues(typeof(TriggerState));
+
     _unicastListener = IGC.UnicastListener;
-    _unicastListener.SetMessageCallback(UNICAST_TAG);
-    
-    _remoteFireNotificationListener = IGC.RegisterBroadcastListener(IGC_TAG_REMOTE_FIRE_NOTIFICATION);
-    _remoteFireNotificationListener.SetMessageCallback(IGC_TAG_REMOTE_FIRE_NOTIFICATION);
+    _unicastListener.SetMessageCallback(UnicastTag);
+
+    _remoteFireNotificationListener = IGC.RegisterBroadcastListener(IgcTagRemoteFireNotification);
+    _remoteFireNotificationListener.SetMessageCallback(IgcTagRemoteFireNotification);
 
     _raycastHoming = new RaycastHoming(_maxRaycastRange, _maxTimeForLockBreak, _minRaycastRange, Me.CubeGrid.EntityId);
     _raycastHoming.AddEntityTypeToFilter(MyDetectedEntityType.FloatingObject, MyDetectedEntityType.Planet, MyDetectedEntityType.Asteroid);
@@ -371,11 +405,11 @@ Program()
     GetLargestGridRadius();
     ParseStorage();
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
-    _runtimeTracker = new RuntimeTracker(this, 5 * 60, 0.005); // 5 second buffer
+    _runtimeTracker = new RuntimeTracker(this, capacity: 5 * 60); // 5 second buffer
 
     float step = 1f / 9f;
     _screenUpdateBuffer = new CircularBuffer<Action>(10);
-    _screenUpdateBuffer.Add(() => _screenHandler.ComputeScreenParams(DesignationMode, _allowedGuidanceEnum, _lockStrength, _statusText, _statusColor, _maxRaycastRange, _inGravity, _stealth, _spiral, _topdown, _usePreciseAiming, _autoFire, _fireEnabled));
+    _screenUpdateBuffer.Add(() => _screenHandler.ComputeScreenParams(DesignationMode, _allowedGuidanceEnum, _lockStrength, _statusText, _statusColor, _maxRaycastRange, _inGravity, _stealth, _spiral, _topdown, _usePreciseAiming, _autofire, _fireEnabled));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 0 * step, 1 * step, _clearSpriteCache));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 1 * step, 2 * step, _clearSpriteCache));
     _screenUpdateBuffer.Add(() => _screenHandler.DrawScreens(_textSurfaces, 2 * step, 3 * step, _clearSpriteCache));
@@ -396,69 +430,52 @@ Program()
     _scheduler.AddScheduledAction(NetworkTargets, 6);
     _scheduler.AddScheduledAction(GetLargestGridRadius, 1.0 / 30.0);
     _scheduler.AddScheduledAction(() => AgeFiredPrograms(1), 1);
-    
+
     OnNewTargetingStatus();
 }
 
 void Main(string arg, UpdateType updateType)
 {
-    if (_showBSOD)
-    {
-        ++_currentBsodShowTime;
-        if (_currentBsodShowTime > BsodShowTime)
-        {
-            _showBSOD = false;
-            _isSetup = GrabBlocks();
-        }
-
-        return;
-    }
-
-    _runtimeTracker.AddRuntime();
-
-    if ((updateType & UpdateType.IGC) != 0)
-    {
-        if (arg.Equals(UNICAST_TAG))
-        {
-            ParseUnicastMessages();
-        }
-        if (arg.Equals(IGC_TAG_REMOTE_FIRE_NOTIFICATION))
-        {
-            ParseRemoteFireNotification();
-        }
-    }
-    else if (!string.IsNullOrWhiteSpace(arg))
-    {
-        ParseArguments(arg);
-    }
-    
-    var lastRuntime = RuntimeToRealTime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0);
-    _timeSinceTurretLock += lastRuntime;
-    if (_autoFire)
-        _timeSinceAutoFire += lastRuntime;
-
     try
     {
+        _runtimeTracker.AddRuntime();
+
+        if ((updateType & UpdateType.IGC) != 0)
+        {
+            IgcMessageHandling();
+        }
+        else if (!string.IsNullOrWhiteSpace(arg))
+        {
+            ParseArguments(arg);
+        }
+
+        double lastRuntime = RuntimeToRealTime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0);
+        _timeSinceTurretLock += lastRuntime;
+        if (_autofire)
+        {
+            _timeSinceAutofire += lastRuntime;
+        }
+
         _scheduler.Update();
         _soundManager.Update((float)lastRuntime);
+        _runtimeTracker.AddInstructions();
     }
     catch (Exception e)
     {
         string scriptName = "WMI Missile Fire Control";
-        BlueScreenOfDeath.Show(Me.GetSurface(0), scriptName, VERSION, e);
-        foreach (var surface in _textSurfaces)
+        BlueScreenOfDeath.Show(Me.GetSurface(0), scriptName, Version, e);
+        foreach (IMyTextSurface surface in _textSurfaces)
         {
-            BlueScreenOfDeath.Show(surface, scriptName, VERSION, e);
+            BlueScreenOfDeath.Show(surface, scriptName, Version, e);
         }
-        _showBSOD = true;
+        throw e;
     }
-    _runtimeTracker.AddInstructions();
 }
 
 void PrintDetailedInfo()
 {
-    _echoBuilder.AppendLine($"LAMP | Launch A Missile Program\n(Version {VERSION} - {DATE})");
-    _echoBuilder.AppendLine($"\nFor use with WHAM v{COMPAT_VERSION} or later.\n");
+    _echoBuilder.AppendLine($"LAMP | Launch A Missile Program\n(Version {Version} - {Date})");
+    _echoBuilder.AppendLine($"\nFor use with WHAM v{CompatVersion} or later.\n");
     _echoBuilder.AppendLine($"Next refresh in {Math.Max(_scheduledSetup.RunInterval - _scheduledSetup.TimeSinceLastRun, 0):N0} seconds\n");
     _echoBuilder.AppendLine($"Last setup result: {(_isSetup ? "SUCCESS" : "FAIL")}\n{_setupStringbuilder}");
     _echoBuilder.AppendLine(_runtimeTracker.Write());
@@ -480,16 +497,16 @@ void HandleDisplays()
 void OnNewTargetingStatus()
 {
     List<IMyTimerBlock> timers;
-    switch (_targetingStatus)
+    switch (CurrentTargetingStatus)
     {
         case TargetingStatus.Idle:
-            timers = _idleTimers;
+            timers = _statusTimersIdle;
             break;
         case TargetingStatus.Searching:
-            timers = _searchTimers;
+            timers = _statusTimersSearch;
             break;
         case TargetingStatus.Targeting:
-            timers = _lockTimers;
+            timers = _statusTimersTargeting;
             break;
         default:
             return;
@@ -503,12 +520,13 @@ void OnNewTargetingStatus()
 void GuidanceProcess()
 {
     if (!_isSetup)
+    {
         return;
+    }
 
     bool shouldBroadcast = false;
-    _statusColor = DefaultTextColor;
+    _statusColor = _defaultTextColor;
     _lockStrength = 0f;
-    _targetingStatus = TargetingStatus.Idle;
 
     if (_shipControllers.Count > 0)
     {
@@ -527,12 +545,6 @@ void GuidanceProcess()
             HandleTurretHoming(ref shouldBroadcast);
             break;
     }
-    
-    if (_targetingStatus != _lastTargetingStatus)
-    {
-        OnNewTargetingStatus();
-    }
-    _lastTargetingStatus = _targetingStatus;
 
     if (shouldBroadcast) //or if kill command
     {
@@ -599,13 +611,19 @@ void BroadcastParameterMessage()
         broadcastKey);
 
     if (_retask)
+    {
         _retask = false;
+    }
 
     if (killNow)
+    {
         _hasKilled = true;
+    }
 
     if (_broadcastRangeOverride)
+    {
         _broadcastRangeOverride = false;
+    }
 }
 
 #region Guidance Moding
@@ -617,8 +635,8 @@ void HandleOptical(ref bool shouldBroadcast)
     StopAllSounds();
 
     // Status
-    _statusText = BEAM_RIDE_ACTIVE;
-    _targetingStatus = TargetingStatus.Targeting;
+    _statusText = ActiveText;
+    CurrentTargetingStatus = TargetingStatus.Targeting;
 }
 
 void HandleCameraHoming(ref bool shouldBroadcast)
@@ -632,23 +650,31 @@ void HandleCameraHoming(ref bool shouldBroadcast)
 
         // Antenna range
         if (_stealthySemiActiveAntenna)
+        {
             antennaRange = Vector3D.Distance(base.Me.CubeGrid.WorldAABB.Center, _raycastHoming.TargetPosition) - _raycastHoming.TargetSize;
+        }
         else
+        {
             antennaRange = _activeAntennaRange;
+        }
 
         // Play sound
         if (!_raycastHoming.MissedLastScan)
+        {
             PlayLockOnSound(_soundBlocks);
+        }
         else if (_raycastHoming.MissedLastScan)
+        {
             PlayScanMissedSound(_soundBlocks);
+        }
 
         // Status
         _lockStrength = 1f - (float)((_raycastHoming.TimeSinceLastLock - _raycastHoming.AutoScanInterval) / _raycastHoming.MaxTimeForLockBreak);
         _lockStrength = MathHelper.Clamp(_lockStrength, 0f, 1f);
 
-        _statusText = TARGET_LOCKED_TEXT;
-        _statusColor = TargetLockedColor;
-        _targetingStatus = TargetingStatus.Targeting;
+        _statusText = TargetLockedText;
+        _statusColor = _targetLockedColor;
+        CurrentTargetingStatus = TargetingStatus.Targeting;
 
         HandleAutofire(_raycastHoming.TargetId);
     }
@@ -670,26 +696,30 @@ void HandleCameraHoming(ref bool shouldBroadcast)
         {
             if (!_raycastHoming.IsScanning)
             {
-                _statusText = TARGET_NOT_LOCKED_TEXT;
-                _statusColor = TargetNotLockedColor;
+                _statusText = TargetNotLockedText;
+                _statusColor = _targetNotLockedColor;
+                CurrentTargetingStatus = TargetingStatus.Idle;
             }
             else
             {
-                _statusText = TARGET_SEARCHING_TEXT;
-                _statusColor = TargetSearchingColor;
-                _targetingStatus = TargetingStatus.Searching;
+                _statusText = TargetSearchingText;
+                _statusColor = _targetSearchingColor;
+                CurrentTargetingStatus = TargetingStatus.Searching;
             }
         }
         else if (_raycastHoming.Status == RaycastHoming.TargetingStatus.TooClose)
         {
-            _statusText = TARGET_TOO_CLOSE_TEXT;
-            _statusColor = TargetTooCloseColor;
+            _statusText = TargetTooCloseText;
+            _statusColor = _targetTooCloseColor;
+            CurrentTargetingStatus = TargetingStatus.Searching;
         }
     }
 
     // Set antenna range
     if (!_broadcastRangeOverride)
+    {
         ScaleAntennaRange(antennaRange);
+    }
 }
 
 void HandleTurretHoming(ref bool shouldBroadcast)
@@ -697,51 +727,59 @@ void HandleTurretHoming(ref bool shouldBroadcast)
     // TODO: Make turret guidance populate fields
     TurretGuidance(_turrets, _turretControlBlocks);
 
-    double antennaRange = _stealthySemiActiveAntenna ? 1 : _idleAntennaRange;
+    double antennaRange = _stealthySemiActiveAntenna.Value ? 1.0 : _idleAntennaRange.Value;
     if (_turretLocked)
     {
         shouldBroadcast = true;
-        
+
         // Sound
         PlayLockOnSound(_soundBlocks);
 
         // Antenna range
         if (_stealthySemiActiveAntenna)
+        {
             antennaRange = Vector3D.Distance(Me.CubeGrid.WorldAABB.Center, _targetInfo.Position) - 10.0;
+        }
         else
+        {
             antennaRange = _activeAntennaRange;
+        }
 
         // Status
         _lockStrength = 1f;
-        _statusText = TARGET_LOCKED_TEXT;
-        _statusColor = TargetLockedColor;
-        _targetingStatus = TargetingStatus.Targeting;
+        _statusText = TargetLockedText;
+        _statusColor = _targetLockedColor;
+        CurrentTargetingStatus = TargetingStatus.Targeting;
 
         HandleAutofire(_targetInfo.EntityId);
     }
     else
     {
         // Status
-        _statusText = TARGET_NOT_LOCKED_TEXT;
-        _statusColor = TargetNotLockedColor;
+        _statusText = TargetNotLockedText;
+        _statusColor = _targetNotLockedColor;
         StopAllSounds();
+
+        CurrentTargetingStatus = TargetingStatus.Idle;
     }
 
     // Set antenna range
     if (!_broadcastRangeOverride)
+    {
         ScaleAntennaRange(antennaRange);
+    }
 }
 
 void HandleAutofire(long targetId)
 {
-    if (_autoFire && FiringAllowed && _timeSinceAutoFire >= _autoFireInterval)
+    if (_autofire && FiringAllowed && _timeSinceAutofire >= _autoFireInterval)
     {
-        if (_autofireLimitPerTarget > 0)
+        if (_autofireLimitPerTarget.HasValue && _autofireLimitPerTarget.Value > 0)
         {
             int firedCount;
             if (_autofiredMissiles.TryGetValue(targetId, out firedCount))
             {
-                if (firedCount >= _autofireLimitPerTarget)
+                if (firedCount >= _autofireLimitPerTarget.Value)
                 {
                     return;
                 }
@@ -753,34 +791,52 @@ void HandleAutofire(long targetId)
             firedCount += 1;
             _autofiredMissiles[targetId] = firedCount;
         }
-        
+
         if (_autoFireRemote)
+        {
             RequestRemoteMissileFire();
+        }
         else
+        {
             FireNextMissile(1);
-        _timeSinceAutoFire = 0;
+        }
+
+        _timeSinceAutofire = 0;
     }
 }
 #endregion
 
 #endregion
 
-#region IGC Unicast Handling
-void ParseUnicastMessages()
+#region IGC Message Handling
+void IgcMessageHandling()
 {
     while (_unicastListener.HasPendingMessage)
     {
         MyIGCMessage message = _unicastListener.AcceptMessage();
         object data = message.Data;
-        if (message.Tag == IGC_TAG_REMOTE_FIRE_RESPONSE)
+        if (message.Tag == IgcTagRemoteFireResponse)
         {
             if (data is MyTuple<Vector3D, long>)
             {
                 var payload = (MyTuple<Vector3D, long>)data;
                 var response = new RemoteFireResponse((Vector3)payload.Item1, payload.Item2);
                 if (!_remoteFireResponses.Contains(response))
+                {
                     _remoteFireResponses.Add(response);
+                }
             }
+        }
+    }
+
+    while (_remoteFireNotificationListener.HasPendingMessage)
+    {
+        var msg = _remoteFireNotificationListener.AcceptMessage();
+        if (msg.Data is int)
+        {
+            var missileNumber = (int)(msg.Data);
+            OpenSiloDoor(missileNumber);
+            TriggerFireTimer(missileNumber);
         }
     }
 }
@@ -804,7 +860,10 @@ struct RemoteFireResponse
     public override bool Equals(object obj)
     {
         if (!(obj is RemoteFireResponse))
+        {
             return false;
+        }
+
         return this.Equals((RemoteFireResponse)obj);
     }
 
@@ -825,10 +884,8 @@ void RequestRemoteMissileFire()
 
     if (!_awaitingResponse)
     {
-        var payload = new MyTuple<Vector3D, long>();
-        payload.Item1 = Me.GetPosition();
-        payload.Item2 = Me.EntityId;
-        IGC.SendBroadcastMessage(IGC_TAG_REMOTE_FIRE_REQUEST, payload);
+        var payload = new MyTuple<Vector3D, long>(Me.GetPosition(), Me.EntityId);
+        IGC.SendBroadcastMessage(IgcTagRemoteFireRequest, payload);
 
         // Delay processing (Gives missiles 20 ticks to respond)
         _scheduler.AddScheduledAction(ParseRemoteFireResponses, 3, true);
@@ -868,32 +925,20 @@ void ParseRemoteFireResponses()
         for (int i = 0; i < _remoteFireResponses.Count; ++i)
         {
             if (i + 1 > _remoteFireRequests)
+            {
                 break;
+            }
 
             var response = _remoteFireResponses[i];
 
-            IGC.SendUnicastMessage(response.EntityId, IGC_TAG_REGISTER, broadcastKey);
-            IGC.SendUnicastMessage(response.EntityId, IGC_TAG_FIRE, "");
+            IGC.SendUnicastMessage(response.EntityId, IgcTagRegister, broadcastKey);
+            IGC.SendUnicastMessage(response.EntityId, IgcTagFire, "");
         }
     }
 
     _remoteFireResponses.Clear();
     _awaitingResponse = false;
     _remoteFireRequests = 0;
-}
-
-void ParseRemoteFireNotification()
-{
-    while (_remoteFireNotificationListener.HasPendingMessage)
-    {
-        var msg = _remoteFireNotificationListener.AcceptMessage();
-        if (msg.Data is int)
-        {
-            var missileNumber = (int)(msg.Data);
-            OpenSiloDoor(missileNumber);
-            TriggerFireTimer(missileNumber);
-        }
-    }
 }
 #endregion
 
@@ -934,21 +979,21 @@ void NetworkTargets()
 {
     bool hasTarget = (DesignationMode == GuidanceMode.Camera && _raycastHoming.Status == RaycastHoming.TargetingStatus.Locked)
         || (DesignationMode == GuidanceMode.Turret && _turretLocked);
-    
+
     int capacity = hasTarget ? 2 : 1;
     _messageBuilder.Capacity = capacity;
-    
+
     // Broadcast own position
     TargetRelation myType = _biggestGrid.GridSizeEnum == MyCubeSize.Large ? TargetRelation.LargeGrid : TargetRelation.SmallGrid;
     var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(TargetRelation.Friendly | myType), _biggestGrid.EntityId, _biggestGrid.WorldVolume.Center, _biggestGridRadius * _biggestGridRadius);
     _messageBuilder.Add(myTuple);
-  
+
     if (hasTarget)
     {
         MyRelationsBetweenPlayerAndBlock relationBetweenPlayerAndBlock;
         MyDetectedEntityType type;
-        long targetId = 0;
-        Vector3D targetPos = Vector3.Zero;
+        long targetId;
+        Vector3D targetPos;
         switch (DesignationMode)
         {
             case GuidanceMode.Camera:
@@ -998,20 +1043,63 @@ void NetworkTargets()
         myTuple = new MyTuple<byte, long, Vector3D, double>((byte)relation, targetId, targetPos, 0);
         _messageBuilder.Add(myTuple);
     }
-    
-    IGC.SendBroadcastMessage(IGC_TAG_IFF, _messageBuilder.MoveToImmutable());
+
+    IGC.SendBroadcastMessage(IgcTagIff, _messageBuilder.MoveToImmutable());
 }
 #endregion
 
 #region Save and Argument Parsing
+const string StorageKey = "LAMP";
 void Save()
 {
-    // TODO: Reimplement this properly
+    _ini.Clear();
+    if (_raycastHoming.Status != RaycastHoming.TargetingStatus.Locked)
+    {
+        Storage = "";
+        return;
+    }
+    int i = 0;
+    _ini.Set(StorageKey, $"{i++}", (int)_raycastHoming.Status);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.HitPosition.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetVelocity.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.X);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.Y);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.PreciseModeOffset.Z);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TimeSinceLastLock);
+    _ini.Set(StorageKey, $"{i++}", _raycastHoming.TargetId);
+    Storage = _ini.ToString();
 }
 
 void ParseStorage()
 {
-    // TODO: Reimplement this properly
+    _ini.Clear();
+    _ini.TryParse(Storage);
+    int i = 0;
+    var tgtStatus = (RaycastHoming.TargetingStatus)_ini.Get(StorageKey, $"{i++}").ToInt32();
+    if (tgtStatus != RaycastHoming.TargetingStatus.Locked)
+    {
+        return;
+    }
+
+    Vector3D pos, vel, offset;
+    pos.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    pos.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    pos.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    vel.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.X = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.Y = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    offset.Z = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    double age = _ini.Get(StorageKey, $"{i++}").ToDouble();
+    long id = _ini.Get(StorageKey, $"{i++}").ToInt64();
+
+    DesignationMode = GuidanceMode.Camera;
+    _raycastHoming.SetInitialLockParameters(pos, vel, offset, age, id);
 }
 
 bool FiringAllowed
@@ -1040,11 +1128,11 @@ void ParseArguments(string arg)
         case "enable_fire":
             _fireEnabled = true;
             break;
-            
+
         case "disable_fire":
             _fireEnabled = false;
             break;
-        
+
         case "fire":
             if (FiringAllowed)
             {
@@ -1180,7 +1268,7 @@ void ParseArguments(string arg)
 
         case "mode_beamride":
         case "mode_optical":
-            DesignationMode = GuidanceMode.BeamRiding;                
+            DesignationMode = GuidanceMode.BeamRiding;
             break;
 
         case "mode_camera":
@@ -1257,40 +1345,26 @@ void ParseArguments(string arg)
         case "autofire":
         case "autofire_toggle":
         case "autofire_switch":
-            _autoFire = !_autoFire;
-            WriteAutoFire();
+            _autofire.Value = !_autofire;
             break;
 
         case "autofire_on":
-            _autoFire = true;
-            WriteAutoFire();
+            _autofire.Value = true;
             break;
 
         case "autofire_off":
-            _autoFire = false;
-            WriteAutoFire();
+            _autofire.Value = false;
             break;
             #endregion
-    }
-}
-
-void WriteAutoFire()
-{
-    _setupIni.Clear();
-    _setupIni.TryParse(Me.CustomData);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE, _autoFire);
-
-    string output = _setupIni.ToString();
-    if (!string.Equals(output, Me.CustomData))
-    {
-        Me.CustomData = output;
     }
 }
 
 void CycleGuidanceModes()
 {
     if (_allowedGuidanceModes.Count == 0)
+    {
         return;
+    }
 
     int index = _allowedGuidanceModes.FindIndex(x => x == DesignationMode);
     index = ++index % _allowedGuidanceModes.Count;
@@ -1299,6 +1373,15 @@ void CycleGuidanceModes()
 #endregion
 
 #region Block Fetching
+
+void ShallowClear<TKey, TValue>(Dictionary<TKey, List<TValue>> dict)
+{
+    foreach (List<TValue> list in dict.Values)
+    {
+        list.Clear();
+    }
+}
+
 bool GrabBlocks()
 {
     _setupStringbuilder.Clear();
@@ -1316,18 +1399,31 @@ bool GrabBlocks()
     _broadcastList.Clear();
     _textSurfaces.Clear();
     _shipControllers.Clear();
+    _mech.Clear();
     _turrets.Clear();
     _turretControlBlocks.Clear();
-    _timersTriggerOnAnyFire.Clear();
-    _idleTimers.Clear();
-    _searchTimers.Clear();
-    _lockTimers.Clear();
-    _siloDoorDict.Clear();
-    _fireTimerDict.Clear();
+    _statusTimersAnyFire.Clear();
+    _statusTimersIdle.Clear();
+    _statusTimersSearch.Clear();
+    _statusTimersTargeting.Clear();
+    ShallowClear(_siloDoorDict);
+    ShallowClear(_fireTimerDict);
     _reference = null;
 
     group.GetBlocksOfType<IMyTerminalBlock>(null, CollectionFunction);
-    GridTerminalSystem.GetBlocksOfType<IMyShipController>(_shipControllers);
+    GridTerminalSystem.GetBlocksOfType(_shipControllers);
+    GridTerminalSystem.GetBlocksOfType(_mech);
+
+    _raycastHoming.ClearIgnoredGridIDs();
+    _raycastHoming.AddIgnoredGridID(Me.CubeGrid.EntityId);
+    foreach (var m in _mech)
+    {
+        _raycastHoming.AddIgnoredGridID(m.CubeGrid.EntityId);
+        if (m.TopGrid != null)
+        {
+            _raycastHoming.AddIgnoredGridID(m.TopGrid.EntityId);
+        }
+    }
 
     _setupStringbuilder.AppendLine($"- Text surfaces: {_textSurfaces.Count}");
     _setupStringbuilder.AppendLine($"- Sound blocks: {_soundBlocks.Count}");
@@ -1337,19 +1433,25 @@ bool GrabBlocks()
     // Camera guidance checks
     _setupStringbuilder.AppendLine($"- Cameras: {_cameraList.Count}");
     if (_cameraList.Count != 0)
+    {
         _allowedGuidanceModes.Add(GuidanceMode.Camera);
+    }
 
     // Turret guidance checks
     _setupStringbuilder.AppendLine($"- Turrets: {_turrets.Count}");
     _setupStringbuilder.AppendLine($"- Custom turret controllers: {_turretControlBlocks.Count}");
     if (_turrets.Count != 0 || _turretControlBlocks.Count != 0)
+    {
         _allowedGuidanceModes.Add(GuidanceMode.Turret);
+    }
 
     // Optical guidance checks
     _setupStringbuilder.AppendLine($"- Ship controllers: {_shipControllers.Count}");
     _setupStringbuilder.AppendLine($"- Reference block: {(_reference != null ? $"'{_reference.CustomName}'" : "(none)")}");
     if (_shipControllers.Count != 0 || _cameraList.Count != 0 || _reference != null)
+    {
         _allowedGuidanceModes.Add(GuidanceMode.BeamRiding);
+    }
 
     //Antenna Blocks
     if (_broadcastList.Count == 0)
@@ -1377,7 +1479,9 @@ bool GrabBlocks()
     }
 
     if (DesignationMode == GuidanceMode.None)
+    {
         DesignationMode = _allowedGuidanceModes[0];
+    }
 
     _setupStringbuilder.AppendLine($"\nAllowed guidance modes:");
     _allowedGuidanceEnum = GuidanceMode.None;
@@ -1391,113 +1495,28 @@ bool GrabBlocks()
 
 void HandleIni()
 {
-    _setupIni.Clear();
-    string preferredStr = _guidanceModeDict.Keys.First(),
-           orderStr = _fireOrderDict.Keys.First(),
-           limitStr = DEFAULT_MISSILE_LIMIT;
-    if (_setupIni.TryParse(Me.CustomData))
+    _ini.Clear();
+    bool parsed = _ini.TryParse(Me.CustomData);
+
+    if (!parsed && !string.IsNullOrWhiteSpace(Me.CustomData))
     {
-        _fireControlGroupName = _setupIni.Get(INI_SECTION_GENERAL, INI_FIRE_GROUP_NAME).ToString(_fireControlGroupName);
-        _missileNameTag = _setupIni.Get(INI_SECTION_GENERAL, INI_MSL_NAME).ToString(_missileNameTag);
-        _referenceNameTag = _setupIni.Get(INI_SECTION_GENERAL, INI_REFERENCE_NAME).ToString(_referenceNameTag);
-        _autoFire = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE).ToBoolean(_autoFire);
-        _autoFireRemote = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE_REMOTE).ToBoolean(_autoFireRemote);
-
-        string temp = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_MSL_LIMIT).ToString(limitStr);
-        int limit;
-        if (int.TryParse(temp, out limit) && limit > 0)
-        {
-            _autofireLimitPerTarget = limit;
-            limitStr = temp;
-        }
-        else
-        {
-            _autofireLimitPerTarget = 0;
-        }
-
-        _autoFireInterval = _setupIni.Get(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL).ToDouble(_autoFireInterval);
-        _idleAntennaRange = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_IDLE).ToDouble(_idleAntennaRange);
-        _activeAntennaRange = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE).ToDouble(_activeAntennaRange);
-        _stealthySemiActiveAntenna = _setupIni.Get(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC).ToBoolean(_stealthySemiActiveAntenna);
-        _minRaycastRange = _setupIni.Get(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE).ToDouble(_minRaycastRange);
-        _searchScanRandomSpread = _setupIni.Get(INI_SECTION_GENERAL, INI_SEARCH_SCAN_SPREAD).ToDouble(_searchScanRandomSpread);
-
-        TopBarColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
-        TitleTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
-        BackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, BackgroundColor);
-        TextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, TextColor);
-        SecondaryTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, SecondaryTextColor);
-        StatusTextColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, StatusTextColor);
-        StatusBarBackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, StatusBarBackgroundColor);
-        GuidanceSelectedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, GuidanceSelectedColor);
-        GuidanceAllowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
-        GuidanceDisallowedColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
-
-        temp = _setupIni.Get(INI_SECTION_GENERAL, INI_PREFERRED_GUID).ToString(preferredStr);
-        GuidanceMode preferredMode;
-        if (_guidanceModeDict.TryGetValue(temp, out preferredMode))
-        {
-            _preferredGuidanceMode = preferredMode;
-            preferredStr = temp;
-        }
-        else
-        {
-            _preferredGuidanceMode = _guidanceModeDict.Values.First();
-        }
-        
-        temp = _setupIni.Get(INI_SECTION_GENERAL, INI_FIRE_ORDER).ToString(orderStr);
-        FireOrder fireOrder;
-        if (_fireOrderDict.TryGetValue(temp, out fireOrder))
-        {
-            _fireOrder = fireOrder;
-            orderStr = temp;
-        }
-        else
-        {
-            _fireOrder = _fireOrderDict.Values.First();
-        }
-    }
-    else if (!string.IsNullOrWhiteSpace(Me.CustomData))
-    {
-        _setupIni.Clear();
-        _setupIni.EndContent = Me.CustomData;
+        _ini.Clear();
+        _ini.EndContent = Me.CustomData;
     }
 
-    _setupIni.Set(INI_SECTION_GENERAL, INI_FIRE_GROUP_NAME, _fireControlGroupName);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_MSL_NAME, _missileNameTag);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_REFERENCE_NAME, _referenceNameTag);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_PREFERRED_GUID, preferredStr);
-    _setupIni.SetComment(INI_SECTION_GENERAL, INI_PREFERRED_GUID, INI_PREFERRED_GUID_COMMENT);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE, _autoFire);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_INTERVAL, _autoFireInterval);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_FIRE_REMOTE, _autoFireRemote);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_AUTO_MSL_LIMIT, limitStr);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_FIRE_ORDER, orderStr);
-    _setupIni.SetComment(INI_SECTION_GENERAL, INI_FIRE_ORDER, INI_FIRE_ORDER_COMMENT);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_IDLE, _idleAntennaRange);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_ACTIVE, _activeAntennaRange);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_ANTENNA_RANGE_DYNAMIC, _stealthySemiActiveAntenna);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_MIN_RAYCAST_RANGE, _minRaycastRange);
-    _setupIni.Set(INI_SECTION_GENERAL, INI_SEARCH_SCAN_SPREAD, _searchScanRandomSpread);
+    foreach (var c in _config)
+    {
+        c.Update(ref _ini);
+    }
+
+    _lockSearchSound.UpdateFrom(_ini);
+    _lockGoodSound.UpdateFrom(_ini);
+    _lockBadSound.UpdateFrom(_ini);
+    _lockLostSound.UpdateFrom(_ini);
+
     _raycastHoming.SearchScanSpread = _searchScanRandomSpread;
 
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TOP_BAR, _setupIni, TopBarColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TITLE_TEXT, _setupIni, TitleTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_BACKGROUND, _setupIni, BackgroundColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT, _setupIni, TextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_SECONDARY, _setupIni, SecondaryTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_TEXT_STATUS, _setupIni, StatusTextColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_STATUS_BACKGROUND, _setupIni, StatusBarBackgroundColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_SELECTED, _setupIni, GuidanceSelectedColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_ALLOWED, _setupIni, GuidanceAllowedColor);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLOR_GUID_DISALLOWED, _setupIni, GuidanceDisallowedColor);
-
-    _lockSearchSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_SEARCH, _setupIni);
-    _lockGoodSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_GOOD, _setupIni);
-    _lockBadSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_BAD, _setupIni);
-    _lockLostSound.UpdateFromIni(INI_SECTION_SOUND_LOCK_LOST, _setupIni);
-
-    string output = _setupIni.ToString();
+    string output = _ini.ToString();
     if (!string.Equals(output, Me.CustomData))
     {
         Me.CustomData = output;
@@ -1507,85 +1526,100 @@ void HandleIni()
 bool CollectionFunction(IMyTerminalBlock block)
 {
     if (!block.IsSameConstructAs(Me))
+    {
         return false;
+    }
 
     AddTextSurfaces(block, _textSurfaces);
 
     if (block.CustomName.IndexOf(_referenceNameTag, StringComparison.OrdinalIgnoreCase) >= 0)
+    {
         _reference = block;
+    }
 
     // TODO: Only look for ship controllers in group? Maybe prioritize those in the group?
 
     var door = block as IMyDoor;
     if (door != null)
     {
-        _setupIni.Clear();
-        bool parsed = _setupIni.TryParse(door.CustomData);
-        int siloNumber = 0; // Default value
-        if (parsed)
+        _ini.Clear();
+        bool parsed = _ini.TryParse(door.CustomData);
+        if (!parsed && !string.IsNullOrWhiteSpace(door.CustomData))
         {
-            siloNumber = _setupIni.Get(INI_SECTION_SILO_DOOR, INI_SILO_NUMBER).ToInt32(siloNumber);
+            _ini.Clear();
+            _ini.EndContent = door.CustomData;
         }
-        _setupIni.Set(INI_SECTION_SILO_DOOR, INI_SILO_NUMBER, siloNumber);
-        _setupIni.SetComment(INI_SECTION_SILO_DOOR, INI_SILO_NUMBER, INI_SILO_NUMBER_COMMENT);
-        _siloDoorDict[siloNumber] = door;
 
-        string output = _setupIni.ToString();
+        _siloDoorSection.Update(ref _ini);
+
+        if (_siloDoorNumber.HasValue)
+        {
+            List<IMyDoor> doors;
+            if (!_siloDoorDict.TryGetValue(_siloDoorNumber.Value, out doors))
+            {
+                doors = new List<IMyDoor>();
+                _siloDoorDict[_siloDoorNumber.Value] = doors;
+            }
+            doors.Add(door);
+        }
+
+        string output = _ini.ToString();
         if (!string.Equals(output, door.CustomData))
         {
             door.CustomData = output;
         }
-        // TODO: Print warn if multiple doors bound to same missile
         return false;
     }
 
     var timer = block as IMyTimerBlock;
     if (timer != null)
     {
-        _setupIni.Clear();
-        bool parsed = _setupIni.TryParse(timer.CustomData);
-        int siloNumber = 0; // Default value
-        bool fireAny = false;
-        string triggerState = "None";
+        _ini.Clear();
+        bool parsed = _ini.TryParse(timer.CustomData);
+
+        if (!parsed && !string.IsNullOrWhiteSpace(timer.CustomData))
+        {
+            _ini.Clear();
+            _ini.EndContent = timer.CustomData;
+        }
+
+        _timerTriggerState.Reset();
         
-        if (parsed)
-        {
-            siloNumber = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER).ToInt32(siloNumber);
-            fireAny = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY).ToBoolean(fireAny);
-            triggerState = _setupIni.Get(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE).ToString(triggerState);
+        _timerConfig.Update(ref _ini);
 
+        if (_timerMissileNumber.HasValue)
+        {
             List<IMyTimerBlock> timers;
-            if (_statusTimers.TryGetValue(triggerState.ToUpperInvariant(), out timers))
+            if (!_fireTimerDict.TryGetValue(_timerMissileNumber.Value, out timers))
             {
-                timers.Add(timer);
+                timers = new List<IMyTimerBlock>();
+                _fireTimerDict[_timerMissileNumber.Value] = timers;
             }
-            else
-            {
-                triggerState = "None";
-            }
-        }
-        _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER, siloNumber);
-        _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_NUMBER, INI_FIRE_TIMER_NUMBER_COMMENT);
-        _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY, fireAny);
-        _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_ANY, INI_FIRE_TIMER_ANY_COMMENT);
-        _setupIni.Set(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE, triggerState);
-        _setupIni.SetComment(INI_SECTION_FIRE_TIMER, INI_FIRE_TIMER_TRIGGER_ON_STATE, INI_FIRE_TIMER_TRIGGER_ON_STATE_COMMENT);
-
-        if (fireAny)
-        {
-            _timersTriggerOnAnyFire.Add(timer);
-        }
-        else
-        {
-            _fireTimerDict[siloNumber] = timer;
+            timers.Add(timer);
         }
 
-        string output = _setupIni.ToString();
+        foreach (TriggerState val in _triggerStateValues)
+        {
+            if (val == TriggerState.None)
+            {
+                continue;
+            }
+
+            if ((val & _timerTriggerState.Value) != 0)
+            {
+                List<IMyTimerBlock> timers;
+                if (_statusTimerMap.TryGetValue(val, out timers))
+                {
+                    timers.Add(timer);
+                }
+            }
+        }
+
+        string output = _ini.ToString();
         if (!string.Equals(output, timer.CustomData))
         {
             timer.CustomData = output;
         }
-        // TODO: Print warn if multiple timers bound to same missile
         return false;
     }
 
@@ -1617,7 +1651,7 @@ bool CollectionFunction(IMyTerminalBlock block)
         _turrets.Add(turret);
         return false;
     }
-    
+
     var tcb = block as IMyTurretControlBlock;
     if (tcb != null)
     {
@@ -1639,93 +1673,98 @@ void AddTextSurfaces(IMyTerminalBlock block, List<IMyTextSurface> textSurfaces)
 
     var surfaceProvider = block as IMyTextSurfaceProvider;
     if (surfaceProvider == null)
+    {
         return;
+    }
 
-    _textSurfaceIni.Clear();
-    bool parsed = _textSurfaceIni.TryParse(block.CustomData);
+    _ini.Clear();
+    bool parsed = _ini.TryParse(block.CustomData);
     if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
     {
-        _textSurfaceIni.Clear();
-        _textSurfaceIni.EndContent = block.CustomData;
+        _ini.Clear();
+        _ini.EndContent = block.CustomData;
     }
 
     int surfaceCount = surfaceProvider.SurfaceCount;
     for (int i = 0; i < surfaceCount; ++i)
     {
-        string iniKey = string.Format(INI_TEXT_SURF_TEMPLATE, i);
-        bool display = _textSurfaceIni.Get(INI_SECTION_TEXT_SURF, iniKey).ToBoolean(i == 0 && !(block is IMyProgrammableBlock));
+        string iniKey = string.Format(IniTextSurfTemplate, i);
+        bool display = _ini.Get(IniSectionTextSurf, iniKey).ToBoolean(i == 0 && !(block is IMyProgrammableBlock));
         if (display)
+        {
             textSurfaces.Add(surfaceProvider.GetSurface(i));
+        }
 
-        _textSurfaceIni.Set(INI_SECTION_TEXT_SURF, iniKey, display);
+        _ini.Set(IniSectionTextSurf, iniKey, display);
     }
 
-    string output = _textSurfaceIni.ToString();
+    string output = _ini.ToString();
     if (!string.Equals(output, block.CustomData))
+    {
         block.CustomData = output;
+    }
 }
 #endregion
 
 #region Firing Methods
-List<IMyBlockGroup> missileGroups = new List<IMyBlockGroup>();
-List<int> currentMissileNumbers = new List<int>();
-List<IMyProgrammableBlock> missilePrograms = new List<IMyProgrammableBlock>();
-Dictionary<int, IMyBlockGroup> missileNumberDict = new Dictionary<int, IMyBlockGroup>();
-Dictionary<IMyProgrammableBlock, double> firedMissileProgramAge = new Dictionary<IMyProgrammableBlock, double>();
-List<IMyProgrammableBlock> firedMissilesKeyList = new List<IMyProgrammableBlock>();
-List<IMyProgrammableBlock> firedMissileProgramKeysToRemove = new List<IMyProgrammableBlock>();
+List<int> _currentMissileNumbers = new List<int>();
+List<IMyProgrammableBlock> _missilePrograms = new List<IMyProgrammableBlock>();
+Dictionary<int, IMyBlockGroup> _missileNumberDict = new Dictionary<int, IMyBlockGroup>();
+Dictionary<IMyProgrammableBlock, double> _firedMissileProgramAge = new Dictionary<IMyProgrammableBlock, double>();
+List<IMyProgrammableBlock> _firedMissilesKeyList = new List<IMyProgrammableBlock>();
+List<IMyProgrammableBlock> _firedMissileProgramKeysToRemove = new List<IMyProgrammableBlock>();
 const double MIN_PROGRAM_AGE_TO_REMOVE = 10.0;
 
 void AgeFiredPrograms(double deltaTime)
 {
-    firedMissilesKeyList.Clear();
-    foreach (var key in firedMissileProgramAge.Keys)
+    _firedMissilesKeyList.Clear();
+    foreach (var key in _firedMissileProgramAge.Keys)
     {
-        firedMissilesKeyList.Add(key);
+        _firedMissilesKeyList.Add(key);
     }
 
-    foreach (var key in firedMissilesKeyList)
+    foreach (var key in _firedMissilesKeyList)
     {
-        double elapsed = firedMissileProgramAge[key];
+        double elapsed = _firedMissileProgramAge[key];
         if (elapsed > MIN_PROGRAM_AGE_TO_REMOVE)
         {
-            firedMissileProgramKeysToRemove.Add(key);
+            _firedMissileProgramKeysToRemove.Add(key);
         }
         else
         {
-            firedMissileProgramAge[key] = elapsed + deltaTime;
+            _firedMissileProgramAge[key] = elapsed + deltaTime;
         }
     }
 
-    foreach (var key in firedMissileProgramKeysToRemove)
+    foreach (var key in _firedMissileProgramKeysToRemove)
     {
-        firedMissileProgramAge.Remove(key);
+        _firedMissileProgramAge.Remove(key);
     }
 }
 
 void GetCurrentMissiles()
 {
-    currentMissileNumbers.Clear();
-    missileNumberDict.Clear();
+    _currentMissileNumbers.Clear();
+    _missileNumberDict.Clear();
     GridTerminalSystem.GetBlockGroups(null, CollectMissileNumbers);
-    
-    switch (_fireOrder)
+
+    switch (_fireOrder.Value)
     {
         case FireOrder.LowestMissileNumber:
-            currentMissileNumbers.Sort();
+            _currentMissileNumbers.Sort();
             break;
         case FireOrder.SmallestAngleToTarget:
-            currentMissileNumbers.Sort((a,b) => MissileCompare(a, b, true));
+            _currentMissileNumbers.Sort((a, b) => MissileCompare(a, b, true));
             break;
         case FireOrder.SmallestDistanceToTarget:
-            currentMissileNumbers.Sort((a,b) => MissileCompare(a, b, false));
+            _currentMissileNumbers.Sort((a, b) => MissileCompare(a, b, false));
             break;
     }
 }
 
 int MissileCompare(int a, int b, bool angle)
 {
-    if (_targetingStatus != TargetingStatus.Targeting)
+    if (CurrentTargetingStatus != TargetingStatus.Targeting)
     {
         return -1;
     }
@@ -1735,9 +1774,13 @@ int MissileCompare(int a, int b, bool angle)
 public static double CosBetween(Vector3D a, Vector3D b)
 {
     if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+    {
         return 0;
+    }
     else
+    {
         return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
 }
 
 
@@ -1745,13 +1788,13 @@ List<IMyShipController> _controllerCompareList = new List<IMyShipController>();
 double GetCompareValue(int num, bool angle)
 {
     _controllerCompareList.Clear();
-    missileNumberDict[num].GetBlocksOfType(_controllerCompareList);
+    _missileNumberDict[num].GetBlocksOfType(_controllerCompareList);
     if (_controllerCompareList.Count == 0)
     {
         return double.MaxValue;
     }
     IMyShipController c = _controllerCompareList[0];
-    
+
     Vector3D targetPos = Vector3D.Zero;
     switch (DesignationMode)
     {
@@ -1784,8 +1827,8 @@ bool CollectMissileNumbers(IMyBlockGroup g)
         return false;
     }
 
-    currentMissileNumbers.Add(number);
-    missileNumberDict[number] = g;
+    _currentMissileNumbers.Add(number);
+    _missileNumberDict[number] = g;
     return false;
 }
 
@@ -1826,7 +1869,7 @@ void AlphaStrike()
 {
     GetCurrentMissiles();
 
-    foreach (var missileNumber in currentMissileNumbers)
+    foreach (var missileNumber in _currentMissileNumbers)
     {
         FireMissilePrograms(missileNumber);
     }
@@ -1834,32 +1877,34 @@ void AlphaStrike()
 
 bool IsMissilePBValid(IMyTerminalBlock b)
 {
-    var func = (IMyFunctionalBlock)b;
-    return func != null && func.IsWorking && !firedMissileProgramAge.ContainsKey((IMyProgrammableBlock)b);
+    var pb = (IMyProgrammableBlock)b;
+    return pb.IsWorking && !_firedMissileProgramAge.ContainsKey(pb);
 }
 
 bool FireMissilePrograms(int missileNumber)
 {
     IMyBlockGroup group = null;
-    if (!missileNumberDict.TryGetValue(missileNumber, out group))
+    if (!_missileNumberDict.TryGetValue(missileNumber, out group))
+    {
         return false;
+    }
 
-    missilePrograms.Clear();
-    group.GetBlocksOfType(missilePrograms, IsMissilePBValid);
-    if (missilePrograms.Count == 0)
+    _missilePrograms.Clear();
+    group.GetBlocksOfType(_missilePrograms, IsMissilePBValid);
+    if (_missilePrograms.Count == 0)
     {
         return false; // Could not fire
     }
 
-    foreach (var pb in missilePrograms)
+    foreach (var pb in _missilePrograms)
     {
-        IGC.SendUnicastMessage(pb.EntityId, IGC_TAG_FIRE, "");
-        firedMissileProgramAge[pb] = 0;
+        IGC.SendUnicastMessage(pb.EntityId, IgcTagFire, "");
+        _firedMissileProgramAge[pb] = 0;
     }
 
     OpenSiloDoor(missileNumber);
     TriggerFireTimer(missileNumber);
-    
+
     BroadcastTargetingData();
     BroadcastParameterMessage();
 
@@ -1871,7 +1916,7 @@ void FireMissileInRange(int numberToFire, int start, int end)
     GetCurrentMissiles();
 
     int numberFired = 0;
-    foreach (var missileNumber in currentMissileNumbers)
+    foreach (var missileNumber in _currentMissileNumbers)
     {
         if (missileNumber < start || missileNumber > end)
         {
@@ -1896,7 +1941,7 @@ void FireNextMissile(int numberToFire)
     GetCurrentMissiles();
 
     int numberFired = 0;
-    foreach (var missileNumber in currentMissileNumbers)
+    foreach (var missileNumber in _currentMissileNumbers)
     {
         bool fired = FireMissilePrograms(missileNumber);
         if (fired)
@@ -1913,23 +1958,29 @@ void FireNextMissile(int numberToFire)
 
 void OpenSiloDoor(int missileNumber)
 {
-    IMyDoor siloDoor;
-    if (_siloDoorDict.TryGetValue(missileNumber, out siloDoor))
+    List<IMyDoor> doors;
+    if (_siloDoorDict.TryGetValue(missileNumber, out doors))
     {
-        siloDoor.Enabled = true;
-        siloDoor.OpenDoor();
+        foreach (IMyDoor d in doors)
+        {
+            d.Enabled = true;
+            d.OpenDoor();
+        }
     }
 }
 
 void TriggerFireTimer(int missileNumber)
 {
-    IMyTimerBlock timer;
-    if (_fireTimerDict.TryGetValue(missileNumber, out timer))
+    List<IMyTimerBlock> timers;
+    if (_fireTimerDict.TryGetValue(missileNumber, out timers))
     {
-        timer.Trigger();
+        foreach (IMyTimerBlock t in timers)
+        {
+            t.Trigger();
+        }
     }
 
-    foreach (var t in _timersTriggerOnAnyFire)
+    foreach (var t in _statusTimersAnyFire)
     {
         t.Trigger();
     }
@@ -1945,22 +1996,26 @@ Vector3D _upVec = new Vector3D(0, 0, 0);
 void OpticalGuidance()
 {
     /*
-     * The following prioritizes references in the following hierchy:
-     * 1. Currently used camera
-     * 2. Reference block (if any is specified)
-     * 3. Currently used control seat
-     * 4. Last active control seat
-     * 5. First control seat that is found
-     * 6. First camera that is found
-     */
+        * The following prioritizes references in the following hierchy:
+        * 1. Currently used camera
+        * 2. Reference block (if any is specified)
+        * 3. Currently used control seat
+        * 4. Last active control seat
+        * 5. First control seat that is found
+        * 6. First camera that is found
+        */
 
     IMyTerminalBlock reference = GetControlledCamera(_cameraList);
 
     if (reference == null)
+    {
         reference = _reference;
+    }
 
     if (reference == null)
+    {
         reference = GetControlledShipController(_shipControllers);
+    }
 
     if (reference == null)
     {
@@ -2012,7 +2067,9 @@ void TurretGuidance(List<IMyLargeTurretBase> turrets, List<IMyTurretControlBlock
         {
             var thisRange = block.Range;
             if (thisRange > _maxTurretRange)
+            {
                 _maxTurretRange = thisRange;
+            }
         }
     }
 
@@ -2027,7 +2084,9 @@ void TurretGuidance(List<IMyLargeTurretBase> turrets, List<IMyTurretControlBlock
         {
             var thisRange = block.Range;
             if (thisRange > _maxTurretRange)
+            {
                 _maxTurretRange = thisRange;
+            }
         }
     }
 
@@ -2139,7 +2198,10 @@ class SoundBlockManager
         set
         {
             if (value == _shouldPlay)
+            {
                 return;
+            }
+
             _shouldPlay = value;
             _hasPlayed = false;
         }
@@ -2256,79 +2318,64 @@ public class MissileStatusScreenHandler
     List<MySpriteContainer> _spriteContainers = new List<MySpriteContainer>();
 
     // Default sizes
-    const float 
-        DEFAULT_SCREEN_SIZE = 512,
-        DEFAULT_SCREEN_HALF_SIZE = 512 * 0.5f;
+    const float
+        DefaultScreenHalfSize = 512 * 0.5f;
 
     // UI positions
-    Vector2 
-        TOP_BAR_SIZE,
-        STATUS_BAR_SIZE,
-        TOP_BAR_POS,
-        TOP_BAR_TEXT_POS,
-        STEALTH_TEXT_POS,
-        AIM_POINT_POS,
-        RANGE_TEXT_POS,
-        SPIRAL_TEXT_POS,
-        TOPDOWN_TEXT_POS,
-        STATUS_BAR_POS,
-        STATUS_BAR_TEXT_POS,
-        STATUS_BAR_WEAK_TEXT_POS,
-        STATUS_BAR_STRONG_TEXT_POS,
-        SECONDARY_TEXT_POS_OFFSET,
-        DROP_SHADOW_OFFSET,
-        MODE_CAMERA_POS,
-        MODE_TURRET_POS,
-        MODE_BEAMRIDE_POS,
-        MODE_CAMERA_SELECT_POS,
-        MODE_TURRET_SELECT_POS,
-        MODE_BEAMRIDE_SELECT_POS,
-        MODE_CAMERA_SELECT_SIZE,
-        MODE_TURRET_SELECT_SIZE,
-        MODE_BEAMRIDE_SELECT_SIZE,
-        AUTOFIRE_TEXT_POS,
-        FIRE_DISABLED_POS,
-        FIRE_DISABLED_TEXT_BOX_SIZE;
+    Vector2
+        _topBarSize,
+        _statusBarSize,
+        _topBarPos,
+        _topBarTextPos,
+        _stealthTextPos,
+        _aimPointTextPos,
+        _rangeTextPos,
+        _spiralTextPos,
+        _topDownTextPos,
+        _statusBarPos,
+        _statusBarTextPos,
+        _secondaryTextPosOffset,
+        _dropShadowOffset,
+        _modeCameraPos,
+        _modeTurretPos,
+        _modeBeamRidePos,
+        _modeCameraSelectPos,
+        _modeTurretSelectPos,
+        _modeBeamRideSelectPos,
+        _modeCameraSelectSize,
+        _modeTurretSelectSize,
+        _modeBeamRideSelectSize,
+        _autofireTextPos,
+        _fireDisabledPos,
+        _fireDisabledTextBoxSize;
 
     // Constants
-    const float 
-        PRIMARY_TEXT_SIZE = 1.5f,
-        SECONDARY_TEXT_SIZE = 1.2f,
-        TERTIARY_TEXT_SIZE = 1f,
-        BASE_TEXT_HEIGHT_PX = 37f,
-        PRIMARY_TEXT_OFFSET = -0.5f * BASE_TEXT_HEIGHT_PX * PRIMARY_TEXT_SIZE,
-        MODE_SELECT_LINE_LENGTH = 20f,
-        MODE_SELECT_LINE_WIDTH = 6f;
+    const float
+        PrimaryTextSize = 1.5f,
+        SecondaryTextSize = 1.2f,
+        BaseTextHeightPx = 37f, // 28.8
+        PrimaryTextOffset = -0.5f * BaseTextHeightPx * PrimaryTextSize,
+        ModeSelectLineLength = 20f,
+        ModeSelectLineWidth = 6f;
 
-    const string 
-        FONT = "DEBUG",
-        TOP_TEXT = "LAMP Fire Control",
-        MODE_TEXT = "Mode",
-        MODE_CAMERA_TEXT = "Camera",
-        MODE_TURRET_TEXT = "Turret",
-        MODE_BEAMRIDE_TEXT = "Beam Ride",
-        RANGE_TEXT = "Range",
-        STEALTH_TEXT = "Stealth",
-        SPIRAL_TEXT = "Evasion",
-        TOPDOWN_TEXT = "Topdown",
-        ENABLED_TEXT = "Enabled",
-        DISABLED_TEXT = "Disabled",
-        NOT_APPLICABLE_TEXT = "N/A",
-        STATUS_TEXT = "Status",
-        WEAK_TEXT = "Weak",
-        STRONG_TEXT = "Strong",
-        AIM_POINT_TEXT = "Aim Point",
-        AIM_CENTER_TEXT = "Center",
-        AIM_OFFSET_TEXT = "Offset",
-        AUTOFIRE_TEXT = "Autofire",
-        FIRE_DISABLED_TEXT = "FIRING DISABLED";
-
-    // Non-configurable colors
-    readonly Color 
-        STATUS_GOOD_COLOR = new Color(0, 50, 0),
-        STATUS_BAD_COLOR = new Color(50, 0, 0),
-        _warningColor = Color.Red,
-        _warningBackgroundColor = new Color(10, 10, 10, 200);
+    const string
+        Font = "Debug",
+        TopText = "LAMP Fire Control",
+        ModeCameraText = "Camera",
+        ModeTurretText = "Turret",
+        ModeBeamRideText = "Beam Ride",
+        RangeText = "Range",
+        StealthText = "Stealth",
+        SpiralText = "Evasion",
+        TopdownText = "Topdown",
+        EnabledText = "Enabled",
+        DisabledText = "Disabled",
+        NotApplicableText = "N/A",
+        AimPointText = "Aim Point",
+        AimCenterText = "Center",
+        AimOffsetText = "Offset",
+        AutofireText = "Autofire",
+        FireDisabledText = "FIRING DISABLED";
 
     Program _p;
     #endregion
@@ -2337,48 +2384,46 @@ public class MissileStatusScreenHandler
     {
         _p = program;
 
-        SECONDARY_TEXT_POS_OFFSET = new Vector2(0, -1.5f * PRIMARY_TEXT_OFFSET);
-        DROP_SHADOW_OFFSET = new Vector2(2, 2);
+        _secondaryTextPosOffset = new Vector2(0, -1.5f * PrimaryTextOffset);
+        _dropShadowOffset = new Vector2(2, 2);
 
         // Top bar
-        TOP_BAR_SIZE = new Vector2(512, 64);
-        TOP_BAR_POS = new Vector2(0, -DEFAULT_SCREEN_HALF_SIZE + 32); //TODO: compute in ctor
-        TOP_BAR_TEXT_POS = new Vector2(0, -DEFAULT_SCREEN_HALF_SIZE + 32 + PRIMARY_TEXT_OFFSET);
+        _topBarSize = new Vector2(512, 64);
+        _topBarPos = new Vector2(0, -DefaultScreenHalfSize + 32); //TODO: compute in ctor
+        _topBarTextPos = new Vector2(0, -DefaultScreenHalfSize + 32 + PrimaryTextOffset);
 
         // Modes
-        MODE_CAMERA_SELECT_SIZE = new Vector2(130, 56);
-        MODE_TURRET_SELECT_SIZE = new Vector2(110, 56);
-        MODE_BEAMRIDE_SELECT_SIZE = new Vector2(170, 56);
+        _modeCameraSelectSize = new Vector2(130, 56);
+        _modeTurretSelectSize = new Vector2(110, 56);
+        _modeBeamRideSelectSize = new Vector2(170, 56);
 
-        MODE_CAMERA_SELECT_POS = new Vector2(-160, -140);
-        MODE_TURRET_SELECT_POS = new Vector2(-20, -140);
-        MODE_BEAMRIDE_SELECT_POS = new Vector2(140, -140);
+        _modeCameraSelectPos = new Vector2(-160, -140);
+        _modeTurretSelectPos = new Vector2(-20, -140);
+        _modeBeamRideSelectPos = new Vector2(140, -140);
 
-        float secondaryTextVeticalOffset = -0.5f * BASE_TEXT_HEIGHT_PX * SECONDARY_TEXT_SIZE;
-        MODE_CAMERA_POS = MODE_CAMERA_SELECT_POS + new Vector2(0, secondaryTextVeticalOffset);
-        MODE_TURRET_POS = MODE_TURRET_SELECT_POS + new Vector2(0, secondaryTextVeticalOffset);
-        MODE_BEAMRIDE_POS = MODE_BEAMRIDE_SELECT_POS + new Vector2(0, secondaryTextVeticalOffset);
+        float secondaryTextVeticalOffset = -0.5f * BaseTextHeightPx * SecondaryTextSize;
+        _modeCameraPos = _modeCameraSelectPos + new Vector2(0, secondaryTextVeticalOffset);
+        _modeTurretPos = _modeTurretSelectPos + new Vector2(0, secondaryTextVeticalOffset);
+        _modeBeamRidePos = _modeBeamRideSelectPos + new Vector2(0, secondaryTextVeticalOffset);
 
         // Status bar
-        STATUS_BAR_POS = new Vector2(0, -70);
-        STATUS_BAR_SIZE = new Vector2(450, 56);
-        STATUS_BAR_TEXT_POS = STATUS_BAR_POS + new Vector2(0, PRIMARY_TEXT_OFFSET);
-        STATUS_BAR_WEAK_TEXT_POS = STATUS_BAR_POS + new Vector2(-200, 40);
-        STATUS_BAR_STRONG_TEXT_POS = STATUS_BAR_POS + new Vector2(200, 40);
+        _statusBarPos = new Vector2(0, -70);
+        _statusBarSize = new Vector2(450, 56);
+        _statusBarTextPos = _statusBarPos + new Vector2(0, PrimaryTextOffset);
 
         // Left column
-        RANGE_TEXT_POS = new Vector2(-220, 0 + PRIMARY_TEXT_OFFSET);
-        SPIRAL_TEXT_POS = new Vector2(-220, 90 + PRIMARY_TEXT_OFFSET);
-        STEALTH_TEXT_POS = new Vector2(-220, 180 + PRIMARY_TEXT_OFFSET);
+        _rangeTextPos = new Vector2(-220, 0 + PrimaryTextOffset);
+        _spiralTextPos = new Vector2(-220, 90 + PrimaryTextOffset);
+        _stealthTextPos = new Vector2(-220, 180 + PrimaryTextOffset);
 
         // Right column
-        AIM_POINT_POS = new Vector2(50, 0 + PRIMARY_TEXT_OFFSET);
-        AUTOFIRE_TEXT_POS = new Vector2(50, 90 + PRIMARY_TEXT_OFFSET);
-        TOPDOWN_TEXT_POS = new Vector2(50, 180 + PRIMARY_TEXT_OFFSET);
-        
+        _aimPointTextPos = new Vector2(50, 0 + PrimaryTextOffset);
+        _autofireTextPos = new Vector2(50, 90 + PrimaryTextOffset);
+        _topDownTextPos = new Vector2(50, 180 + PrimaryTextOffset);
+
         // Fire disabled
-        FIRE_DISABLED_POS = new Vector2(0, 50);
-        FIRE_DISABLED_TEXT_BOX_SIZE = new Vector2(360, -PRIMARY_TEXT_OFFSET * PRIMARY_TEXT_SIZE + 24);
+        _fireDisabledPos = new Vector2(0, 50);
+        _fireDisabledTextBoxSize = new Vector2(360, -PrimaryTextOffset * PrimaryTextSize + 24);
     }
 
     //For debugging
@@ -2420,7 +2465,7 @@ public class MissileStatusScreenHandler
         if (!anyGuidanceAllowed)
         {
             statusText = "ERROR";
-            statusColor = STATUS_BAD_COLOR;
+            statusColor = _p.LockStatusBadColor;
         }
 
         Vector2 modeSelectSize = Vector2.Zero;
@@ -2431,111 +2476,111 @@ public class MissileStatusScreenHandler
             showTopdownAndAimMode = false;
             lockStrength = 1;
 
-            modeSelectSize = MODE_BEAMRIDE_SELECT_SIZE;
-            modeSelectPos = MODE_BEAMRIDE_SELECT_POS;
+            modeSelectSize = _modeBeamRideSelectSize;
+            modeSelectPos = _modeBeamRideSelectPos;
         }
         else
         {
             if (guidanceMode == GuidanceMode.Camera)
             {
-                modeSelectSize = MODE_CAMERA_SELECT_SIZE;
-                modeSelectPos = MODE_CAMERA_SELECT_POS;
+                modeSelectSize = _modeCameraSelectSize;
+                modeSelectPos = _modeCameraSelectPos;
             }
             else if (guidanceMode == GuidanceMode.Turret)
             {
-                modeSelectSize = MODE_TURRET_SELECT_SIZE;
-                modeSelectPos = MODE_TURRET_SELECT_POS;
+                modeSelectSize = _modeTurretSelectSize;
+                modeSelectPos = _modeTurretSelectPos;
             }
         }
 
         MySpriteContainer container;
 
         // Title bar
-        container = new MySpriteContainer("SquareSimple", TOP_BAR_SIZE, TOP_BAR_POS, 0, _p.TopBarColor, true);
+        container = new MySpriteContainer("SquareSimple", _topBarSize, _topBarPos, 0, _p.TopBarColor, true);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(TOP_TEXT, FONT, PRIMARY_TEXT_SIZE, TOP_BAR_TEXT_POS, _p.TitleTextColor);
+        container = new MySpriteContainer(TopText, Font, PrimaryTextSize, _topBarTextPos, _p.TitleTextColor);
         _spriteContainers.Add(container);
 
         // Status bar
-        container = new MySpriteContainer("SquareSimple", STATUS_BAR_SIZE, STATUS_BAR_POS, 0, _p.StatusBarBackgroundColor);
+        container = new MySpriteContainer("SquareSimple", _statusBarSize, _statusBarPos, 0, _p.StatusBarBackgroundColor);
         _spriteContainers.Add(container);
 
-        Color lerpedStatusColor = CustomInterpolation(STATUS_BAD_COLOR, STATUS_GOOD_COLOR, lockStrength);
-        Vector2 statusBarSize = STATUS_BAR_SIZE * new Vector2(lockStrength, 1f);
-        container = new MySpriteContainer("SquareSimple", statusBarSize, STATUS_BAR_POS, 0, lerpedStatusColor);
+        Color lerpedStatusColor = CustomInterpolation(_p.LockStatusBadColor, _p.LockStatusGoodColor, lockStrength);
+        Vector2 statusBarSize = _statusBarSize * new Vector2(lockStrength, 1f);
+        container = new MySpriteContainer("SquareSimple", statusBarSize, _statusBarPos, 0, lerpedStatusColor);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(statusText, FONT, PRIMARY_TEXT_SIZE, STATUS_BAR_TEXT_POS + DROP_SHADOW_OFFSET, Color.Black);
+        container = new MySpriteContainer(statusText, Font, PrimaryTextSize, _statusBarTextPos + _dropShadowOffset, Color.Black);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(statusText, FONT, PRIMARY_TEXT_SIZE, STATUS_BAR_TEXT_POS, statusColor);
+        container = new MySpriteContainer(statusText, Font, PrimaryTextSize, _statusBarTextPos, statusColor);
         _spriteContainers.Add(container);
 
         // Modes
-        DrawBoxCorners(modeSelectSize, modeSelectPos, MODE_SELECT_LINE_LENGTH, MODE_SELECT_LINE_WIDTH, _p.GuidanceSelectedColor, _spriteContainers);
+        DrawBoxCorners(modeSelectSize, modeSelectPos, ModeSelectLineLength, ModeSelectLineWidth, _p.GuidanceSelectedColor, _spriteContainers);
 
-        container = new MySpriteContainer(MODE_CAMERA_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_CAMERA_POS, (allowedModesEnum & GuidanceMode.Camera) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(ModeCameraText, Font, SecondaryTextSize, _modeCameraPos, (allowedModesEnum & GuidanceMode.Camera) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(MODE_TURRET_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_TURRET_POS, (allowedModesEnum & GuidanceMode.Turret) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(ModeTurretText, Font, SecondaryTextSize, _modeTurretPos, (allowedModesEnum & GuidanceMode.Turret) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(MODE_BEAMRIDE_TEXT, FONT, SECONDARY_TEXT_SIZE, MODE_BEAMRIDE_POS, (allowedModesEnum & GuidanceMode.BeamRiding) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
+        container = new MySpriteContainer(ModeBeamRideText, Font, SecondaryTextSize, _modeBeamRidePos, (allowedModesEnum & GuidanceMode.BeamRiding) != 0 ? _p.GuidanceAllowedColor : _p.GuidanceDisallowedColor, TextAlignment.CENTER);
         _spriteContainers.Add(container);
 
         // Range
-        container = new MySpriteContainer(RANGE_TEXT, FONT, PRIMARY_TEXT_SIZE, RANGE_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(RangeText, Font, PrimaryTextSize, _rangeTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer($"{range * 0.001:n1} km", FONT, SECONDARY_TEXT_SIZE, RANGE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer($"{range * 0.001:n1} km", Font, SecondaryTextSize, _rangeTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Stealth
-        container = new MySpriteContainer(STEALTH_TEXT, FONT, PRIMARY_TEXT_SIZE, STEALTH_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(StealthText, Font, PrimaryTextSize, _stealthTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(stealth ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, STEALTH_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(stealth ? EnabledText : DisabledText, Font, SecondaryTextSize, _stealthTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Spiral
-        container = new MySpriteContainer(SPIRAL_TEXT, FONT, PRIMARY_TEXT_SIZE, SPIRAL_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(SpiralText, Font, PrimaryTextSize, _spiralTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(spiral ? ENABLED_TEXT : DISABLED_TEXT, FONT, SECONDARY_TEXT_SIZE, SPIRAL_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(spiral ? EnabledText : DisabledText, Font, SecondaryTextSize, _spiralTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Topdown
-        container = new MySpriteContainer(TOPDOWN_TEXT, FONT, PRIMARY_TEXT_SIZE, TOPDOWN_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(TopdownText, Font, PrimaryTextSize, _topDownTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer((!inGravity || !showTopdownAndAimMode) ? NOT_APPLICABLE_TEXT : (topdown ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, TOPDOWN_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer((!inGravity || !showTopdownAndAimMode) ? NotApplicableText : (topdown ? EnabledText : DisabledText), Font, SecondaryTextSize, _topDownTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Aimpoint
-        container = new MySpriteContainer(AIM_POINT_TEXT, FONT, PRIMARY_TEXT_SIZE, AIM_POINT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(AimPointText, Font, PrimaryTextSize, _aimPointTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (precise ? AIM_OFFSET_TEXT : AIM_CENTER_TEXT), FONT, SECONDARY_TEXT_SIZE, AIM_POINT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(!showTopdownAndAimMode ? NotApplicableText : (precise ? AimOffsetText : AimCenterText), Font, SecondaryTextSize, _aimPointTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
         // Autofire
-        container = new MySpriteContainer(AUTOFIRE_TEXT, FONT, PRIMARY_TEXT_SIZE, AUTOFIRE_TEXT_POS, _p.TextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(AutofireText, Font, PrimaryTextSize, _autofireTextPos, _p.TextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
 
-        container = new MySpriteContainer(!showTopdownAndAimMode ? NOT_APPLICABLE_TEXT : (autofire ? ENABLED_TEXT : DISABLED_TEXT), FONT, SECONDARY_TEXT_SIZE, AUTOFIRE_TEXT_POS + SECONDARY_TEXT_POS_OFFSET, _p.SecondaryTextColor, TextAlignment.LEFT);
+        container = new MySpriteContainer(!showTopdownAndAimMode ? NotApplicableText : (autofire ? EnabledText : DisabledText), Font, SecondaryTextSize, _autofireTextPos + _secondaryTextPosOffset, _p.SecondaryTextColor, TextAlignment.LEFT);
         _spriteContainers.Add(container);
-        
+
         // Fire Disabled Warning
         if (!fireEnabled)
         {
-            container = new MySpriteContainer("SquareSimple", FIRE_DISABLED_TEXT_BOX_SIZE, FIRE_DISABLED_POS, 0, _warningBackgroundColor);
+            container = new MySpriteContainer("SquareSimple", _fireDisabledTextBoxSize, _fireDisabledPos, 0, _p.FireDisabledBackgroundColor);
             _spriteContainers.Add(container);
 
-            container = new MySpriteContainer("AH_TextBox", FIRE_DISABLED_TEXT_BOX_SIZE, FIRE_DISABLED_POS, 0, _warningColor);
+            container = new MySpriteContainer("AH_TextBox", _fireDisabledTextBoxSize, _fireDisabledPos, 0, _p.FireDisabledColor);
             _spriteContainers.Add(container);
 
-            container = new MySpriteContainer(FIRE_DISABLED_TEXT, FONT, PRIMARY_TEXT_SIZE, FIRE_DISABLED_POS + new Vector2(0, -22), _warningColor, TextAlignment.CENTER);
+            container = new MySpriteContainer(FireDisabledText, Font, PrimaryTextSize, _fireDisabledPos + new Vector2(0, -22), _p.FireDisabledColor, TextAlignment.CENTER);
             _spriteContainers.Add(container);
         }
     }
@@ -2577,15 +2622,15 @@ public class MissileStatusScreenHandler
 
     /*
     Draws a box that looks like this:
-     __        __
+        __        __
     |            |
 
     |__        __|
     */
     static void DrawBoxCorners(Vector2 boxSize, Vector2 centerPos, float lineLength, float lineWidth, Color color, List<MySpriteContainer> spriteContainers)
     {
-        Vector2 horizontalSize = new Vector2(lineLength, lineWidth);
-        Vector2 verticalSize = new Vector2(lineWidth, lineLength);
+        var horizontalSize = new Vector2(lineLength, lineWidth);
+        var verticalSize = new Vector2(lineWidth, lineLength);
 
         Vector2 horizontalOffset = 0.5f * horizontalSize;
         Vector2 verticalOffset = 0.5f * verticalSize;
@@ -2648,10 +2693,10 @@ void PopulateMatrix3x3Columns(ref Matrix3x3 mat, ref Vector3D col0, ref Vector3D
 
 void SendMissileHomingMessage(Vector3D lastHitPosition, Vector3D targetPosition, Vector3D targetVelocity, Vector3D preciseOffset, Vector3D shooterPosition, double timeSinceLastLock, long targetId, long keycode)
 {
-    Matrix3x3 matrix1 = new Matrix3x3();
+    var matrix1 = new Matrix3x3();
     PopulateMatrix3x3Columns(ref matrix1, ref lastHitPosition, ref targetPosition, ref targetVelocity);
 
-    Matrix3x3 matrix2 = new Matrix3x3();
+    var matrix2 = new Matrix3x3();
     PopulateMatrix3x3Columns(ref matrix2, ref preciseOffset, ref shooterPosition, ref Vector3D.Zero);
 
     var payload = new MyTuple<Matrix3x3, Matrix3x3, float, long, long>
@@ -2663,7 +2708,7 @@ void SendMissileHomingMessage(Vector3D lastHitPosition, Vector3D targetPosition,
         Item5 = keycode,
     };
 
-    IGC.SendBroadcastMessage(IGC_TAG_HOMING, payload);
+    IGC.SendBroadcastMessage(IgcTagHoming, payload);
 }
 
 void SendMissileBeamRideMessage(Vector3D forward, Vector3D left, Vector3D up, Vector3D shooterPosition, long keycode)
@@ -2677,7 +2722,7 @@ void SendMissileBeamRideMessage(Vector3D forward, Vector3D left, Vector3D up, Ve
         Item5 = keycode
     };
 
-    IGC.SendBroadcastMessage(IGC_TAG_BEAM_RIDING, payload);
+    IGC.SendBroadcastMessage(IgcTagBeamRide, payload);
 }
 
 void SendMissileParameterMessage(bool kill, bool stealth, bool spiral, bool topdown, bool precise, bool retask, long keycode)
@@ -2696,7 +2741,7 @@ void SendMissileParameterMessage(bool kill, bool stealth, bool spiral, bool topd
         Item2 = keycode
     };
 
-    IGC.SendBroadcastMessage(IGC_TAG_PARAMS, payload);
+    IGC.SendBroadcastMessage(IgcTagParams, payload);
 }
 
 byte BoolToByte(bool value)
@@ -2708,39 +2753,23 @@ long GetBroadcastKey()
 {
     long broadcastKey = -1;
     if (_broadcastList.Count > 0)
+    {
         broadcastKey = _broadcastList[0].EntityId;
+    }
 
     return broadcastKey;
 }
 #endregion
 
 #region General Functions
-Vector3D GetAverageBlockPosition<T>(List<T> blocks) where T : class, IMyTerminalBlock
-{
-    Vector3D sum = Vector3D.Zero;
-    foreach (var block in blocks)
-    {
-        sum += block.GetPosition();
-    }
-    return sum / blocks.Count();
-}
-
 IMyCameraBlock GetControlledCamera(List<IMyCameraBlock> cameras)
 {
     foreach (var block in cameras)
     {
         if (block.IsActive)
+        {
             return block;
-    }
-    return null;
-}
-
-IMyLargeTurretBase GetControlledTurret(List<IMyLargeTurretBase> turrets)
-{
-    foreach (var block in turrets)
-    {
-        if (block.IsUnderControl)
-            return block;
+        }
     }
     return null;
 }
@@ -2756,61 +2785,11 @@ void ScaleAntennaRange(double dist)
 }
 #endregion
 
-#region Ini Helper
-public static class MyIniHelper
-{
-    public static void SetVector3D(string sectionName, string vectorName, ref Vector3D vector, MyIni ini)
-    {
-        ini.Set(sectionName, vectorName, vector.ToString());
-    }
-
-    public static Vector3D GetVector3D(string sectionName, string vectorName, MyIni ini)
-    {
-        var vector = Vector3D.Zero;
-        Vector3D.TryParse(ini.Get(sectionName, vectorName).ToString(), out vector);
-        return vector;
-    }
-
-    public static void SetColor(string sectionName, string itemName, MyIni ini, Color color)
-    {
-        string colorString = string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A);
-        ini.Set(sectionName, itemName, colorString);
-    }
-
-    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultChar = null)
-    {
-        string rgbString = ini.Get(sectionName, itemName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length != 4)
-        {
-            if (defaultChar.HasValue)
-                return defaultChar.Value;
-            else
-                return Color.Transparent;
-        }
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
-        if (!hasAlpha)
-            a = 255;
-
-        r = MathHelper.Clamp(r, 0, 255);
-        g = MathHelper.Clamp(g, 0, 255);
-        b = MathHelper.Clamp(b, 0, 255);
-        a = MathHelper.Clamp(a, 0, 255);
-
-        return new Color(r, g, b, a);
-    }
-}
 #endregion
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile }
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
 
 #region Raycast Homing
 class RaycastHoming
@@ -2823,9 +2802,15 @@ class RaycastHoming
             return OffsetTargeting ? OffsetTargetPosition : TargetCenter;
         }
     }
-    public double SearchScanSpread {get; set; } = 0;
+    public double SearchScanSpread { get; set; } = 0;
     public Vector3D TargetCenter { get; private set; } = Vector3D.Zero;
-    public Vector3D OffsetTargetPosition { get; private set; } = Vector3D.Zero;
+    public Vector3D OffsetTargetPosition
+    {
+        get
+        {
+            return TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
+        }
+    }
     public Vector3D TargetVelocity { get; private set; } = Vector3D.Zero;
     public Vector3D HitPosition { get; private set; } = Vector3D.Zero;
     public Vector3D PreciseModeOffset { get; private set; } = Vector3D.Zero;
@@ -2852,14 +2837,12 @@ class RaycastHoming
     readonly List<IMyCameraBlock> _availableCameras = new List<IMyCameraBlock>();
     readonly Random _rngeesus = new Random();
 
-    MyDetectedEntityInfo _info = default(MyDetectedEntityInfo);
     MatrixD _targetOrientation;
-    Vector3D _targetPositionOverride;
     HashSet<long> _gridIDsToIgnore = new HashSet<long>();
     double _timeSinceLastScan = 0;
     bool _manualLockOverride = false;
     bool _fudgeVectorSwitch = false;
-    
+
     double AutoScanScaleFactor
     {
         get
@@ -2878,10 +2861,8 @@ class RaycastHoming
 
     public void SetInitialLockParameters(Vector3D hitPosition, Vector3D targetVelocity, Vector3D offset, double timeSinceLastLock, long targetId)
     {
-        _targetPositionOverride = hitPosition;
         TargetCenter = hitPosition;
         HitPosition = hitPosition;
-        OffsetTargetPosition = hitPosition;
         PreciseModeOffset = offset;
         TargetVelocity = targetVelocity;
         TimeSinceLastLock = timeSinceLastLock;
@@ -2928,7 +2909,6 @@ class RaycastHoming
 
     void ClearLockInternal()
     {
-        _info = default(MyDetectedEntityInfo);
         IsScanning = false;
         Status = TargetingStatus.NotLocked;
         MissedLastScan = false;
@@ -2941,12 +2921,12 @@ class RaycastHoming
         TargetRelation = MyRelationsBetweenPlayerAndBlock.NoOwnership;
         TargetType = MyDetectedEntityType.None;
     }
-    
+
     double RndDbl()
     {
         return 2 * _rngeesus.NextDouble() - 1;
     }
-    
+
     double GaussRnd()
     {
         return (RndDbl() + RndDbl() + RndDbl()) / 3.0;
@@ -2967,7 +2947,7 @@ class RaycastHoming
         var randomVector = GaussRnd() * perpVector1 + GaussRnd() * perpVector2;
         return randomVector * fudgeFactor * TimeSinceLastLock;
     }
-    
+
     Vector3D GetSearchPos(Vector3D origin, Vector3D direction, IMyCameraBlock camera)
     {
         Vector3D scanPos = origin + direction * MaxRange;
@@ -2976,6 +2956,208 @@ class RaycastHoming
             return scanPos;
         }
         return scanPos + (camera.WorldMatrix.Left * GaussRnd() + camera.WorldMatrix.Up * GaussRnd()) * SearchScanSpread;
+    }
+
+    IMyTerminalBlock GetReference(List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock)
+    {
+        /*
+         * References are prioritized in this order:
+         * 1. Currently used camera
+         * 2. Reference block
+         * 3. Currently used control seat
+         */
+        IMyTerminalBlock controlledCam = GetControlledCamera(cameraList);
+        if (controlledCam != null)
+            return controlledCam;
+
+        if (referenceBlock != null)
+            return referenceBlock;
+
+        return GetControlledShipController(shipControllers);
+    }
+
+    IMyCameraBlock SelectCamera()
+    {
+        // Check for transition between faces
+        if (_availableCameras.Count == 0)
+        {
+            _timeSinceLastScan = 100000;
+            MissedLastScan = true;
+            return null;
+        }
+
+        return GetCameraWithMaxRange(_availableCameras);
+    }
+
+    void SetAutoScanInterval(double scanRange, IMyCameraBlock camera)
+    {
+        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
+    }
+
+    bool DoLockScan(List<IMyCameraBlock> cameraList, out MyDetectedEntityInfo info, out IMyCameraBlock camera)
+    {
+        info = default(MyDetectedEntityInfo);
+
+        #region Scan position selection
+        Vector3D scanPosition;
+        switch (_currentAimMode)
+        {
+            case AimMode.Offset:
+                scanPosition = HitPosition;
+                break;
+            case AimMode.OffsetRelative:
+                scanPosition = OffsetTargetPosition;
+                break;
+            default:
+                scanPosition = TargetCenter;
+                break;
+        }
+        scanPosition += TargetVelocity * TimeSinceLastLock;
+
+        if (MissedLastScan)
+        {
+            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
+        }
+        #endregion
+
+        #region Camera selection
+        GetCamerasInDirection(cameraList, _availableCameras, scanPosition, true);
+
+        camera = SelectCamera();
+        if (camera == null)
+        {
+            return false;
+        }
+        #endregion
+
+        #region Scanning
+        // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
+        Vector3D adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - camera.GetPosition()) * 2 * TargetSize;
+        double scanRange = (adjustedTargetPos - camera.GetPosition()).Length();
+
+        SetAutoScanInterval(scanRange, camera);
+
+        if (camera.AvailableScanRange >= scanRange &&
+            _timeSinceLastScan >= AutoScanInterval)
+        {
+            info = camera.Raycast(adjustedTargetPos);
+            return true;
+        }
+        return false;
+        #endregion
+    }
+
+    bool DoSearchScan(List<IMyCameraBlock> cameraList, IMyTerminalBlock reference, out MyDetectedEntityInfo info, out IMyCameraBlock camera)
+    {
+        info = default(MyDetectedEntityInfo);
+
+        #region Camera selection
+        if (reference != null)
+        {
+            GetCamerasInDirection(cameraList, _availableCameras, reference.WorldMatrix.Forward);
+        }
+        else
+        {
+            _availableCameras.Clear();
+            _availableCameras.AddRange(cameraList);
+        }
+
+        camera = SelectCamera();
+        if (camera == null)
+        {
+            return false;
+        }
+        #endregion
+
+        #region Scanning
+        SetAutoScanInterval(MaxRange, camera);
+
+        if (camera.AvailableScanRange >= MaxRange &&
+            _timeSinceLastScan >= AutoScanInterval)
+        {
+            if (reference != null)
+            {
+                info = camera.Raycast(GetSearchPos(reference.GetPosition(), reference.WorldMatrix.Forward, camera));
+            }
+            else
+            {
+                info = camera.Raycast(MaxRange);
+            }
+
+            return true;
+        }
+        return false;
+        #endregion
+    }
+
+    public void UpdateTargetStateVectors(Vector3D position, Vector3D hitPosition, Vector3D velocity, double timeSinceLock = 0)
+    {
+        TargetCenter = position;
+        HitPosition = hitPosition;
+        TargetVelocity = velocity;
+        TimeSinceLastLock = timeSinceLock;
+    }
+
+    void ProcessScanData(MyDetectedEntityInfo info, IMyTerminalBlock reference, Vector3D scanOrigin)
+    {
+        // Validate target and assign values
+        if (info.IsEmpty() ||
+            _targetFilter.Contains(info.Type) ||
+            _gridIDsToIgnore.Contains(info.EntityId))
+        {
+            MissedLastScan = true;
+            CycleAimMode();
+        }
+        else
+        {
+            if (Vector3D.DistanceSquared(info.Position, scanOrigin) < MinRange * MinRange && Status != TargetingStatus.Locked)
+            {
+                Status = TargetingStatus.TooClose;
+                return;
+            }
+
+            if (info.EntityId != TargetId)
+            {
+                if (Status == TargetingStatus.Locked)
+                {
+                    MissedLastScan = true;
+                    CycleAimMode();
+                    return;
+                }
+                else if (_manualLockOverride)
+                {
+                    MissedLastScan = true;
+                    return;
+                }
+            }
+
+            MissedLastScan = false;
+            UpdateTargetStateVectors(info.Position, info.HitPosition.Value, info.Velocity);
+            TargetSize = info.BoundingBox.Size.Length();
+            _targetOrientation = info.Orientation;
+
+            if (Status != TargetingStatus.Locked) // Initial lockon
+            {
+                Status = TargetingStatus.Locked;
+                TargetId = info.EntityId;
+                TargetRelation = info.Relationship;
+                TargetType = info.Type;
+
+                // Compute aim offset
+                if (!_manualLockOverride)
+                {
+                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorRejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
+                    PreciseModeOffset = Vector3D.TransformNormal(info.HitPosition.Value + hitPosOffset - TargetCenter, MatrixD.Transpose(_targetOrientation));
+                }
+            }
+
+            _manualLockOverride = false;
+        }
+    }
+
+    void CycleAimMode()
+    {
+        _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
     }
 
     public void Update(double timeStep, List<IMyCameraBlock> cameraList, List<IMyShipController> shipControllers, IMyTerminalBlock referenceBlock = null)
@@ -2987,209 +3169,41 @@ class RaycastHoming
 
         TimeSinceLastLock += timeStep;
 
-        _info = default(MyDetectedEntityInfo);
-        _availableCameras.Clear();
+        if (cameraList.Count == 0)
+            return;
 
-        //Check for lock lost
-        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && Status == TargetingStatus.Locked)
+        // Check for lock lost
+        if (TimeSinceLastLock > (MaxTimeForLockBreak + AutoScanInterval) && (Status == TargetingStatus.Locked || _manualLockOverride))
         {
-            LockLost = true;
+            LockLost = true; // TODO: Change this to a callback
             ClearLockInternal();
             return;
         }
 
-        // Determine where to scan next
-        var scanPosition = Vector3D.Zero;
-        switch (_currentAimMode)
-        {
-            case AimMode.Offset:
-                scanPosition = HitPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            case AimMode.OffsetRelative:
-                scanPosition = OffsetTargetPosition + TargetVelocity * TimeSinceLastLock;
-                break;
-            default:
-                scanPosition = TargetCenter + TargetVelocity * TimeSinceLastLock;
-                break;
-        }
+        IMyTerminalBlock reference = GetReference(cameraList, shipControllers, referenceBlock);
 
-        if (MissedLastScan && cameraList.Count > 0)
-        {
-            scanPosition += CalculateFudgeVector(scanPosition - cameraList[0].GetPosition());
-        }
-
-        // Trim out cameras that cant see our next scan position
-        Vector3D testDirection = Vector3D.Zero;
-        IMyTerminalBlock reference = null;
+        MyDetectedEntityInfo info;
+        IMyCameraBlock camera;
+        bool scanned;
         if (Status == TargetingStatus.Locked || _manualLockOverride)
         {
-            GetAvailableCameras(cameraList, _availableCameras, scanPosition, true);
+            scanned = DoLockScan(cameraList, out info, out camera);
         }
         else
         {
-            /*
-             * The following prioritizes references in the following hierarchy:
-             * 1. Currently used camera
-             * 2. Reference block
-             * 3. Currently used control seat
-             */
-            if (reference == null)
-                reference = GetControlledCamera(cameraList);
-            
-            if (reference == null)
-                reference = referenceBlock;
-
-            if (reference == null)
-                reference = GetControlledShipController(shipControllers);
-
-            if (reference != null)
-            {
-                testDirection = reference.WorldMatrix.Forward;
-                GetAvailableCameras(cameraList, _availableCameras, testDirection);
-            }
-            else
-            {
-                _availableCameras.AddRange(cameraList);
-            }
+            scanned = DoSearchScan(cameraList, reference, out info, out camera);
         }
 
-        // Check for transition between faces
-        if (_availableCameras.Count == 0)
-        {
-            _timeSinceLastScan = 100000;
-            MissedLastScan = true;
-            return;
-        }
-
-        var camera = GetCameraWithMaxRange(_availableCameras);
-        var cameraMatrix = camera.WorldMatrix;
-
-        double scanRange;
-        Vector3D adjustedTargetPos = Vector3D.Zero;
-        if (Status == TargetingStatus.Locked || _manualLockOverride)
-        {
-            // We adjust the scan position to scan a bit past the target so we are more likely to hit if it is moving away
-            adjustedTargetPos = scanPosition + Vector3D.Normalize(scanPosition - cameraMatrix.Translation) * 2 * TargetSize;
-            scanRange = (adjustedTargetPos - cameraMatrix.Translation).Length();
-        }
-        else
-        {
-            scanRange = MaxRange;
-        }
-
-        AutoScanInterval = scanRange / (1000.0 * camera.RaycastTimeMultiplier) / _availableCameras.Count * AutoScanScaleFactor;
-
-        //Attempt to scan adjusted target position
-        if (camera.AvailableScanRange >= scanRange &&
-            _timeSinceLastScan >= AutoScanInterval)
-        {
-            if (Status == TargetingStatus.Locked || _manualLockOverride)
-                _info = camera.Raycast(adjustedTargetPos);
-            else if (!Vector3D.IsZero(testDirection))
-                _info = camera.Raycast(GetSearchPos(reference.GetPosition(), testDirection, camera));
-            else
-                _info = camera.Raycast(MaxRange);
-
-            _timeSinceLastScan = 0;
-        }
-        else // Not enough charge stored up yet
+        if (!scanned)
         {
             return;
         }
+        _timeSinceLastScan = 0;
 
-        // Validate target and assign values
-        if (!_info.IsEmpty() &&
-            !_targetFilter.Contains(_info.Type) &&
-            !_gridIDsToIgnore.Contains(_info.EntityId)) //target lock
-        {
-            if (Vector3D.DistanceSquared(_info.Position, camera.GetPosition()) < MinRange * MinRange && Status != TargetingStatus.Locked)
-            {
-                Status = TargetingStatus.TooClose;
-                return;
-            }
-            else if (Status == TargetingStatus.Locked) // Target already locked
-            {
-                if (_info.EntityId == TargetId)
-                {
-                    TargetCenter = _info.Position;
-                    HitPosition = _info.HitPosition.Value;
-
-                    _targetOrientation = _info.Orientation;
-                    OffsetTargetPosition = TargetCenter + Vector3D.TransformNormal(PreciseModeOffset, _targetOrientation);
-
-                    TargetVelocity = _info.Velocity;
-                    TargetSize = _info.BoundingBox.Size.Length();
-                    TimeSinceLastLock = 0;
-
-                    _manualLockOverride = false;
-                    
-                    MissedLastScan = false;
-                    TargetRelation = _info.Relationship;
-                    TargetType = _info.Type;
-                }
-                else
-                {
-                    MissedLastScan = true;
-                }
-            }
-            else // Target not yet locked: initial lockon
-            {
-                if (_manualLockOverride && TargetId != _info.EntityId)
-                    return;
-
-                Status = TargetingStatus.Locked;
-                TargetId = _info.EntityId;
-                TargetCenter = _info.Position;
-                HitPosition = _info.HitPosition.Value;
-                TargetVelocity = _info.Velocity;
-                TargetSize = _info.BoundingBox.Size.Length();
-                TimeSinceLastLock = 0;
-
-                var aimingCamera = GetControlledCamera(_availableCameras);
-                Vector3D hitPosOffset = Vector3D.Zero;
-                if (aimingCamera != null)
-                {
-                    hitPosOffset = aimingCamera.GetPosition() - camera.GetPosition();
-                }
-                else if (reference != null)
-                {
-                    hitPosOffset = reference.GetPosition() - camera.GetPosition();
-                }
-                if (!Vector3D.IsZero(hitPosOffset))
-                {
-                    hitPosOffset = VectorRejection(hitPosOffset, HitPosition - camera.GetPosition());
-                }
-
-                var hitPos = _info.HitPosition.Value + hitPosOffset;
-                _targetOrientation = _info.Orientation;
-
-                if (_manualLockOverride)
-                {
-                    _manualLockOverride = false;
-                }
-                else
-                {
-                    PreciseModeOffset = Vector3D.TransformNormal(hitPos - TargetCenter, MatrixD.Transpose(_targetOrientation));
-                    OffsetTargetPosition = hitPos;
-                }
-
-                MissedLastScan = false;
-                TargetRelation = _info.Relationship;
-                TargetType = _info.Type;
-            }
-        }
-        else
-        {
-            MissedLastScan = true;
-        }
-
-        if (MissedLastScan)
-        {
-            _currentAimMode = (AimMode)((int)(_currentAimMode + 1) % 3);
-        }
+        ProcessScanData(info, reference, camera.GetPosition());
     }
 
-    void GetAvailableCameras(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
+    void GetCamerasInDirection(List<IMyCameraBlock> allCameras, List<IMyCameraBlock> availableCameras, Vector3D testVector, bool vectorIsPosition = false)
     {
         availableCameras.Clear();
 
@@ -3901,10 +3915,9 @@ class ArgumentParser
 }
 #endregion
 
-#region BSOD
 static class BlueScreenOfDeath 
 {
-    const int MAX_BSOD_WIDTH = 35;
+    const int MAX_BSOD_WIDTH = 50;
     const string BSOD_TEMPLATE =
     "{0} - v{1}\n\n"+ 
     "A fatal exception has occured at\n"+
@@ -3930,7 +3943,7 @@ static class BlueScreenOfDeath
         surface.ContentType = ContentType.TEXT_AND_IMAGE;
         surface.Alignment = TextAlignment.LEFT;
         float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
-        surface.FontSize = scaleFactor * surface.TextureSize.X / (26f * MAX_BSOD_WIDTH);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
         surface.FontColor = Color.White;
         surface.BackgroundColor = Color.Blue;
         surface.Font = "Monospace";
@@ -3952,10 +3965,11 @@ static class BlueScreenOfDeath
                     lineLength += word.Length;
                     if (lineLength >= MAX_BSOD_WIDTH)
                     {
-                        lineLength = 0;
                         bsodBuilder.Append("\n");
+                        lineLength = word.Length;
                     }
                     bsodBuilder.Append(word).Append(" ");
+                    lineLength += 1;
                 }
                 bsodBuilder.Append("\n");
             }
@@ -3966,15 +3980,6 @@ static class BlueScreenOfDeath
                                         version,
                                         DateTime.Now, 
                                         bsodBuilder));
-    }
-}
-#endregion
-
-public static class StringExtensions
-{
-    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
-    {
-        return source?.IndexOf(toCheck, comp) >= 0;
     }
 }
 
@@ -4041,6 +4046,1436 @@ public struct MySpriteContainer
     }
 }
 
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigInt : ConfigValue<int>
+{
+    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
+    {}
+
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigFloat : ConfigValue<float>
+{
+    public ConfigFloat(string name, float value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetSingle(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigDouble : ConfigValue<double>
+{
+    public ConfigDouble(string name, double value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetDouble(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigColor : ConfigValue<Color>
+{
+    public ConfigColor(string name, Color value = default(Color), string comment = null) : base(name, value, comment) { }
+    public override string ToString()
+    {
+        return string.Format("{0}, {1}, {2}, {3}", Value.R, Value.G, Value.B, Value.A);
+    }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string rgbString = val.ToString("");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0, a = 0;
+        if (rgbSplit.Length != 4 ||
+            !int.TryParse(rgbSplit[0].Trim(), out r) ||
+            !int.TryParse(rgbSplit[1].Trim(), out g) ||
+            !int.TryParse(rgbSplit[2].Trim(), out b))
+        {
+            SetDefault();
+            return false;
+        }
+
+        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        if (!hasAlpha)
+        {
+            a = 255;
+        }
+
+        r = MathHelper.Clamp(r, 0, 255);
+        g = MathHelper.Clamp(g, 0, 255);
+        b = MathHelper.Clamp(b, 0, 255);
+        a = MathHelper.Clamp(a, 0, 255);
+        _value = new Color(r, g, b, a);
+        return true;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : IConfigValue<T>, IConfigValue
+{
+    public readonly ConfigImplementation Implementation;
+    public Action<T> Callback;
+
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+
+    public ConfigDeprecated(ConfigImplementation impl)
+    {
+        Implementation = impl;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            Callback?.Invoke(Implementation.Value);
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Delete(section, Implementation.Name);
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public void Reset() {}
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
+    where ConfigImplementation : IConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+    
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Reset()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        Implementation.WriteToIni(ref ini, section);
+        if (!HasValue)
+        {
+            ini.Set(section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
+    }
+}
+
 /// <summary>
 /// Selects the active controller from a list using the following priority:
 /// Main controller > Oldest controlled ship controller > Any controlled ship controller.
@@ -4083,6 +5518,4 @@ IMyShipController GetControlledShipController(List<IMyShipController> controller
     // Nothing is under control, return the controller from last cycle.
     return lastController;
 }
-#endregion
-
 #endregion
