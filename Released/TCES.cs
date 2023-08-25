@@ -50,8 +50,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.9.3",
-                    Date = "2023/07/03",
+public const string Version = "1.10.1",
+                    Date = "2023/08/25",
                     IniSectionGeneral = "TCES - General",
                     IniKeyGroupNameTag = "Group name tag",
                     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -66,13 +66,13 @@ public const string Version = "1.9.3",
 RuntimeTracker _runtimeTracker;
 long _runCount = 0;
 
-IConfigValue[] _config;
-ConfigString _groupNameTag = new ConfigString(IniSectionGeneral, IniKeyGroupNameTag, "TCES");
-public ConfigString AzimuthName = new ConfigString(IniSectionGeneral, IniKeyAzimuthName, "Azimuth");
-public ConfigString ElevationName = new ConfigString(IniSectionGeneral, IniKeyElevationName, "Elevation");
-public ConfigBool AutomaticRest = new ConfigBool(IniSectionGeneral, IniKeyAutoRestAngle, true);
-public ConfigFloat AutomaticRestDelay = new ConfigFloat(IniSectionGeneral, IniKeyAutoRestDelay, 2f);
-ConfigBool _drawTitleScreen = new ConfigBool(IniSectionGeneral, IniKeyDrawTitleScreen, true);
+ConfigSection _config = new ConfigSection(IniSectionGeneral);
+ConfigString _groupNameTag = new ConfigString(IniKeyGroupNameTag, "TCES");
+public ConfigString AzimuthName = new ConfigString(IniKeyAzimuthName, "Azimuth");
+public ConfigString ElevationName = new ConfigString(IniKeyElevationName, "Elevation");
+public ConfigBool AutomaticRest = new ConfigBool(IniKeyAutoRestAngle, true);
+public ConfigFloat AutomaticRestDelay = new ConfigFloat(IniKeyAutoRestDelay, 2f);
+ConfigBool _drawTitleScreen = new ConfigBool(IniKeyDrawTitleScreen, true);
 
 TCESTitleScreen _titleScreen;
 
@@ -82,33 +82,10 @@ MyIni _ini = new MyIni();
 
 class CustomTurretController
 {
-    class ConfigRotorAngle : ConfigFloat
-    {
-        const string DefaultString = "none";
-        public bool HasValue { get; private set; } = false;
+    ConfigSection _rotorConfig = new ConfigSection(IniSectionRotor);
 
-        public ConfigRotorAngle(string section, string name) : base(section, name, -1f, null) { }
-
-        public override string ToString()
-        {
-            return HasValue ? Value.ToString() : DefaultString;
-        }
-
-        protected override bool SetValue(ref MyIniValue val)
-        {
-            HasValue = true;
-            return base.SetValue(ref val);
-        }
-        protected override void SetDefault()
-        {
-            HasValue = false;
-        }
-    }
-
-    IConfigValue[] _rotorConfig;
-
-    ConfigBool _enableStabilization = new ConfigBool(IniSectionRotor, IniKeyEnableStabilization, true);
-    ConfigRotorAngle _restAngle = new ConfigRotorAngle(IniSectionRotor, IniKeyRestAngle);
+    ConfigBool _enableStabilization = new ConfigBool(IniKeyEnableStabilization, true);
+    ConfigNullable<float, ConfigFloat> _restAngle = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(IniKeyRestAngle), "none");
 
     const float RotorStopThresholdRad = 1f * (MathHelper.Pi / 180f);
     List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
@@ -207,11 +184,10 @@ class CustomTurretController
         _aiControlSM.AddState(new State(AiTargetingState.AzimuthOnly, onEnter: OnAiControlAzimuthOnly));
         _aiControlSM.Initialize(AiTargetingState.Idle);
 
-        _rotorConfig = new IConfigValue[]
-        {
+        _rotorConfig.AddValues(
             _restAngle,
-            _enableStabilization,
-        };
+            _enableStabilization
+        );
 
         _p = p;
         _group = group;
@@ -227,7 +203,7 @@ class CustomTurretController
 
     public void GoToRest()
     {
-        if (_p.AutomaticRest && _controller != null && !IsActive)
+        if (_controller != null && !IsActive)
         {
             _rotorControlSM.SetState(ControlState.MoveToRest);
         }
@@ -503,11 +479,8 @@ class CustomTurretController
             _ini.EndContent = r.CustomData;
         }
 
-        foreach (IConfigValue c in _rotorConfig)
-        {
-            c.Update(_ini);
-        }
-
+        _rotorConfig.Update(ref _ini);
+        
         string output = _ini.ToString();
         if (output != r.CustomData)
         {
@@ -904,15 +877,14 @@ class CustomTurretController
 
 Program()
 {
-    _config = new IConfigValue[]
-    {
+    _config.AddValues(
         _groupNameTag,
         AzimuthName,
         ElevationName,
         AutomaticRest,
         AutomaticRestDelay,
-        _drawTitleScreen,
-    };
+        _drawTitleScreen
+    );
 
     Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
@@ -938,10 +910,7 @@ void ProcessIni()
         _ini.EndContent = Me.CustomData;
     }
 
-    foreach (IConfigValue c in _config)
-    {
-        c.Update(_ini);
-    }
+    _config.Update(ref _ini);
 
     string output = _ini.ToString();
     if (output != Me.CustomData)
@@ -1447,15 +1416,23 @@ static class BlueScreenOfDeath
 
 public interface IConfigValue
 {
-    void WriteToIni(MyIni ini);
-    bool ReadFromIni(MyIni ini);
-    bool Update(MyIni ini);
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
 }
 
-public abstract class ConfigValue<T> : IConfigValue
+public interface IConfigValue<T> : IConfigValue
 {
-    public string Section;
-    public string Name;
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
     protected T _value;
     public T Value
     {
@@ -1467,7 +1444,6 @@ public abstract class ConfigValue<T> : IConfigValue
         }
     }
     readonly T _defaultValue;
-    readonly string _comment;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -1475,13 +1451,12 @@ public abstract class ConfigValue<T> : IConfigValue
         return cfg.Value;
     }
 
-    public ConfigValue(string section, string name, T defaultValue, string comment)
+    public ConfigValue(string name, T defaultValue, string comment)
     {
-        Section = section;
         Name = name;
         _value = defaultValue;
         _defaultValue = defaultValue;
-        _comment = comment;
+        Comment = comment;
     }
 
     public override string ToString()
@@ -1489,21 +1464,21 @@ public abstract class ConfigValue<T> : IConfigValue
         return Value.ToString();
     }
 
-    public bool Update(MyIni ini)
+    public bool Update(ref MyIni ini, string section)
     {
-        bool read = ReadFromIni(ini);
-        WriteToIni(ini);
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
         return read;
     }
 
-    public bool ReadFromIni(MyIni ini)
+    public bool ReadFromIni(ref MyIni ini, string section)
     {
         if (_skipRead)
         {
             _skipRead = false;
             return true;
         }
-        MyIniValue val = ini.Get(Section, Name);
+        MyIniValue val = ini.Get(section, Name);
         bool read = !val.IsEmpty;
         if (read)
         {
@@ -1516,12 +1491,12 @@ public abstract class ConfigValue<T> : IConfigValue
         return read;
     }
 
-    public void WriteToIni(MyIni ini)
+    public void WriteToIni(ref MyIni ini, string section)
     {
-        ini.Set(Section, Name, this.ToString());
-        if (!string.IsNullOrWhiteSpace(_comment))
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
         {
-            ini.SetComment(Section, Name, _comment);
+            ini.SetComment(section, Name, Comment);
         }
         _skipRead = false;
     }
@@ -1540,9 +1515,70 @@ public abstract class ConfigValue<T> : IConfigValue
     }
 }
 
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
 public class ConfigString : ConfigValue<string>
 {
-    public ConfigString(string section, string name, string value = "", string comment = null) : base(section, name, value, comment) { }
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
     protected override bool SetValue(ref MyIniValue val)
     {
         if (!val.TryGetString(out _value))
@@ -1556,7 +1592,7 @@ public class ConfigString : ConfigValue<string>
 
 public class ConfigBool : ConfigValue<bool>
 {
-    public ConfigBool(string section, string name, bool value = false, string comment = null) : base(section, name, value, comment) { }
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
     protected override bool SetValue(ref MyIniValue val)
     {
         if (!val.TryGetBoolean(out _value))
@@ -1570,7 +1606,7 @@ public class ConfigBool : ConfigValue<bool>
 
 public class ConfigFloat : ConfigValue<float>
 {
-    public ConfigFloat(string section, string name, float value = 0, string comment = null) : base(section, name, value, comment) { }
+    public ConfigFloat(string name, float value = 0, string comment = null) : base(name, value, comment) { }
     protected override bool SetValue(ref MyIniValue val)
     {
         if (!val.TryGetSingle(out _value))
@@ -1579,6 +1615,91 @@ public class ConfigFloat : ConfigValue<float>
             return false;
         }
         return true;
+    }
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
+    where ConfigImplementation : IConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+    
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Reset()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        Implementation.WriteToIni(ref ini, section);
+        if (!HasValue)
+        {
+            ini.Set(section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
     }
 }
 
@@ -1736,7 +1857,7 @@ class State : IState
 public static class VectorMath
 {
     /// <summary>
-    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// Normalizes a vector only if it is non-zero and non-unit
     /// </summary>
     public static Vector3D SafeNormalize(Vector3D a)
     {
@@ -1752,7 +1873,7 @@ public static class VectorMath
     /// <summary>
     /// Reflects vector a over vector b with an optional rejection factor
     /// </summary>
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1)
     {
         Vector3D proj = Projection(a, b);
         Vector3D rej = a - proj;
@@ -1762,7 +1883,7 @@ public static class VectorMath
     /// <summary>
     /// Rejects vector a on vector b
     /// </summary>
-    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return Vector3D.Zero;
@@ -1824,10 +1945,6 @@ public static class VectorMath
     /// Returns if the normalized dot product between two vectors is greater than the tolerance.
     /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
     /// </summary>
-    /// <param name="a">First vector</param>
-    /// <param name="b">Second vector</param>
-    /// <param name="tolerance">Cosine of maximum angle</param>
-    /// <returns></returns>
     public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
     {
         double dot = Vector3D.Dot(a, b);
