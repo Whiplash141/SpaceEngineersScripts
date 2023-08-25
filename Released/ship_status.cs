@@ -26,36 +26,22 @@
 
 ============================================
     DO NOT EDIT VARIABLES IN THE SCRIPT
-           USE THE CUSTOM DATA!
+            USE THE CUSTOM DATA!
 ============================================
 */
 
-const string VERSION = "1.6.2";
-const string DATE = "2023/06/12";
+const string VERSION = "1.9.0";
+const string DATE = "2023/08/25";
 
-// Configurable
-string _textSurfaceGroupName = "SIMPL";
-float _textSize = 0.5f;
-Color _maxDensityColor = new Color(50, 50, 50);
-Color _minDensityColor = new Color(10, 10, 10);
-Color _missingColor = new Color(100, 0, 0, 200);
-Color _bgColor = new Color(0, 0, 0);
-Color _powerColor = new Color(0, 100, 0, 100);
-Color _weaponColor = new Color(100, 50, 0, 100);
-Color _gyroColor = new Color(100, 100, 0, 100);
-Color _thrustColor = new Color(0, 0, 100, 100);
-bool _autoscan = true;
 
 const NormalAxis DEFAULT_NORMAL_AXIS = NormalAxis.X;
 const float DEFAULT_ROTATION = 0f;
-const bool DEFAULT_AUTOSCALE = true;
-const float DEFAULT_SCALE = 10f;
 const bool DEFAULT_INVERT = false;
 const float DEFAULT_LEGEND_SCALE = 1f;
 
 const int BLOCKS_TO_STORE_PER_TICK = 500;
 const int BLOCKS_TO_CHECK_PER_TICK = 100;
-const int SPRITES_TO_CREATE_PER_TICK = 500;
+const int SPRITES_TO_CREATE_PER_TICK = 250;
 const int DISCRETE_DENSITY_STEPS = 4;
 
 const string INI_SECTION_NAME = "SIMPL - General Config";
@@ -74,21 +60,88 @@ const string INI_KEY_COLOR_THRUST = "Thrust";
 const string INI_KEY_COLOR_BG = "Background";
 
 const string INI_SECTION_TEXT_CONFIG = "SIMPL - Display Config";
-const string INI_KEY_NORMAL = "Normal axis";
+const string INI_KEY_NORMAL = "View axis";
 const string INI_KEY_ROTATION = "Rotation (deg)";
-const string INI_KEY_AUTOSCALE = "Autoscale layout";
-const string INI_KEY_SCALE = "Manual layout scale";
-const string INI_KEY_INVERT = "Flip horizontally";
+const string INI_KEY_SCALE = "Scale";
 const string INI_KEY_LEGEND_SCALE = "Legend Scale";
+const string INI_KEY_NORMAL_COMPAT = "Normal axis";
+const string INI_KEY_AUTOSCALE_COMPAT = "Autoscale layout";
+const string INI_KEY_SCALE_COMPAT = "Manual layout scale";
+const string INI_KEY_INVERT_COMPAT = "Flip horizontally";
 
 const string INI_SECTION_TEXT_SURF = "SIMPL - Text Surface Config";
 const string INI_KEY_TEXT_SURF_TEMPLATE = "Show on screen {0}";
 
-const string INI_COMMENT_NORMAL = " Normal axis values: X, Y, or Z";
+const string INI_COMMENT_NORMAL = " View axis values: X, Y, Z, NegativeX, NegativeY, NegativeZ";
 
 const string INI_SECTION_MULTISCREEN = "SIMPL - Multiscreen Config";
 const string INI_KEY_MULTISCREEN_ROWS = "Screen rows";
 const string INI_KEY_MULTISCREEN_COLS = "Screen cols";
+
+// Configurable
+ConfigString _textSurfaceGroupName = new ConfigString(INI_KEY_GROUP_NAME, "SIMPL");
+ConfigBool _autoscan = new ConfigBool(INI_KEY_AUTO_SCAN, true);
+
+ConfigColor _bgColor = new ConfigColor(INI_KEY_COLOR_BG, new Color(0, 0, 0));
+
+ConfigEnum<NormalAxis> _normal = new ConfigEnum<NormalAxis>(INI_KEY_NORMAL, DEFAULT_NORMAL_AXIS, INI_COMMENT_NORMAL);
+ConfigFloat _rotation = new ConfigFloat(INI_KEY_ROTATION, DEFAULT_ROTATION);
+ConfigFloat _legendScale = new ConfigFloat(INI_KEY_LEGEND_SCALE, DEFAULT_LEGEND_SCALE);
+
+ConfigNullable<float, ConfigFloat> _screenScale = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE), "auto");
+
+ConfigDeprecated<bool, ConfigBool> _autoscaleCompat = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(INI_KEY_AUTOSCALE_COMPAT, true));
+ConfigDeprecated<float, ConfigFloat> _screenScaleCompat = new ConfigDeprecated<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE_COMPAT, 1f));
+ConfigDeprecated<NormalAxis, ConfigEnum<NormalAxis>> _normalCompat = new ConfigDeprecated<NormalAxis, ConfigEnum<NormalAxis>>(new ConfigEnum<NormalAxis>(INI_KEY_NORMAL_COMPAT, NormalAxis.X));
+ConfigDeprecated<bool, ConfigBool> _invertCompat = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(INI_KEY_INVERT_COMPAT, false));
+
+ConfigInt _rows = new ConfigInt(INI_KEY_MULTISCREEN_ROWS, 1);
+ConfigInt _cols = new ConfigInt(INI_KEY_MULTISCREEN_COLS, 1);
+
+ConfigSection _sectionGeneral = new ConfigSection(INI_SECTION_NAME);
+ConfigSection _sectionColors = new ConfigSection(INI_SECTION_COLOR, INI_COMMENT_COLOR);
+ConfigSection _sectionTextConfig = new ConfigSection(INI_SECTION_TEXT_CONFIG);
+ConfigSection _sectionMultiscreen = new ConfigSection(INI_SECTION_MULTISCREEN);
+
+void ConfigureIni()
+{
+    _screenScaleCompat.Callback = (scale) => {
+        if (!_autoscaleCompat.Implementation.Value)
+        {
+            _screenScale.Value = scale;
+        }
+    };
+    
+    _normalCompat.Callback = (normal) =>
+    {
+        _normal.Value = normal;
+    };
+    
+    _invertCompat.Callback = (invert) =>
+    {
+        if (invert)
+        {
+            _normal.Value |= NormalAxis.Negative;
+        }
+    };
+
+    _sectionGeneral.AddValues(_textSurfaceGroupName, _autoscan);
+
+    _sectionColors.AddValues(
+        _planarMap.ColorMaxDensity,
+        _planarMap.ColorMinDensity,
+        _planarMap.ColorMissing,
+        _bgColor,
+        _planarMap.ColorWeapon,
+        _planarMap.ColorPower,
+        _planarMap.ColorGyro,
+        _planarMap.ColorThrust);
+
+    _sectionTextConfig.AddValues(_autoscaleCompat, _screenScaleCompat, _normalCompat, _invertCompat, _normal, _rotation, _screenScale, _legendScale);
+    _sectionMultiscreen.AddValues(_rows, _cols);
+}
+
+float _textSize = 0.5f;
 
 List<TextSurfaceConfig> _textSurfaces = new List<TextSurfaceConfig>();
 List<BlockInfo> _blockInfoArray = new List<BlockInfo>();
@@ -98,8 +151,7 @@ RuntimeTracker _runtimeTracker;
 Legend _legend;
 LoadingScreen _loadingScreen = new LoadingScreen($"Loading SIMPL (v{VERSION})", "");
 MyIni _ini = new MyIni();
-StringBuilder _echoBuilder = new StringBuilder(512),
-              _textMeasureBuilder = new StringBuilder(256);
+StringBuilder _echoBuilder = new StringBuilder(512);
 
 IEnumerator<float> _blockStorageStateMachine = null;
 IEnumerator<int> _blockCheckStateMachine = null;
@@ -120,11 +172,15 @@ int _spritesX = 0;
 int _spritesY = 0;
 int _spritesZ = 0;
 
-public enum NormalAxis { X, Y, Z }
+public enum NormalAxis { X = 0, Y = 1, Z = 2, Axes = X | Y | Z, Negative = 4, NegativeX = Negative | X, NegativeY = Negative | Y, NegativeZ = Negative | Z };
 public enum BlockMask { None, Power = 1, Gyro = 2, Thrust = 4, Weapon = 8 }
+public enum BlockStatus { Nominal = 0, Damaged = 1, Missing = 2 };
 
 Program()
 {
+    _planarMap = new PlanarMap(Me.CubeGrid);
+    ConfigureIni();
+
     InitializeGridBlockStorage();
 
     _runtimeTracker = new RuntimeTracker(this, 600);
@@ -135,14 +191,12 @@ Program()
 
     _forceDrawTimeout = new ScheduledAction(() => _allowForceDraw = true, 1.0 / 30.0, true);
 
-    _planarMap = new PlanarMap(Me.CubeGrid, _minDensityColor, _maxDensityColor, _missingColor, _powerColor, _weaponColor, _gyroColor, _thrustColor);
-
     _legend = new Legend(_textSize);
-    _legend.AddLegendItem(INI_KEY_COLOR_MISSING, "Damage", ref _missingColor);
-    _legend.AddLegendItem(INI_KEY_COLOR_WEAPON, "Weapons", ref _weaponColor);
-    _legend.AddLegendItem(INI_KEY_COLOR_POWER, "Power", ref _powerColor);
-    _legend.AddLegendItem(INI_KEY_COLOR_GYRO, "Gyros", ref _gyroColor);
-    _legend.AddLegendItem(INI_KEY_COLOR_THRUST, "Thrust", ref _thrustColor);
+    _legend.AddLegendItem(INI_KEY_COLOR_MISSING, "Damage", _planarMap.ColorMissing);
+    _legend.AddLegendItem(INI_KEY_COLOR_WEAPON, "Weapons", _planarMap.ColorWeapon);
+    _legend.AddLegendItem(INI_KEY_COLOR_POWER, "Power", _planarMap.ColorPower);
+    _legend.AddLegendItem(INI_KEY_COLOR_GYRO, "Gyros", _planarMap.ColorGyro);
+    _legend.AddLegendItem(INI_KEY_COLOR_THRUST, "Thrust", _planarMap.ColorThrust);
 
     GetScreens();
 
@@ -229,35 +283,22 @@ struct TextSurfaceConfig
     public readonly ISpriteSurface Surface;
     public readonly NormalAxis Normal;
     public readonly float RotationRad;
-    public readonly bool Autoscale;
-    public readonly float Scale;
+    public readonly float? Scale;
     public readonly float LegendScale;
-    public readonly bool Invert;
 
-    public TextSurfaceConfig(ISpriteSurface surface, NormalAxis normal, float rotationDeg, float scale, float legendScale, bool invert, bool autoscale)
+    public TextSurfaceConfig(ISpriteSurface surface, NormalAxis normal, float rotationDeg, float? scale, float legendScale)
     {
         Surface = surface;
         Normal = normal;
         RotationRad = MathHelper.ToRadians(rotationDeg);
         Scale = scale;
         LegendScale = legendScale;
-        Invert = invert;
-        Autoscale = autoscale;
     }
 }
 
-void GetSurfaceConfigValues(bool parsed, IMyTerminalBlock b, bool hasMulltipleScreens, int surfaceIdx, out NormalAxis normal, out float rotation, out float scale, out float legendScale, out bool invert, out bool autoscale, out bool multiscreen, out int rows, out int cols)
+void GetSurfaceConfigValues(IMyTerminalBlock b, bool hasMulltipleScreens, int surfaceIdx, out bool multiscreen)
 {
-    normal = DEFAULT_NORMAL_AXIS;
-    rotation = DEFAULT_ROTATION;
-    scale = DEFAULT_SCALE;
-    legendScale = DEFAULT_LEGEND_SCALE;
-    invert = DEFAULT_INVERT;
-    autoscale = DEFAULT_AUTOSCALE;
     multiscreen = false;
-    rows = 1;
-    cols = 1;
-
 
     string sectionName = INI_SECTION_TEXT_CONFIG;
     if (hasMulltipleScreens)
@@ -267,36 +308,11 @@ void GetSurfaceConfigValues(bool parsed, IMyTerminalBlock b, bool hasMulltipleSc
     else if (_ini.ContainsSection(INI_SECTION_MULTISCREEN))
     {
         multiscreen = true;
-        rows = _ini.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS).ToInt32(rows);
-        cols = _ini.Get(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS).ToInt32(cols);
-        rows = Math.Max(rows, 1);
-        cols = Math.Max(cols, 1);
-        _ini.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_ROWS, rows);
-        _ini.Set(INI_SECTION_MULTISCREEN, INI_KEY_MULTISCREEN_COLS, cols);
+        _sectionMultiscreen.Update(ref _ini); // TODO: clamp
     }
 
-    if (parsed)
-    {
-        string normalAxisStr = _ini.Get(sectionName, INI_KEY_NORMAL).ToString();
-        if (!Enum.TryParse(normalAxisStr, true, out normal))
-        {
-            normal = DEFAULT_NORMAL_AXIS;
-        }
-        rotation = _ini.Get(sectionName, INI_KEY_ROTATION).ToSingle(rotation);
-        autoscale = _ini.Get(sectionName, INI_KEY_AUTOSCALE).ToBoolean(autoscale);
-        scale = _ini.Get(sectionName, INI_KEY_SCALE).ToSingle(scale);
-        legendScale = _ini.Get(sectionName, INI_KEY_LEGEND_SCALE).ToSingle(legendScale);
-        invert = _ini.Get(sectionName, INI_KEY_INVERT).ToBoolean(invert);
-    }
-
-    _ini.Set(sectionName, INI_KEY_NORMAL, normal.ToString());
-    _ini.Set(sectionName, INI_KEY_ROTATION, rotation);
-    _ini.Set(sectionName, INI_KEY_AUTOSCALE, autoscale);
-    _ini.Set(sectionName, INI_KEY_SCALE, scale);
-    _ini.Set(sectionName, INI_KEY_LEGEND_SCALE, legendScale);
-    _ini.Set(sectionName, INI_KEY_INVERT, invert);
-
-    _ini.SetComment(sectionName, INI_KEY_NORMAL, INI_COMMENT_NORMAL);
+    _sectionTextConfig.Section = sectionName;
+    _sectionTextConfig.Update(ref _ini);
 }
 
 bool CollectScreens(IMyTerminalBlock b)
@@ -304,15 +320,7 @@ bool CollectScreens(IMyTerminalBlock b)
     if (!b.IsSameConstructAs(Me))
         return false;
 
-    NormalAxis normal;
-    float rotation;
-    float scale;
-    float legendScale;
-    bool invert;
-    bool autoscale;
     bool multiscreen;
-    int rows;
-    int cols;
 
     var tp = b as IMyTextPanel;
     var tsp = b as IMyTextSurfaceProvider;
@@ -330,18 +338,18 @@ bool CollectScreens(IMyTerminalBlock b)
 
     if (tp != null)
     {
-        GetSurfaceConfigValues(parsed, b, false, 0, out normal, out rotation, out scale, out legendScale, out invert, out autoscale, out multiscreen, out rows, out cols);
+        GetSurfaceConfigValues(b, false, 0, out multiscreen);
         ISpriteSurface surf;
-        if (multiscreen && (rows > 1 || cols > 1))
+        if (multiscreen && (_rows > 1 || _cols > 1))
         {
-            surf = new MultiScreenSpriteSurface(tp, rows, cols, this);
+            surf = new MultiScreenSpriteSurface(tp, _rows, _cols, this);
         }
         else
         {
             surf = new SingleScreenSpriteSurface(tp);
         }
 
-        _textSurfaces.Add(new TextSurfaceConfig(surf, normal, rotation, scale, legendScale, invert, autoscale));
+        _textSurfaces.Add(new TextSurfaceConfig(surf, _normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _legendScale));
 
         string output = _ini.ToString();
         if (!string.Equals(output, b.CustomData))
@@ -360,9 +368,9 @@ bool CollectScreens(IMyTerminalBlock b)
 
             if (display)
             {
-                GetSurfaceConfigValues(parsed, b, true, i, out normal, out rotation, out scale, out legendScale, out invert, out autoscale, out multiscreen, out rows, out cols);
+                GetSurfaceConfigValues(b, true, i, out multiscreen);
                 var surf = new SingleScreenSpriteSurface(tsp.GetSurface(i));
-                _textSurfaces.Add(new TextSurfaceConfig(surf, normal, rotation, scale, legendScale, invert, autoscale));
+                _textSurfaces.Add(new TextSurfaceConfig(surf, _normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _legendScale));
             }
         }
 
@@ -380,44 +388,20 @@ void ParseGeneralConfig()
 {
     _ini.Clear();
     bool parsed = _ini.TryParse(Me.CustomData);
-    if (parsed)
-    {
-        _textSurfaceGroupName = _ini.Get(INI_SECTION_NAME, INI_KEY_GROUP_NAME).ToString(_textSurfaceGroupName);
-        _autoscan = _ini.Get(INI_SECTION_NAME, INI_KEY_AUTO_SCAN).ToBoolean(_autoscan);
-        _maxDensityColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MAX, _ini, _maxDensityColor);
-        _minDensityColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MIN, _ini, _minDensityColor);
-        _missingColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MISSING, _ini, _missingColor);
-        _bgColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_BG, _ini, _bgColor);
 
-        _weaponColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_WEAPON, _ini, _weaponColor);
-        _powerColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_POWER, _ini, _powerColor);
-        _gyroColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_GYRO, _ini, _gyroColor);
-        _thrustColor = MyIniHelper.GetColor(INI_SECTION_COLOR, INI_KEY_COLOR_THRUST, _ini, _thrustColor);
+    _sectionGeneral.Update(ref _ini);
+    _sectionColors.Update(ref _ini);
 
-        _planarMap.UpdateColors(ref _minDensityColor, ref _maxDensityColor, ref _missingColor, ref _powerColor, ref _weaponColor, ref _gyroColor, ref _thrustColor);
-    }
-    else if (!string.IsNullOrWhiteSpace(Me.CustomData))
+    if (!parsed && !string.IsNullOrWhiteSpace(Me.CustomData))
     {
         _ini.EndContent = Me.CustomData;
     }
 
-    _ini.Set(INI_SECTION_NAME, INI_KEY_GROUP_NAME, _textSurfaceGroupName);
-    _ini.Set(INI_SECTION_NAME, INI_KEY_AUTO_SCAN, _autoscan);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MAX, _maxDensityColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MIN, _minDensityColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_MISSING, _missingColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_BG, _bgColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_WEAPON, _weaponColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_POWER, _powerColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_GYRO, _gyroColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLOR, INI_KEY_COLOR_THRUST, _thrustColor, _ini);
-    _ini.SetSectionComment(INI_SECTION_COLOR, INI_COMMENT_COLOR);
-
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_MISSING, ref _missingColor);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_WEAPON, ref _weaponColor);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_POWER, ref _powerColor);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_GYRO, ref _gyroColor);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_THRUST, ref _thrustColor);
+    _legend.UpdateLegendItemColor(INI_KEY_COLOR_MISSING, _planarMap.ColorMissing);
+    _legend.UpdateLegendItemColor(INI_KEY_COLOR_WEAPON, _planarMap.ColorWeapon);
+    _legend.UpdateLegendItemColor(INI_KEY_COLOR_POWER, _planarMap.ColorPower);
+    _legend.UpdateLegendItemColor(INI_KEY_COLOR_GYRO, _planarMap.ColorGyro);
+    _legend.UpdateLegendItemColor(INI_KEY_COLOR_THRUST, _planarMap.ColorThrust);
 
     string output = _ini.ToString();
 
@@ -457,8 +441,8 @@ public static Matrix CreateRotMatrix(float rotation)
 public static int GetPositionIndex(ref Vector3I diff, ref Vector3I span)
 {
     return diff.X
-         + diff.Y * (span.X + 1)
-         + diff.Z * ((span.X + 1) * (span.Y + 1));
+            + diff.Y * (span.X + 1)
+            + diff.Z * ((span.X + 1) * (span.Y + 1));
 }
 #endregion
 
@@ -499,11 +483,11 @@ public IEnumerator<float> GridSpaceStorageIterator()
 {
     int volume = (Me.CubeGrid.Max - Me.CubeGrid.Min + Vector3I.One).Volume();
     EnqueuePositionIfUnique(Me.Position);
-    
+
     _storageStageStr = "Storing blocks...";
-    
+
     int blocksStored = 0;
-    while(_cellsToStore.Count > 0)
+    while (_cellsToStore.Count > 0)
     {
         Vector3I pos = _cellsToStore.Dequeue();
         _maxCheckedPos = Vector3I.Max(pos, _maxCheckedPos);
@@ -514,7 +498,7 @@ public IEnumerator<float> GridSpaceStorageIterator()
             BlockInfo blockInfo = new BlockInfo(ref pos, Me.CubeGrid);
             _blockInfoArray.Add(blockInfo);
             _planarMap.StoreBlockInfo(blockInfo);
-            
+
             // Step towards neighbors
             EnqueuePositionIfUnique(pos + Vector3I.UnitX);
             EnqueuePositionIfUnique(pos + Vector3I.UnitY);
@@ -602,26 +586,22 @@ void TryStartBlockCheck(bool commanded)
     }
 }
 
-
 public IEnumerator<int> GridSpaceCheckingIterator()
 {
+    _planarMap.ResetStatus();
+    yield return 0;
+
     for (int ii = 0; ii < _blockInfoArray.Count; ++ii)
     {
         BlockInfo blockInfo = _blockInfoArray[ii];
-
-        bool wasMissing = blockInfo.IsMissing;
-        blockInfo.IsMissing = !Me.CubeGrid.CubeExists(blockInfo.GridPosition);
-
-        if (wasMissing != blockInfo.IsMissing)
-        {
-            _planarMap.UpdateForDamage(blockInfo);
-        }
+        _planarMap.UpdateStatus(blockInfo);
 
         if (++_blocksUpdated > BLOCKS_TO_CHECK_PER_TICK)
         {
             yield return ii;
         }
     }
+
     yield return _blockInfoArray.Count;
 }
 
@@ -684,12 +664,12 @@ public IEnumerator<float> SpriteDrawStateMachine()
     {
         TextSurfaceConfig config = _textSurfaces[jj];
         ISpriteSurface surf = config.Surface;
-        NormalAxis normal = config.Normal;
+        NormalAxis normal = config.Normal & NormalAxis.Axes;
         float rotation = config.RotationRad;
-        float scale = config.Scale;
+        bool autoscale = !config.Scale.HasValue;
+        float scale = config.Scale.HasValue ? config.Scale.Value : 1;
         float legendScale = config.LegendScale;
-        bool invert = config.Invert;
-        bool autoscale = config.Autoscale;
+        bool invert = (config.Normal & NormalAxis.Negative) != 0;
         surf.ScriptBackgroundColor = _bgColor;
 
         Vector2 screenCenter = surf.TextureSize * 0.5f;
@@ -1049,7 +1029,7 @@ public struct LegendItem
     public string Name;
     public Color Color;
 
-    public LegendItem(string name, ref Color color)
+    public LegendItem(string name, Color color)
     {
         Name = name;
         Color = color;
@@ -1112,12 +1092,12 @@ public class Legend
         }
     }
 
-    public void AddLegendItem(string key, string name, ref Color color)
+    public void AddLegendItem(string key, string name, Color color)
     {
-        _legendItems[key] = new LegendItem(name, ref color);
+        _legendItems[key] = new LegendItem(name, color);
     }
 
-    public void UpdateLegendItemColor(string key, ref Color color)
+    public void UpdateLegendItemColor(string key, Color color)
     {
         LegendItem item;
         if (!_legendItems.TryGetValue(key, out item))
@@ -1132,13 +1112,35 @@ public class Legend
 public class BlockInfo
 {
     public readonly Vector3I GridPosition;
-    public bool IsMissing;
+
+    public BlockStatus Status
+    {
+        get
+        {
+            BlockStatus status = BlockStatus.Nominal;
+
+            if (!_grid.CubeExists(GridPosition))
+            {
+                status = BlockStatus.Missing;
+            }
+            else if (_cube != null && !_cube.IsFunctional)
+            {
+                status = BlockStatus.Damaged;
+            }
+
+            return status;
+        }
+    }
+
     public BlockMask BlockMask;
+
+    IMyCubeGrid _grid;
+    IMyCubeBlock _cube;
 
     public BlockInfo(ref Vector3I gridPosition, IMyCubeGrid grid)
     {
         GridPosition = gridPosition;
-        IsMissing = false;
+        _grid = grid;
 
         var slim = grid.GetCubeBlock(gridPosition);
         if (slim == null)
@@ -1146,22 +1148,22 @@ public class BlockInfo
             return;
         }
 
-        var cube = slim.FatBlock;
-        if (cube == null)
+        _cube = slim.FatBlock;
+        if (_cube == null)
         {
             return;
         }
 
-        if (cube as IMyPowerProducer != null)
+        if (_cube as IMyPowerProducer != null)
             BlockMask |= BlockMask.Power;
 
-        if (cube as IMyGyro != null)
+        if (_cube as IMyGyro != null)
             BlockMask |= BlockMask.Gyro;
 
-        if (cube as IMyThrust != null)
+        if (_cube as IMyThrust != null)
             BlockMask |= BlockMask.Thrust;
 
-        if (cube as IMyUserControllableGun != null)
+        if (_cube as IMyUserControllableGun != null)
             BlockMask |= BlockMask.Weapon;
     }
 }
@@ -1206,9 +1208,10 @@ public class BlockStatusSpriteCreator
         rotatedFromCenterPlanar.X *= sign;
 
         Color functionalSpriteColor;
-        if (_planarMapPtr.DrawBlockMaskSprite(normal, ref _gridPosition, out functionalSpriteColor) && functionalSpriteColor.A > 0)
+        string spriteName;
+        if (_planarMapPtr.DrawBlockMaskSprite(normal, ref _gridPosition, out functionalSpriteColor, out spriteName) && functionalSpriteColor.A > 0)
         {
-            surf.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", screenCenter + rotatedFromCenterPlanar * scale, Vector2.One * scale, functionalSpriteColor, rotation: rotation * sign));
+            surf.Add(new MySprite(SpriteType.TEXTURE, spriteName, screenCenter + rotatedFromCenterPlanar * scale, Vector2.One * scale, functionalSpriteColor, rotation: rotation * sign));
         }
     }
 }
@@ -1224,9 +1227,9 @@ public class PlanarMap
     readonly int[,] _densityXNormal;
     readonly int[,] _densityYNormal;
     readonly int[,] _densityZNormal;
-    readonly bool[,] _missingXNormal;
-    readonly bool[,] _missingYNormal;
-    readonly bool[,] _missingZNormal;
+    readonly Swappable<BlockStatus[,]> _statusXNormal;
+    readonly Swappable<BlockStatus[,]> _statusYNormal;
+    readonly Swappable<BlockStatus[,]> _statusZNormal;
     readonly BlockMask[,] _masksXNormal;
     readonly BlockMask[,] _masksYNormal;
     readonly BlockMask[,] _masksZNormal;
@@ -1245,15 +1248,15 @@ public class PlanarMap
     int _maxDensityY = 0;
     int _maxDensityZ = 0;
 
-    Color _colorMinDensity;
-    Color _colorMaxDensity;
-    Color _colorMissing;
-    Color _colorPower;
-    Color _colorWeapon;
-    Color _colorGyro;
-    Color _colorThrust;
+    public ConfigColor ColorMinDensity = new ConfigColor(INI_KEY_COLOR_MIN, new Color(10, 10, 10));
+    public ConfigColor ColorMaxDensity = new ConfigColor(INI_KEY_COLOR_MAX, new Color(50, 50, 50));
+    public ConfigColor ColorMissing = new ConfigColor(INI_KEY_COLOR_MISSING, new Color(100, 0, 0, 200));
+    public ConfigColor ColorPower = new ConfigColor(INI_KEY_COLOR_POWER, new Color(0, 100, 0, 100));
+    public ConfigColor ColorWeapon = new ConfigColor(INI_KEY_COLOR_WEAPON, new Color(100, 50, 0, 100));
+    public ConfigColor ColorGyro = new ConfigColor(INI_KEY_COLOR_GYRO, new Color(100, 100, 0, 100));
+    public ConfigColor ColorThrust = new ConfigColor(INI_KEY_COLOR_THRUST, new Color(0, 0, 100, 100));
 
-    public PlanarMap(IMyCubeGrid grid, Color minDensityColor, Color maxDensityColor, Color missingColor, Color powerColor, Color weaponColor, Color gyroColor, Color thrustColor)
+    public PlanarMap(IMyCubeGrid grid)
     {
         _min = grid.Min;
         _max = grid.Max;
@@ -1264,15 +1267,13 @@ public class PlanarMap
         _densityYNormal = new int[diff.Z + 1, diff.X + 1];
         _densityZNormal = new int[diff.X + 1, diff.Y + 1];
 
-        _missingXNormal = new bool[diff.Y + 1, diff.Z + 1];
-        _missingYNormal = new bool[diff.Z + 1, diff.X + 1];
-        _missingZNormal = new bool[diff.X + 1, diff.Y + 1];
+        _statusXNormal = new Swappable<BlockStatus[,]>(new BlockStatus[diff.Y + 1, diff.Z + 1], new BlockStatus[diff.Y + 1, diff.Z + 1]);
+        _statusYNormal = new Swappable<BlockStatus[,]>(new BlockStatus[diff.Z + 1, diff.X + 1], new BlockStatus[diff.Z + 1, diff.X + 1]);
+        _statusZNormal = new Swappable<BlockStatus[,]>(new BlockStatus[diff.X + 1, diff.Y + 1], new BlockStatus[diff.X + 1, diff.Y + 1]);
 
         _masksXNormal = new BlockMask[diff.Y + 1, diff.Z + 1];
         _masksYNormal = new BlockMask[diff.Z + 1, diff.X + 1];
         _masksZNormal = new BlockMask[diff.X + 1, diff.Y + 1];
-
-        UpdateColors(ref minDensityColor, ref maxDensityColor, ref missingColor, ref powerColor, ref weaponColor, ref gyroColor, ref thrustColor);
     }
 
     public void CreateQuadTrees()
@@ -1280,17 +1281,6 @@ public class PlanarMap
         QuadTreeXNormal.Initialize(_densityXNormal, DISCRETE_DENSITY_STEPS);
         QuadTreeYNormal.Initialize(_densityYNormal, DISCRETE_DENSITY_STEPS);
         QuadTreeZNormal.Initialize(_densityZNormal, DISCRETE_DENSITY_STEPS);
-    }
-
-    public void UpdateColors(ref Color minDensityColor, ref Color maxDensityColor, ref Color missingColor, ref Color colorPower, ref Color weaponColor, ref Color gyroColor, ref Color thrustColor)
-    {
-        _colorMinDensity = minDensityColor;
-        _colorMaxDensity = maxDensityColor;
-        _colorMissing = missingColor;
-        _colorPower = colorPower;
-        _colorWeapon = weaponColor;
-        _colorGyro = gyroColor;
-        _colorThrust = thrustColor;
     }
 
     public void StoreBlockInfo(BlockInfo info)
@@ -1305,6 +1295,8 @@ public class PlanarMap
         _masksXNormal[diff.Y, diff.Z] |= info.BlockMask;
         _masksYNormal[diff.Z, diff.X] |= info.BlockMask;
         _masksZNormal[diff.X, diff.Y] |= info.BlockMask;
+
+        UpdateStatus(info);
 
         _maxDensityX = Math.Max(_maxDensityX, _densityXNormal[diff.Y, diff.Z]);
         _maxDensityY = Math.Max(_maxDensityY, _densityYNormal[diff.Z, diff.X]);
@@ -1335,69 +1327,83 @@ public class PlanarMap
 
     }
 
-    public void UpdateForDamage(BlockInfo info)
+    public void ResetStatus()
     {
-        var diff = info.GridPosition - _min;
-        _missingXNormal[diff.Y, diff.Z] = info.IsMissing;
-        _missingYNormal[diff.Z, diff.X] = info.IsMissing;
-        _missingZNormal[diff.X, diff.Y] = info.IsMissing;
+        _statusXNormal.Swap();
+        _statusYNormal.Swap();
+        _statusZNormal.Swap();
+        Array.Clear(_statusXNormal.Inactive, 0, _statusXNormal.Inactive.Length);
+        Array.Clear(_statusYNormal.Inactive, 0, _statusYNormal.Inactive.Length);
+        Array.Clear(_statusZNormal.Inactive, 0, _statusZNormal.Inactive.Length);
     }
 
-    public bool DrawBlockMaskSprite(NormalAxis normal, ref Vector3I blockPosition, out Color functionalSpriteColor)
+    public void UpdateStatus(BlockInfo info)
+    {
+        var diff = info.GridPosition - _min;
+        _statusXNormal.Active[diff.Y, diff.Z] |= info.Status;
+        _statusYNormal.Active[diff.Z, diff.X] |= info.Status;
+        _statusZNormal.Active[diff.X, diff.Y] |= info.Status;
+
+        _statusXNormal.Inactive[diff.Y, diff.Z] |= info.Status;
+        _statusYNormal.Inactive[diff.Z, diff.X] |= info.Status;
+        _statusZNormal.Inactive[diff.X, diff.Y] |= info.Status;
+    }
+
+    public bool DrawBlockMaskSprite(NormalAxis normal, ref Vector3I blockPosition, out Color functionalSpriteColor, out string spriteName)
     {
         blockPosition = Vector3I.Max(_min, Vector3I.Min(_max, blockPosition));
         var diff = blockPosition - _min;
 
-        bool missing;
+        BlockStatus status;
         BlockMask blockMasks;
         if (NormalAxis.X == normal)
         {
             blockMasks = _masksXNormal[diff.Y, diff.Z];
-            missing = _missingXNormal[diff.Y, diff.Z];
+            status = _statusXNormal.Active[diff.Y, diff.Z];
         }
         else if (NormalAxis.Y == normal)
         {
             blockMasks = _masksYNormal[diff.Z, diff.X];
-            missing = _missingYNormal[diff.Z, diff.X];
+            status = _statusYNormal.Active[diff.Z, diff.X];
         }
         else
         {
             blockMasks = _masksZNormal[diff.X, diff.Y];
-            missing = _missingZNormal[diff.X, diff.Y];
+            status = _statusZNormal.Active[diff.X, diff.Y];
         }
 
-
-        if (missing)
+        spriteName = "SquareSimple";
+        if ((status & (BlockStatus.Missing | BlockStatus.Damaged)) != 0)
         {
-            functionalSpriteColor = _colorMissing;
+            functionalSpriteColor = ColorMissing;
         }
-        else if (_colorWeapon.A > 0 && (blockMasks & BlockMask.Weapon) != 0)
+        else if (ColorWeapon.Value.A > 0 && (blockMasks & BlockMask.Weapon) != 0)
         {
-            functionalSpriteColor = _colorWeapon;
+            functionalSpriteColor = ColorWeapon;
         }
-        else if (_colorPower.A > 0 && (blockMasks & BlockMask.Power) != 0)
+        else if (ColorPower.Value.A > 0 && (blockMasks & BlockMask.Power) != 0)
         {
-            functionalSpriteColor = _colorPower;
+            functionalSpriteColor = ColorPower;
         }
-        else if (_colorGyro.A > 0 && (blockMasks & BlockMask.Gyro) != 0)
+        else if (ColorGyro.Value.A > 0 && (blockMasks & BlockMask.Gyro) != 0)
         {
-            functionalSpriteColor = _colorGyro;
+            functionalSpriteColor = ColorGyro;
         }
-        else if (_colorThrust.A > 0 && (blockMasks & BlockMask.Thrust) != 0)
+        else if (ColorThrust.Value.A > 0 && (blockMasks & BlockMask.Thrust) != 0)
         {
-            functionalSpriteColor = _colorThrust;
+            functionalSpriteColor = ColorThrust;
         }
         else
         {
             functionalSpriteColor = Color.Transparent;
         }
 
-        return missing || blockMasks != BlockMask.None;
+        return status == BlockStatus.Missing || status == BlockStatus.Damaged || blockMasks != BlockMask.None;
     }
 
     public Color GetColor(float lerpScale)
     {
-        return Color.Lerp(_colorMinDensity, _colorMaxDensity, lerpScale);
+        return Color.Lerp(ColorMinDensity, ColorMaxDensity, lerpScale);
     }
 
     public Color GetColor(NormalAxis normal, ref Vector3I blockPosition)
@@ -1425,10 +1431,45 @@ public class PlanarMap
 
         float lerpScale = (float)density / maxDensity;
         lerpScale = (float)(Math.Round(lerpScale * DISCRETE_DENSITY_STEPS) / DISCRETE_DENSITY_STEPS);
-        return Color.Lerp(_colorMinDensity, _colorMaxDensity, lerpScale);
+        return Color.Lerp(ColorMinDensity, ColorMaxDensity, lerpScale);
     }
 }
 #endregion
+
+class Swappable<T> where T : class
+{
+    public T Active
+    {
+        get
+        {
+            return _swap ? _inst1 : _inst2;
+        }
+    }
+
+    public T Inactive
+    {
+        get
+        {
+            return _swap ? _inst2 : _inst1;
+        }
+    }
+
+    bool _swap = false;
+    readonly T _inst1;
+    readonly T _inst2;
+
+
+    public Swappable(T pri, T sec)
+    {
+        _inst1 = pri;
+        _inst2 = sec;
+    }
+
+    public void Swap()
+    {
+        _swap = !_swap;
+    }
+}
 
 #endregion
 
@@ -1759,215 +1800,7 @@ public class ScheduledAction
     }
 }
 #endregion
-public static class MyIniHelper
-{
-    #region List<string>
-    /// <summary>
-    /// Deserializes a List<string> from MyIni
-    /// </summary>
-    public static void GetStringList(string section, string name, MyIni ini, List<string> list)
-    {
-        string raw = ini.Get(section, name).ToString(null);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            // Preserve contents
-            return;
-        }
 
-        list.Clear();
-        string[] split = raw.Split('\n');
-        foreach (var s in split)
-        {
-            list.Add(s);
-        }
-    }
-
-    /// <summary>
-    /// Serializes a List<string> to MyIni
-    /// </summary>
-    public static void SetStringList(string section, string name, MyIni ini, List<string> list)
-    {
-        string output = string.Join($"\n", list);
-        ini.Set(section, name, output);
-    }
-    #endregion
-    
-    #region List<int>
-    const char LIST_DELIMITER = ',';
-
-    /// <summary>
-    /// Deserializes a List<int> from MyIni
-    /// </summary>
-    public static void GetListInt(string section, string name, MyIni ini, List<int> list)
-    {
-        list.Clear();
-        string raw = ini.Get(section, name).ToString();
-        string[] split = raw.Split(LIST_DELIMITER);
-        foreach (var s in split)
-        {
-            int i;
-            if (int.TryParse(s, out i))
-            {
-                list.Add(i);
-            }
-        }
-    }
-    
-    /// <summary>
-    /// Serializes a List<int> to MyIni
-    /// </summary>
-    public static void SetListInt(string section, string name, MyIni ini, List<int> list)
-    {
-        string output = string.Join($"{LIST_DELIMITER}", list);
-        ini.Set(section, name, output);
-    }
-    #endregion
-
-    #region Vector2
-        /// <summary>
-    /// Adds a Vector3D to a MyIni object
-    /// </summary>
-    public static void SetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
-    {
-        string vectorString = string.Format("{0}, {1}", vector.X, vector.Y);
-        ini.Set(sectionName, vectorName, vectorString);
-    }
-
-    /// <summary>
-    /// Parses a MyIni object for a Vector3D
-    /// </summary>
-    public static Vector2 GetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
-    {
-        string vectorString = ini.Get(sectionName, vectorName).ToString("null");
-        string[] stringSplit = vectorString.Split(',');
-
-        float x, y;
-        if (stringSplit.Length != 2)
-        {
-            if (defaultVector.HasValue)
-                return defaultVector.Value;
-            else
-                return default(Vector2);
-        }
-
-        float.TryParse(stringSplit[0].Trim(), out x);
-        float.TryParse(stringSplit[1].Trim(), out y);
-
-        return new Vector2(x, y);
-    }
-    #endregion
-
-    #region Vector3D
-    /// <summary>
-    /// Adds a Vector3D to a MyIni object
-    /// </summary>
-    public static void SetVector3D(string sectionName, string vectorName, ref Vector3D vector, MyIni ini)
-    {
-        ini.Set(sectionName, vectorName, vector.ToString());
-    }
-
-    /// <summary>
-    /// Parses a MyIni object for a Vector3D
-    /// </summary>
-    public static Vector3D GetVector3D(string sectionName, string vectorName, MyIni ini, Vector3D? defaultVector = null)
-    {
-        var vector = Vector3D.Zero;
-        if (Vector3D.TryParse(ini.Get(sectionName, vectorName).ToString(), out vector))
-            return vector;
-        else if (defaultVector.HasValue)
-            return defaultVector.Value;
-        return default(Vector3D);
-    }
-    #endregion
-
-    #region ColorChar
-    /// <summary>
-    /// Adds a color character to a MyIni object
-    /// </summary>
-    public static void SetColorChar(string sectionName, string charName, char colorChar, MyIni ini)
-    {
-        int rgb = (int)colorChar - 0xe100;
-        int b = rgb & 7;
-        int g = rgb >> 3 & 7;
-        int r = rgb >> 6 & 7;
-        string colorString = $"{r}, {g}, {b}";
-
-        ini.Set(sectionName, charName, colorString);
-    }
-
-    /// <summary>
-    /// Parses a MyIni for a color character 
-    /// </summary>
-    public static char GetColorChar(string sectionName, string charName, MyIni ini, char defaultChar = (char)(0xe100))
-    {
-        string rgbString = ini.Get(sectionName, charName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0;
-        if (rgbSplit.Length != 3)
-            return defaultChar;
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-
-        r = MathHelper.Clamp(r, 0, 7);
-        g = MathHelper.Clamp(g, 0, 7);
-        b = MathHelper.Clamp(b, 0, 7);
-
-        return (char)(0xe100 + (r << 6) + (g << 3) + b);
-    }
-    #endregion
-
-    #region Color
-    /// <summary>
-    /// Adds a Color to a MyIni object
-    /// </summary>
-    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini, bool writeAlpha = true)
-    {
-        if (writeAlpha)
-        {
-            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A));
-        }
-        else
-        {
-            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}", color.R, color.G, color.B));
-        }
-    }
-
-    /// <summary>
-    /// Parses a MyIni for a Color
-    /// </summary>
-    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultChar = null)
-    {
-        string rgbString = ini.Get(sectionName, itemName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length < 3)
-        {
-            if (defaultChar.HasValue)
-                return defaultChar.Value;
-            else
-                return Color.Transparent;
-        }
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = rgbSplit.Length >= 4 && int.TryParse(rgbSplit[3].Trim(), out a);
-        if (!hasAlpha)
-            a = 255;
-
-        r = MathHelper.Clamp(r, 0, 255);
-        g = MathHelper.Clamp(g, 0, 255);
-        b = MathHelper.Clamp(b, 0, 255);
-        a = MathHelper.Clamp(a, 0, 255);
-
-        return new Color(r, g, b, a);
-    }
-    #endregion
-}
 #region Multi-screen Sprite Surface
 
 public interface ISpriteSurface
@@ -2392,4 +2225,410 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     }
 }
 #endregion
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigColor : ConfigValue<Color>
+{
+    public ConfigColor(string name, Color value = default(Color), string comment = null) : base(name, value, comment) { }
+    public override string ToString()
+    {
+        return string.Format("{0}, {1}, {2}, {3}", Value.R, Value.G, Value.B, Value.A);
+    }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string rgbString = val.ToString("");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0, a = 0;
+        if (rgbSplit.Length != 4 ||
+            !int.TryParse(rgbSplit[0].Trim(), out r) ||
+            !int.TryParse(rgbSplit[1].Trim(), out g) ||
+            !int.TryParse(rgbSplit[2].Trim(), out b))
+        {
+            SetDefault();
+            return false;
+        }
+
+        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        if (!hasAlpha)
+        {
+            a = 255;
+        }
+
+        r = MathHelper.Clamp(r, 0, 255);
+        g = MathHelper.Clamp(g, 0, 255);
+        b = MathHelper.Clamp(b, 0, 255);
+        a = MathHelper.Clamp(a, 0, 255);
+        _value = new Color(r, g, b, a);
+        return true;
+    }
+}
+
+public class ConfigFloat : ConfigValue<float>
+{
+    public ConfigFloat(string name, float value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetSingle(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigInt : ConfigValue<int>
+{
+    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
+    {}
+
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : IConfigValue<T>, IConfigValue
+{
+    public readonly ConfigImplementation Implementation;
+    public Action<T> Callback;
+
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+
+    public ConfigDeprecated(ConfigImplementation impl)
+    {
+        Implementation = impl;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            Callback?.Invoke(Implementation.Value);
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Delete(section, Implementation.Name);
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public void Reset() {}
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
+    where ConfigImplementation : IConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+    
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Reset()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        Implementation.WriteToIni(ref ini, section);
+        if (!HasValue)
+        {
+            ini.Set(section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
+    }
+}
 #endregion
