@@ -157,7 +157,7 @@ void OnInitiate(){foreach(var b in _batteries){b.Enabled=true;b.ChargeMode=Charg
 void OnDetach(){foreach(var m in _artMasses){m.Enabled=true;}foreach(var b in _mergeBlocks){b.Enabled=false;}foreach(var c in _connectors){c.Disconnect();}foreach(var r in _rotors){r.Detach();}foreach(var a in _antennas){a.Radius=1f;a.Enabled=false;a.EnableBroadcasting=false;a.Enabled=true;// TODO: this used to be a bug workaround, not sure if it is still needed tbh
 a.HudText=GetAntennaName(a.HudText);}foreach(var b in _beacons){b.Radius=1f;b.Enabled=true;}ApplyThrustOverride(_sideThrusters,MinThrust,false);ApplyThrustOverride(_detachThrusters,100f);}// Disables missile thrust for drifting.
 void OnDrift(){ApplyThrustOverride(_detachThrusters,MinThrust);}// Ignites main thrust.
-void OnFlight(){foreach(var m in _artMasses){m.Enabled=false;}foreach(var c in _cameras){c.EnableRaycast=true;c.Enabled=true;}ApplyThrustOverride(_detachThrusters,MinThrust);ApplyThrustOverride(_sideThrusters,MinThrust);ApplyThrustOverride(_mainThrusters,100f);Me.CubeGrid.CustomName=_missileGroupNameTag;_killAllowed=true;}
+void OnFlight(){foreach(var t in _mainThrusters){t.Enabled=true;}foreach(var m in _artMasses){m.Enabled=false;}foreach(var c in _cameras){c.EnableRaycast=true;c.Enabled=true;}ApplyThrustOverride(_detachThrusters,MinThrust);ApplyThrustOverride(_sideThrusters,MinThrust);ApplyThrustOverride(_mainThrusters,100f);Me.CubeGrid.CustomName=_missileGroupNameTag;_killAllowed=true;}
 #endregion
 
 #region Missile Nav, Guidance, and Control

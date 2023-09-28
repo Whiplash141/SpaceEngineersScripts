@@ -1568,6 +1568,11 @@ void OnDrift()
 // Ignites main thrust.
 void OnFlight()
 {
+    foreach (var t in _mainThrusters)
+    {
+        t.Enabled = true;
+    }
+
     foreach (var m in _artMasses)
     {
         m.Enabled = false;
