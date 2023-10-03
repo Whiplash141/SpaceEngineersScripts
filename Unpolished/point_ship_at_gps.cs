@@ -3,6 +3,12 @@
 
 Simple proof of concept script to point a ship's reference block at
 an input GPS coordinate.
+
+Place a ship controller on your ship with the name "Reference", then
+place one or more gyros on your ship.
+
+Then run the script with a GPS coordinate as an argument and the ship will
+point at that GPS.
 */
 const string ReferenceName = "Reference";
 
