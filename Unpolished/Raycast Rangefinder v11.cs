@@ -300,8 +300,8 @@ void RangeFinder(double range)
         }
         string finalOutput = "/// WMI Raycast Rangefinder /// \n\n" + $"Scan Range: {range} m\n" + scanCount + scanPercentageBar + "\n\n" + targetStatus;
 
-        thisPanel.WritePublicText(finalOutput);
-        thisPanel.ShowPublicTextOnScreen();
+        thisPanel.WriteText(finalOutput);
+        thisPanel.ContentType = ContentType.TEXT_AND_IMAGE;
     }
 }
 
