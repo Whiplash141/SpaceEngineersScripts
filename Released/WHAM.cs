@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.12.3";
-const string Date = "2023/08/07";
+const string Version = "170.15.4";
+const string Date = "2023/10/12";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -86,7 +86,8 @@ double
     _timeSinceLastLock = 0,
     _distanceFromShooter = 0,
     _timeTotal = 0,
-    _timeSinceLastIngest = 0;
+    _timeSinceLastIngest = 0,
+    _fuelConservationCos;
 
 int _setupTicks = 0;
 
@@ -240,9 +241,9 @@ enum PostSetupAction { None = 0, Fire = 1, FireRequestResponse = 2 };
 PostSetupAction _postSetupAction = PostSetupAction.None;
 
 const int MaxInstructionsPerRun = 5000;
-const double Tick = 1.0 / 60.0;
 
 const double
+    Tick = 1.0 / 60.0,
     UpdatesPerSecond = 10.0,
     SecondsPerUpdate = 1.0 / UpdatesPerSecond,
     DegToRad = Math.PI / 180,
@@ -379,7 +380,15 @@ ConfigBool
         " If remote fire is enabled, this will be forced to true.");
 ConfigEnum<AntennaNameMode> _antennaMode = new ConfigEnum<AntennaNameMode>("Antenna name mode", AntennaNameMode.Meme, " Valid antenna name modes:\n Meme, Empty, Custom, MissileName, MissileStatus");
 
+ConfigSection _fuelConservationConfig = new ConfigSection("Fuel Conservation");
+ConfigBool _conserveFuel = new ConfigBool("Conserve fuel", false, " If enabled, the missile will cut thrust when near max speed to attempt\n to save fuel/power. This will make the missile LESS ACCURATE!");
+ConfigDouble _fuelConservationMaxSpeed = new ConfigDouble("Max speed (m/s)", 95);
+ConfigDouble _fuelConservationAngle = new ConfigDouble("Angle tolerance (deg)", 2.5, " Smaller angles make the missile more accurate but will use more fuel");
+
 ConfigSection[] _config;
+
+enum LogLevel { Info, Warning, Error, Fail, Success }
+Logger _logger;
 
 void SetupConfig()
 {
@@ -394,6 +403,7 @@ void SetupConfig()
         _spiralConfig,
         _randomConfig,
         _raycastConfig,
+        _fuelConservationConfig,
         _miscConfig,
     };
 
@@ -449,6 +459,11 @@ void SetupConfig()
         _raycastIgnorePlanetSurface,
         _ignoreIdForDetonation);
 
+    _fuelConservationConfig.AddValues(
+        _conserveFuel,
+        _fuelConservationMaxSpeed,
+        _fuelConservationAngle);
+
     _miscConfig.AddValues(
         _allowRemoteFire,
         _antennaMode,
@@ -461,6 +476,13 @@ void SetupConfig()
 #region Main Methods
 Program()
 {
+    _logger = new Logger(_setupBuilder);
+    _logger.RegisterType(LogLevel.Info, "> INFO:", new Color(0, 170, 255));
+    _logger.RegisterType(LogLevel.Warning, "> WARN:", new Color(255, 255, 0));
+    _logger.RegisterType(LogLevel.Error, "> ERROR:", new Color(255, 0, 0));
+    _logger.RegisterType(LogLevel.Fail, "", null, new Color(255, 0, 0));
+    _logger.RegisterType(LogLevel.Success, "", null, new Color(0, 250, 0));
+
     SetupConfig();
     SetupLaunchStages();
 
@@ -602,6 +624,23 @@ void PrintEcho()
 }
 #endregion
 
+#region Logging
+void LogInfo(string text)
+{
+    _logger.Log(LogLevel.Info, text);
+}
+
+void LogWarning(string text)
+{
+    _logger.Log(LogLevel.Warning, text);
+}
+
+void LogError(string text)
+{
+    _logger.Log(LogLevel.Error, text);
+}
+#endregion
+
 #region Ini Configuration
 void LoadIniConfig()
 {
@@ -619,6 +658,8 @@ void LoadIniConfig()
     {
         c.ReadFromIni(ref _ini);
     }
+
+    _fuelConservationCos = Math.Cos(MathHelper.ToRadians(_fuelConservationAngle));
 
     if (_allowRemoteFire && !_requireAntenna)
     {
@@ -930,7 +971,8 @@ List<IMyBlockGroup> _allGroups = new List<IMyBlockGroup>();
 List<IMyProgrammableBlock> _groupPrograms = new List<IMyProgrammableBlock>();
 int _autoConfigureMissileNumber;
 IEnumerator<SetupStatus> _setupStateMachine;
-StringBuilder _setupBuilder = new StringBuilder();
+StringBuilder _setupBuilder = new StringBuilder(),
+    _workingBuilder = new StringBuilder();
 
 void ClearLists()
 {
@@ -971,6 +1013,7 @@ string GetTitle()
 List<IMyRadioAntenna> _broadcasters = new List<IMyRadioAntenna>();
 List<IMyBlockGroup> _foundGroups = new List<IMyBlockGroup>();
 List<IMyMechanicalConnectionBlock> _mechConnections = new List<IMyMechanicalConnectionBlock>();
+
 enum SetupStatus { None = 0, Running = 1, Done = 2 }
 IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
 {
@@ -1033,21 +1076,27 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
 
         if (_missileGroup == null)
         {
-            _setupBuilder.Append("> WARN: No groups containing this\n  program found.\n");
+            LogWarning("No groups containing this program found.");
             _missileGroup = GridTerminalSystem.GetBlockGroupWithName(_missileGroupNameTag); // Default
         }
         else if (_foundGroups.Count > 1) // Too many
         {
-            _setupBuilder.Append("> WARN: MULTIPLE groups\n  containing this program\n  found:\n");
+            _workingBuilder.Clear();
+            _workingBuilder.Append("MULTIPLE groups containing this program found:\n");
             for (int i = 0; i < _foundGroups.Count; ++i)
             {
                 var thisGroup = _foundGroups[i];
-                _setupBuilder.Append($"    {i + 1}: {thisGroup.Name}\n");
+                _workingBuilder.Append($"    {i + 1}: {thisGroup.Name}");
+                if ((i + 1) != _foundGroups.Count)
+                {
+                    _workingBuilder.Append("\n");
+                }
             }
+            LogWarning(_workingBuilder.ToString());
         }
         else
         {
-            _setupBuilder.Append($"> Missile group found:\n  '{_missileTag} {_autoConfigureMissileNumber}'\n");
+            LogInfo($"Missile group found: '{_missileTag} {_autoConfigureMissileNumber}'");
             _missileNumber.Value = _autoConfigureMissileNumber;
         }
     }
@@ -1108,28 +1157,28 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         {
             if (_allowRemoteFire)
             {
-                _setupBuilder.Append($"> WARN: No antennas in group named '{_fireControlGroupNameTag}', but remote fire is active.\n");
+                LogWarning($"No antennas in group named '{_fireControlGroupNameTag}', but remote fire is active.");
             }
             else if (!reload)
             {
                 _preSetupFailed = true;
-                _setupBuilder.Append($">> ERR: No antennas in group named '{_fireControlGroupNameTag}'! This missile MUST be attached to a configured firing ship to fire!\n");
+                LogError($"No antennas in group named '{_fireControlGroupNameTag}'! This missile MUST be attached to a configured firing ship to fire!");
             }
         }
         else
         {
-            _setupBuilder.Append($"> Info: Found antenna(s) on firing ship\n");
+            LogInfo($"Found antenna(s) on firing ship");
             _foundLampAntennas = true;
         }
     }
     else if (_allowRemoteFire)
     {
-        _setupBuilder.Append($"> WARN: No group named '{_fireControlGroupNameTag}' found, but remote fire is active.\n");
+        LogWarning($"No group named '{_fireControlGroupNameTag}' found, but remote fire is active.");
     }
     else if (!reload)
     {
         _preSetupFailed = true;
-        _setupBuilder.Append($">> ERR: No group named '{_fireControlGroupNameTag}' found! This missile MUST be attached to a configured firing ship to fire!\n");
+        LogError($"No group named '{_fireControlGroupNameTag}' found! This missile MUST be attached to a configured firing ship to fire!");
     }
     #endregion
 
@@ -1142,7 +1191,7 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
     }
     else
     {
-        _setupBuilder.Append($">> ERR: No block group named '{_missileGroupNameTag}' found!\n");
+        LogError($"No block group named '{_missileGroupNameTag}' found!");
         _preSetupFailed = true;
     }
 
@@ -1175,18 +1224,19 @@ public void RunSetupStateMachine()
             _setupStateMachine.Dispose();
             _setupStateMachine = null;
 
-            _setupBuilder.Append($"> Info: Setup took {_setupTicks} tick(s)\n");
-
             // Post-block fetch
             bool setupPassed = SetupErrorChecking();
+            LogInfo($"Setup took {_setupTicks} tick(s)");
+
+            _setupBuilder.Append("\nSetup Result: ");
             if (!setupPassed || _preSetupFailed)
             {
-                _setupBuilder.Append("\n>>> Setup Failed! <<<\n");
+                _logger.Log(LogLevel.Fail, "[[FAILED]]\n");
                 Echo(_setupBuilder.ToString());
                 return;
             }
             // Implied else
-            _setupBuilder.Append("\n>>> Setup Successful! <<<\n");
+            _logger.Log(LogLevel.Success, "[[SUCCESS]]\n");
             _missileReference = _shipControllers[0];
 
             if ((_postSetupAction & PostSetupAction.Fire) != 0)
@@ -1240,28 +1290,37 @@ public bool AtInstructionLimit()
 bool SetupErrorChecking()
 {
     bool setupFailed = false;
-    // ERRORS
-    setupFailed |= EchoIfTrue(_requireAntenna && _antennas.Count == 0, ">> ERR: No antennas found");
-    setupFailed |= EchoIfTrue(_gyros.Count == 0, ">> ERR: No gyros found");
-    setupFailed |= EchoIfTrue(_shipControllers.Count == 0, ">> ERR: No remotes found");
+
+    setupFailed |= LogIfTrue(_requireAntenna ? LogLevel.Error : LogLevel.Warning , _antennas.Count == 0, "No antennas found");
+    setupFailed |= LogIfTrue(LogLevel.Error, _gyros.Count == 0, "No gyros found");
+    setupFailed |= LogIfTrue(LogLevel.Error, _shipControllers.Count == 0, "No remotes found");
+
     if (_shipControllers.Count > 0)
     {
         GetThrusterOrientation(_shipControllers[0]);
+        setupFailed |= _mainThrusters.Count == 0;
+        if (_mainThrusters.Count == 0)
+        {
+            if (_sideThrusters.Count != 0)
+            {
+                LogError("No main thrusters found. Make sure that your remote is pointed forwards!");
+            }
+            else
+            {
+                LogError("No main thrusters found.");
+            }
+        }
     }
-    setupFailed |= EchoIfTrue(_mainThrusters.Count == 0, ">> ERR: No main thrusters found");
-    setupFailed |= EchoIfTrue(_batteries.Count == 0 && _reactors.Count == 0, ">> ERR: No batteries or reactors found");
+    setupFailed |= LogIfTrue(LogLevel.Error, _batteries.Count == 0 && _reactors.Count == 0, "No batteries or reactors found");
 
-    EchoIfTrue(!_requireAntenna && _antennas.Count == 0, "> WARN: No antennas found");
-
-    // WARNINGS
-    if (!EchoIfTrue(_mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "> WARN: No merge blocks, rotors, or connectors found for detaching"))
+    if (!LogIfTrue(LogLevel.Warning, _mergeBlocks.Count == 0 && _rotors.Count == 0 && _connectors.Count == 0, "No merge blocks, rotors, or connectors found for detaching"))
     {
         EchoBlockCount(_mergeBlocks.Count, "merge");
         EchoBlockCount(_rotors.Count, "rotor");
         EchoBlockCount(_connectors.Count, "connector");
     }
 
-    // INFO
+    EchoBlockCount(_antennas.Count, "antenna");
     EchoBlockCount(_artMasses.Count, "art. mass block");
     EchoBlockCount(_sensors.Count, "sensor");
     EchoBlockCount(_warheads.Count, "warhead");
@@ -1279,7 +1338,7 @@ bool SetupErrorChecking()
 
 void EchoBlockCount(int count, string name)
 {
-    _setupBuilder.Append($"> Info: {count} {name}{(count == 1 ? "" : "s")}\n");
+    LogInfo($"Found {count} {name}{(count == 1 ? "" : "s")}");
 }
 
 bool CollectBlocks(IMyTerminalBlock block)
@@ -1372,24 +1431,41 @@ bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list, out T typedBlock) 
     return false;
 }
 
-bool EchoIfTrue(bool state, string toEcho)
+bool LogIfTrue(LogLevel severity, bool state, string msg)
 {
     if (state)
     {
-        _setupBuilder.Append(toEcho).Append("\n");
+        _logger.Log(severity, msg);
     }
     return state;
 }
 
-// Assumes all thrust is on same grid as PB
-void GetThrusterOrientation(IMyTerminalBlock refBlock)
+MatrixD MissileMatrix
 {
-    var forwardDirn = refBlock.Orientation.Forward;
+    get
+    {
+        if (_missileReference != null)
+        {
+            return _missileReference.WorldMatrix;
+        }
+        return MatrixD.Identity;
+    }
+}
+
+void GetThrusterOrientation(IMyTerminalBlock reference)
+{
+    if (reference == null)
+    {
+        return;
+    }
+
+    _mainThrusters.Clear();
+    _sideThrusters.Clear();
 
     foreach (IMyThrust t in _unsortedThrusters)
     {
         var thrustDirn = Base6Directions.GetFlippedDirection(t.Orientation.Forward);
-        if (thrustDirn == forwardDirn)
+        if (thrustDirn == reference.Orientation.Forward)
         {
             _mainThrusters.Add(t);
         }
@@ -1556,7 +1632,7 @@ void OnDetach()
     }
 
     ApplyThrustOverride(_sideThrusters, MinThrust, false);
-    ApplyThrustOverride(_detachThrusters, 100f);
+    ApplyThrustOverride(_detachThrusters, 1f);
 }
 
 // Disables missile thrust for drifting.
@@ -1581,7 +1657,7 @@ void OnFlight()
 
     ApplyThrustOverride(_detachThrusters, MinThrust);
     ApplyThrustOverride(_sideThrusters, MinThrust);
-    ApplyThrustOverride(_mainThrusters, 100f);
+    ApplyThrustOverride(_mainThrusters, 1f);
 
     Me.CubeGrid.CustomName = _missileGroupNameTag;
 
@@ -1656,7 +1732,7 @@ void Navigation(
 {
     missilePos = _missileReference.CenterOfMass;
     missileVel = _missileReference.GetShipVelocities().LinearVelocity;
-    missileMatrix = _missileReference.WorldMatrix; // TODO: Determine from thrust allocation
+    missileMatrix = MissileMatrix;
 
     shooterPos = _shooterPosCached + _offsetLeft * _shooterLeftVec + _offsetUp * _shooterUpVec;
 
@@ -1717,7 +1793,7 @@ Vector3D GuidanceMain(
 
     if (shouldSpiral)
     {
-        accelCmd = missileAcceleration * SpiralTrajectory(accelCmd, _missileReference.WorldMatrix.Up);
+        accelCmd = missileAcceleration * SpiralTrajectory(accelCmd, missileMatrix.Up);
     }
 
     if (_enableEvasion && _evadeWithRandomizedHeading)
@@ -1818,8 +1894,19 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
 {
     if (InFlight)
     {
-        var headingDeviation = VectorMath.CosBetween(accelCmd, missileMatrix.Forward);
-        ApplyThrustOverride(_mainThrusters, (float)MathHelper.Clamp(headingDeviation, 0.25f, 1f) * 100f);
+        if (_conserveFuel &&
+            _fuelConservationMaxSpeed > 0 &&
+            (velocityVec.LengthSquared() >= _fuelConservationMaxSpeed * _fuelConservationMaxSpeed) &&
+            VectorMath.CosBetween(accelCmd, velocityVec) >= _fuelConservationCos
+        )
+        {
+            ApplyThrustOverride(_mainThrusters, MinThrust, false);
+        }
+        else
+        {
+            var headingDeviation = VectorMath.CosBetween(accelCmd, missileMatrix.Forward);
+            ApplyThrustOverride(_mainThrusters, (float)MathHelper.Clamp(headingDeviation, 0.1f, 1f));
+        }
         var sideVelocity = VectorMath.Rejection(velocityVec, accelCmd);
         ApplySideThrust(_sideThrusters, sideVelocity, gravityVec, mass);
     }
@@ -1946,9 +2033,19 @@ void ScaleAntennaRange(double dist)
     }
 }
 
+double CalculateMissileThrust(List<IMyThrust> mainThrusters)
+{
+    double thrust = 0;
+    foreach (var block in mainThrusters)
+    {
+        thrust += block.IsFunctional && !block.Closed ? block.MaxEffectiveThrust : 0; // TODO: IsWorking?
+    }
+    return thrust;
+}
+
 void ApplyThrustOverride(List<IMyThrust> thrusters, float overrideValue, bool turnOn = true)
 {
-    float thrustProportion = overrideValue * 0.01f;
+    float thrustProportion = overrideValue;
     foreach (IMyThrust t in thrusters)
     {
         if (t.Closed)
@@ -2173,18 +2270,6 @@ void KillPower()
     Detonate(0);
     Runtime.UpdateFrequency = UpdateFrequency.None;
 }
-
-double CalculateMissileThrust(List<IMyThrust> mainThrusters)
-{
-    double thrust = 0;
-    foreach (var block in mainThrusters)
-    {
-        if (block.Closed)
-            continue;
-        thrust += block.IsFunctional ? block.MaxEffectiveThrust : 0;
-    }
-    return thrust;
-}
 #endregion
 
 #region Vector Math Functions
@@ -2225,7 +2310,8 @@ void ComputeRandomHeadingVector()
     }
 
     double angle = RNGesus.NextDouble() * Math.PI * 2.0;
-    _randomizedHeadingVector = Math.Sin(angle) * _missileReference.WorldMatrix.Up + Math.Cos(angle) * _missileReference.WorldMatrix.Right;
+    var missileMatrix = MissileMatrix;
+    _randomizedHeadingVector = Math.Sin(angle) * missileMatrix.Up + Math.Cos(angle) * missileMatrix.Right;
     _randomizedHeadingVector *= _maxRandomAccelRatio;
 }
 
@@ -4060,6 +4146,70 @@ class State : IState
         OnUpdate = onUpdate;
         OnEnter = onEnter;
         OnLeave = onLeave;
+    }
+}
+public class Logger
+{
+    public static string GetHexColor(Color c)
+    {
+        return $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+    }
+    
+    struct LogType
+    {
+        public static LogType Default = new LogType("", null, null);
+        
+        const string ColorFormat = "[color={1}]{0}[/color]";
+        const string NoColorFormat = "{0}";
+        
+        public readonly string Prefix;
+        public readonly string PrefixColorHex;
+        public readonly string TextColorHex;
+        
+        readonly string _prefixFormat;
+        readonly string _textFormat;
+
+        public LogType(string prefix, Color? prefixColor, Color? textColor)
+        {
+            Prefix = prefix;
+            PrefixColorHex = prefixColor.HasValue ? GetHexColor(prefixColor.Value) : null;
+            _prefixFormat = prefixColor.HasValue ? ColorFormat : NoColorFormat;
+            TextColorHex = textColor.HasValue ? GetHexColor(textColor.Value) : null;
+            _textFormat = textColor.HasValue ? ColorFormat : NoColorFormat;
+        }
+
+        public void Write(StringBuilder buffer, string text)
+        {
+            if (!string.IsNullOrWhiteSpace(Prefix))
+            {
+                buffer.Append(string.Format(_prefixFormat, Prefix, PrefixColorHex)).Append(" ");
+            }
+            buffer.AppendLine(string.Format(_textFormat, text, TextColorHex));
+        }
+    }
+
+    Dictionary<Enum, LogType> _logTypes = new Dictionary<Enum, LogType>();
+    
+    StringBuilder _buffer;
+
+    public Logger(StringBuilder buffer)
+    {
+        _buffer = buffer;
+    }
+
+    public void RegisterType(Enum type, string prefix, Color? prefixColor = null, Color? textColor = null)
+    {
+        _logTypes[type] = new LogType(prefix, prefixColor, textColor);
+    }
+
+    public void Log(Enum type, string text)
+    {
+        LogType logType;
+        if (!_logTypes.TryGetValue(type, out logType))
+        {
+            logType = LogType.Default;
+        }
+        logType.Write(_buffer, text);
     }
 }
 #endregion
