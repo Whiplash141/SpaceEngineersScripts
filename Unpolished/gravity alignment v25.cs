@@ -287,9 +287,8 @@ void StatusScreens()
 
     foreach (IMyTextPanel thisScreen in screens)
     {
-        thisScreen.WritePublicText(statusScreenMessage);
-        thisScreen.ShowTextureOnScreen();
-        thisScreen.ShowPublicTextOnScreen();
+        thisScreen.WriteText(statusScreenMessage);
+        thisScreen.ContentType = ContentType.TEXT_AND_IMAGE;
     }
 }
 
