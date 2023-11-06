@@ -1,5 +1,5 @@
 /* 
-/// Whip's Speed Matcher v25 - 7/31/18 /// 
+/// Whip's Speed Matcher v25.0.1 - 2023/11/05 /// 
 _______________________________________________________________________            
 ///DESCRIPTION///    
  
@@ -426,13 +426,13 @@ IMyShipController GetControlledShipController(List<IMyShipController> SCs)
     return SCs[0]; 
 }
  
-void WriteToTextPanel(string textToWrite, bool append = false) 
+void WriteToTextPanel(string textToWrite) 
 { 
     foreach (var thisScreen in textPanels) 
     { 
-        thisScreen.WritePublicText(textToWrite, append); 
-        thisScreen.ShowPublicTextOnScreen(); 
-        thisScreen.SetValue("FontSize", 1.6f); 
+        thisScreen.WriteText(textToWrite); 
+        thisScreen.ContentType = ContentType.TEXT_AND_IMAGE;
+        thisScreen.FontSize = 1.6f; 
     } 
 } 
  
