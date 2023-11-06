@@ -178,9 +178,8 @@ void WriteToTextPanels(List<IMyTextPanel> textPanels, double currentExtension, d
 
     foreach (IMyTextPanel block in textPanels)
     {
-        block.WritePublicText(output);
-        if (!block.ShowText)
-            block.ShowPublicTextOnScreen();
+        block.WriteText(output);
+        block.ContentType = ContentType.TEXT_AND_IMAGE;
     }
 }
 

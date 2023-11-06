@@ -51,7 +51,7 @@ void Main(string argument)
 
     foreach (var block in cyclingLCDs)
     {
-        block.WritePublicText(storagePanel.GetPublicText());
-        block.ShowPublicTextOnScreen();
+        block.WriteText(storagePanel.GetText());
+        block.ContentType = ContentType.TEXT_AND_IMAGE;
     }
 }
