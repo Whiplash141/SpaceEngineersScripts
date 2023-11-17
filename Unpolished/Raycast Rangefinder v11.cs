@@ -29,6 +29,22 @@ range <number> : Sets the desired range (in meters) to the specified <number>
 
 range default : Sets the desired range back to the 50,000 meter default
 
+setup : Refetches all blocks
+
+auto on : Turns autoscan on
+
+auto off : Turns autoscan off
+
+auto toggle : Toggles autoscan on/off
+___________________________________________________________________
+///USING MULTIPLE ARGUMENTS///
+
+You can run multiple arguments at the same time by separating them
+with a semicolon (;).
+
+For example:
+    setup;range 5000;start
+
 */
 
 /* 
@@ -76,9 +92,15 @@ MyDetectedEntityInfo targetInfo = new MyDetectedEntityInfo();
 
 Program()
 {
-    GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks); 
-
+    Setup(); 
     Runtime.UpdateFrequency = UpdateFrequency.Update10;
+}
+
+void Setup()
+{
+    textPanelList.Clear();
+    cameraList.Clear();
+    GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks);
 }
 
 void Main(string arg, UpdateType updateSource)
@@ -175,10 +197,15 @@ void ArgumentHandling(string arg)
                     Echo("Auto Scaning Enabled");
                 }
             }
-            else
-            {
-                Echo($"Error: unrecognized command '{thisArg}'");
-            }
+        }
+        else if (thisArg.Contains("setup"))
+        {
+            Echo("Running setup...");
+            Setup();
+        }
+        else
+        {
+            Echo($"Error: unrecognized command \"{thisArg}\"");
         }
     }
 }
@@ -209,16 +236,24 @@ void RangeFinder()
     double availableScanRange = 0;
     double autoScanInterval = 0;
 
+    bool failed = false;
+
     //Check if camera list is empty
     if (cameraList.Count == 0)
     {
-        Echo($"ERROR: No cameras with name tag '{cameraNameTag}' found! Fix then recompile!");
-        return;
+        Echo($"ERROR: No cameras with name tag '{cameraNameTag}' found!");
+        failed = true;
     }
 
     if (textPanelList.Count == 0)
     {
         Echo($"Warning: No text panels with name tag {textPanelNameTag} found! Fix then recompile!");
+        failed = true;
+    }
+
+    if (failed)
+    {
+        Echo("Fix then recompile or run the argument \"setup\"!");
         return;
     }
 
