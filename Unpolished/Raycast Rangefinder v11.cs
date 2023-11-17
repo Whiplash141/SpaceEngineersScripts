@@ -1,18 +1,18 @@
 
 /* 
-///Whip's Raycast Rangefinder v11 - 1/19/18///
+/ //// / Whip's Raycast Rangefinder v11 - 2023/11/16 / //// /
 ///HOWDY!///
 ___________________________________________________________________
 ///SETUP///
 
 1.) Place a programmable block with this code on your ship
-    
+
 2.) Place at least one camera on your ship with the name tag "Raycast" 
     in the name somewhere
-    
+
 3.) Place at least one LCD or text panel on your ship with the name tag
     "Raycast" somewhere in the name
-    
+
 4.) Run the code with the argument "start" to start scanning!
     (See the argument section for more arguments)
 ___________________________________________________________________
@@ -21,14 +21,14 @@ ___________________________________________________________________
 start : Starts the scanning procedure. If the camera is not charged
         the program will begin charging the camera and will scan the
         desired distance once fully charged
-        
+
 stop : Stops the scanning procedure. The cameras will continue to 
-       charge, but the program will not run any scans.
-       
+        charge, but the program will not run any scans.
+
 range <number> : Sets the desired range (in meters) to the specified <number>
 
 range default : Sets the desired range back to the 50,000 meter default
-     
+
 */
 
 /* 
@@ -41,7 +41,7 @@ ___________________________________________________________________
 */
 
 //Name tag of cameras to use
-const string cameraNameTag = "Raycast"; 
+const string cameraNameTag = "Raycast";
 
 //Name tag of text panels to write on
 const string textPanelNameTag = "Raycast";
@@ -55,7 +55,7 @@ bool autoScan = false;
 
 //Determines if code should automatically set the font size
 bool autoSetFontSize = true;
-  
+
 /*    
 ___________________________________________________________________    
 
@@ -67,15 +67,37 @@ double scanRange = defaultScanRange;
 double timeSinceLastScan = 0;
 bool shouldScan = false;
 
+List<IMyTextPanel> textPanelList = new List<IMyTextPanel>();
+List<IMyCameraBlock> cameraList = new List<IMyCameraBlock>();
+StringBuilder finalOutputBuilder = new StringBuilder();
+StringBuilder scanInfoBuilder = new StringBuilder();
+StringBuilder targetInfoBuilder = new StringBuilder();
+MyDetectedEntityInfo targetInfo = new MyDetectedEntityInfo();
+
 Program()
 {
-    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks); 
+
+    Runtime.UpdateFrequency = UpdateFrequency.Update10;
 }
 
 void Main(string arg, UpdateType updateSource)
 {
-    //Argument handling
-    #region Argument Handling
+    ArgumentHandling(arg);
+
+    if ((updateSource & UpdateType.Update10) == 0)
+        return;
+
+    RangeFinder();
+}
+
+void ArgumentHandling(string arg)
+{
+    if (string.IsNullOrWhiteSpace(arg))
+    {
+        return;
+    }
+
     string[] arguments = arg.ToLower().Split(';');
 
     if (arguments.Length == 0)
@@ -129,7 +151,7 @@ void Main(string arg, UpdateType updateSource)
         {
             //Remove the keyword and any spaces
             var trimmedArg = thisArg.Replace("auto", "").Replace(" ", "");
-            
+
             if (trimmedArg.Contains("on"))
             {
                 autoScan = true;
@@ -159,149 +181,207 @@ void Main(string arg, UpdateType updateSource)
             }
         }
     }
-    #endregion
-    
-    if ((updateSource & UpdateType.Update1) == 0)
-        return;
-    
-    RangeFinder(scanRange);
 }
 
-MyDetectedEntityInfo targetInfo = new MyDetectedEntityInfo();
-void RangeFinder(double range)
+bool CollectBlocks(IMyTerminalBlock block)
+{
+    var panel = block as IMyTextPanel;
+    if (panel != null && block.CustomName.IndexOf(textPanelNameTag, StringComparison.OrdinalIgnoreCase) != -1)
+    {
+        textPanelList.Add(panel);
+        return false;
+    }
+
+    var cam = block as IMyCameraBlock;
+    if (cam != null && block.CustomName.IndexOf(cameraNameTag, StringComparison.OrdinalIgnoreCase) != -1)
+    {
+        cameraList.Add(cam);
+        cam.EnableRaycast = true;
+        return false;
+    }
+
+    return false;
+}
+
+void RangeFinder()
 {
     double secondsTillScan = 0;
     double availableScanRange = 0;
     double autoScanInterval = 0;
 
-    //Get cameras
-    var cameraList = new List<IMyCameraBlock>();
-    GridTerminalSystem.GetBlocksOfType(cameraList, block => block.CustomName.ToLower().Contains(cameraNameTag.ToLower()));
-
     //Check if camera list is empty
     if (cameraList.Count == 0)
     {
-        Echo($"Error: No cameras with name tag '{cameraNameTag}' found");
+        Echo($"ERROR: No cameras with name tag '{cameraNameTag}' found! Fix then recompile!");
         return;
     }
 
-    //Set raycast on for all our cameras
-    foreach (IMyCameraBlock camera in cameraList)
+    if (textPanelList.Count == 0)
     {
-        if (!camera.EnableRaycast)
-            camera.EnableRaycast = true;
+        Echo($"Warning: No text panels with name tag {textPanelNameTag} found! Fix then recompile!");
+        return;
     }
 
-    //Get camera with maximum available range
-    var thisCamera = GetCameraWithMaxRange(cameraList);
+    IMyCameraBlock thisCamera = GetCameraWithMaxRange(cameraList);
 
     availableScanRange = thisCamera.AvailableScanRange;
-    
-    var availableScans = GetAvailableScans(cameraList, range);
-    
-    //Get time until next scan
-    secondsTillScan = Math.Max((range - availableScanRange) / 2000, 0);
-    
+
+    int availableScans = GetAvailableScans(cameraList, scanRange);
+
+    secondsTillScan = Math.Max((scanRange - availableScanRange) / 2000, 0);
+
     timeSinceLastScan += Runtime.TimeSinceLastRun.TotalSeconds;
-    autoScanInterval = range / 2000 / cameraList.Count / Math.Max(availableScans, 1);
+    autoScanInterval = scanRange / 2000 / cameraList.Count / Math.Max(availableScans, 1);
 
     //Attempt to scan range in front of camera
-    if (availableScanRange >= range && shouldScan)
+    if (availableScanRange >= scanRange && shouldScan)
     {
         if (!autoScan)
         {
-            targetInfo = thisCamera.Raycast(range);
+            targetInfo = thisCamera.Raycast(scanRange);
             shouldScan = false;
             Echo("Scanning Finished");
             timeSinceLastScan = 0;
         }
         else if (timeSinceLastScan >= autoScanInterval && secondsTillScan <= autoScanInterval)
         {
-            targetInfo = thisCamera.Raycast(range);
+            targetInfo = thisCamera.Raycast(scanRange);
             timeSinceLastScan = 0;
         }
     }
-    
-    //Construct output text
-    string targetStatus = "No target detected";
+
+    string scanProgress;
+    if (shouldScan)
+    {
+        if (autoScan)
+        {
+            scanProgress = "<< AutoScan Active... >>";
+        }
+        else
+        {
+            scanProgress = "< Scan in progress... >";
+        }
+    }
+    else
+    {
+        scanProgress = "> No scans in progress <";
+    }
+
+    double timeUntilScan;
+    double percentageCurrent;
+    double percentageMax;
+    if (!autoScan)
+    {
+        timeUntilScan = Math.Round(secondsTillScan, 2);
+        percentageCurrent = availableScanRange;
+        percentageMax = scanRange;
+    }
+    else
+    {
+        if (secondsTillScan <= autoScanInterval)
+        {
+            timeUntilScan = Math.Round(Math.Max(autoScanInterval - timeSinceLastScan, 0), 2);
+            percentageCurrent = timeSinceLastScan;
+            percentageMax = autoScanInterval;
+        }
+        else
+        {
+            timeUntilScan = Math.Round(secondsTillScan - autoScanInterval, 2);
+            percentageCurrent = timeSinceLastScan;
+            percentageMax = secondsTillScan - autoScanInterval;
+        }
+    }
+
+    MyWaypointInfo? targetWaypoint = null;
+
+    scanInfoBuilder.Clear();
+    targetInfoBuilder.Clear();
+
+    scanInfoBuilder
+        .Append("/// WMI Raycast Rangefinder /// \n\n")
+        .Append("Scan Range: ")
+        .Append(scanRange)
+        .Append(" m\nAvailable Scans: ")
+        .Append(availableScans)
+        .Append("\nStatus: ")
+        .Append(scanProgress)
+        .Append("\nNext scan ready in: ")
+        .Append(timeUntilScan)
+        .Append(" s\n");
+
     if (!targetInfo.IsEmpty())
     {
         Vector3D hitPosition = new Vector3D(0, 0, 0);
         if (targetInfo.HitPosition.HasValue)
             hitPosition = (Vector3D)targetInfo.HitPosition;
-        
+
+        targetWaypoint = new MyWaypointInfo(targetInfo.Name, hitPosition);
+
         double targetSize = Math.Round(targetInfo.BoundingBox.Size.Length());
-        
-        targetStatus = $" Target Info:\n Range: {Math.Round(Vector3D.Distance(hitPosition, Me.GetPosition()))} m \n Velocity: {Math.Round(targetInfo.Velocity.Length(),2)}\n Size: {targetSize} m \n    Type: {targetInfo.Type}\n    Relation: {targetInfo.Relationship}"
-            + $"\n GPS:{targetInfo.Name}:{Math.Round(hitPosition.X)}:{Math.Round(hitPosition.Y)}:{Math.Round(hitPosition.Z)}:";
-            
-        if (targetInfo.Type.ToString() == "Planet")
+
+        targetInfoBuilder
+            .Append(" Target Info:\n    Range: ")
+            .Append(Math.Round(Vector3D.Distance(hitPosition, Me.GetPosition())))
+            .Append(" m \n    Velocity: ")
+            .Append(Math.Round(targetInfo.Velocity.Length(), 2))
+            .Append("\n    Size: ")
+            .Append(targetSize)
+            .Append(" m \n    Type: ")
+            .Append(targetInfo.Type)
+            .Append("\n    Relation: ")
+            .Append(targetInfo.Relationship)
+            .Append("\n    ")
+            .Append(targetWaypoint.Value.ToString());
+
+        if (targetInfo.Type == MyDetectedEntityType.Planet)
         {
-            var targetCenter = (Vector3D)targetInfo.Position;
-            var targetCenterToHitPosVec = hitPosition - targetCenter;
-            
+            Vector3D targetCenter = targetInfo.Position;
+            Vector3D targetCenterToHitPosVec = hitPosition - targetCenter;
+
             if (targetCenterToHitPosVec.LengthSquared() > 0)
             {
                 targetCenterToHitPosVec = Vector3D.Normalize(targetCenterToHitPosVec);
             }
-            
-            var safetyOffsetVec = targetCenterToHitPosVec * 50000;
-            
-            var safeJumpPos = hitPosition + safetyOffsetVec;
-            
-            targetStatus += $"\n GPS:Safe Jump Pos:{Math.Round(safeJumpPos.X)}:{Math.Round(safeJumpPos.Y)}:{Math.Round(safeJumpPos.Z)}:";
+
+            Vector3D safetyOffsetVec = targetCenterToHitPosVec * 50000;
+
+            Vector3D safeJumpPos = hitPosition + safetyOffsetVec;
+
+            targetInfoBuilder
+                .Append("\n    ")
+                .Append(new MyWaypointInfo("GPS:Safe Jump Pos", safeJumpPos).ToString());
         }
     }
-
-    //Get text panels
-    var textPanelList = new List<IMyTextPanel>();
-    GridTerminalSystem.GetBlocksOfType(textPanelList, block => block.CustomName.ToLower().Contains(textPanelNameTag.ToLower()));
-    
-    if (textPanelList.Count == 0)
+    else
     {
-        Echo($"Error: No text panels with name tag {textPanelNameTag} found");
-    }
-
-    string scanProgress = "> No scans in progress <";
-    if (shouldScan)
-    {
-        if (autoScan)
-            scanProgress = "<< AutoScan Active... >>";
-        else
-        {
-            scanProgress = "< Scan in progress... >"; 
-        }
-    }
-    
-    string scanCount = "";
-    if (!autoScan)
-    {
-        scanCount = $"Available Scans: {availableScans}\n";
+        targetInfoBuilder.Append("No target detected");
     }
 
     foreach (IMyTextPanel thisPanel in textPanelList)
     {
         //Set font size if allowed
         if (autoSetFontSize)
-            thisPanel.SetValue("FontSize", 1.15f);
-        
+        {
+            thisPanel.FontSize = 1.15f;
+        }
+
         //Get max text panel width and scale our progress bar accordingly
         int panelWidth = GetMaxHorizontalChars(thisPanel);
-        string scanPercentageBar = "";
-        
-        if (!autoScan)
-            scanPercentageBar = $"Status: {scanProgress}\nNext scan ready in: {Math.Round(secondsTillScan, 2)} s\n" + PercentageBar(availableScanRange, range, panelWidth);
-        else
-        {
-            if (secondsTillScan <= autoScanInterval)
-                scanPercentageBar = $"Status: {scanProgress}\nNext AutoScan ready in: {Math.Round(Math.Max(autoScanInterval - timeSinceLastScan, 0), 2)} s\n" + PercentageBar(timeSinceLastScan, autoScanInterval, panelWidth);
-            else
-                scanPercentageBar = $"Status: {scanProgress}\nNext AutoScan ready in: {Math.Round(secondsTillScan  - autoScanInterval, 2)} s\n" + PercentageBar(timeSinceLastScan, secondsTillScan - autoScanInterval, panelWidth);
-        }
-        string finalOutput = "/// WMI Raycast Rangefinder /// \n\n" + $"Scan Range: {range} m\n" + scanCount + scanPercentageBar + "\n\n" + targetStatus;
 
-        thisPanel.WriteText(finalOutput);
+        finalOutputBuilder.Clear();
+        finalOutputBuilder
+            .Append(scanInfoBuilder)
+            .Append(PercentageBar(percentageCurrent, percentageMax, panelWidth))
+            .Append("\n\n")
+            .Append(targetInfoBuilder);
+
+        thisPanel.WriteText(finalOutputBuilder.ToString());
         thisPanel.ContentType = ContentType.TEXT_AND_IMAGE;
+
+        if (targetWaypoint.HasValue)
+        {
+            thisPanel.WritePublicTitle(targetWaypoint.Value.ToString());
+        }
     }
 }
 
@@ -309,9 +389,9 @@ IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameraList)
 {
     //Assumes that cameraList is NOT empty
     double maxRange = 0;
-    
+
     IMyCameraBlock maxRangeCamera = cameraList[0];
-    
+
     foreach (IMyCameraBlock thisCamera in cameraList)
     {
         if (thisCamera.AvailableScanRange > maxRange)
@@ -320,27 +400,27 @@ IMyCameraBlock GetCameraWithMaxRange(List<IMyCameraBlock> cameraList)
             maxRange = maxRangeCamera.AvailableScanRange;
         }
     }
-    
+
     return maxRangeCamera;
 }
 
 int GetAvailableScans(List<IMyCameraBlock> cameraList, double range)
 {
     int scans = 0;
-    
+
     foreach (IMyCameraBlock thisCamera in cameraList)
     {
         var availableScanRange = thisCamera.AvailableScanRange;
-        
+
         scans += (int)Math.Floor(availableScanRange / range);
     }
-    
+
     return scans;
 }
 
 int GetMaxHorizontalChars(IMyTextPanel panel)
 {
-    double textSize = panel.GetValue<float>("FontSize");
+    double textSize = panel.FontSize;
     int pixelWidth = (int)Math.Floor(650 / textSize);
     int startAndEndWidth = 9 + 1 + 9;
     int charWidth = 6 + 1;
@@ -368,5 +448,5 @@ string PercentageBar(double current, double max, int maxBarTicks = 50)
     int percentFullLength = (int)MathHelper.Clamp(Math.Round(percent / percentIncrement), 0, maxBarTicks);
     int percentEmptyLength = MathHelper.Clamp(maxBarTicks - percentFullLength, 0, maxBarTicks);
 
-    return "[" + new String('|', percentFullLength) + new String('\'', percentEmptyLength) + "]"; // + String.Format("{0:000.0}%", Math.Round(percent, 2));
+    return "[" + new String('|', percentFullLength) + new String('\'', percentEmptyLength) + "]";
 }
