@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.15.4";
-const string Date = "2023/10/12";
+const string Version = "170.16.2";
+const string Date = "2023/11/23";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -212,7 +212,6 @@ List<IMyShipConnector> _connectors = new List<IMyShipConnector>();
 List<IMyMotorStator> _rotors = new List<IMyMotorStator>();
 List<IMyReactor> _reactors = new List<IMyReactor>();
 List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
-List<IMyBeacon> _beacons = new List<IMyBeacon>();
 List<IMySensorBlock> _sensors = new List<IMySensorBlock>();
 List<IMyWarhead> _warheads = new List<IMyWarhead>();
 List<IMyTimerBlock> _timers = new List<IMyTimerBlock>();
@@ -249,6 +248,7 @@ const double
     DegToRad = Math.PI / 180,
     RpmToRad = Math.PI / 30,
     TopdownDescentAngle = Math.PI / 6,
+    AntennaEnableDelay = 2, // To prevent HUD bug where they show up when they shouldn't
     MaxGuidanceTime = 180,
     RuntimeToRealtime = Tick / 0.0166666,
     GyroSlowdownAngle = Math.PI / 36;
@@ -361,7 +361,7 @@ ConfigDouble
 ConfigSection _raycastConfig = new ConfigSection("Raycast/Sensors");
 ConfigBool _useCamerasForHoming = new ConfigBool("Use cameras for homing", true);
 ConfigDouble
-    _raycastRange = new ConfigDouble("Tripwire range (m)", 0.25),
+    _raycastRange = new ConfigDouble("Tripwire range (m)", 2.5),
     _raycastMinimumTargetSize = new ConfigDouble("Minimum target size (m)", 0),
     _minimumArmingRange = new ConfigDouble("Minimum warhead arming range (m)", 100);
 ConfigBool
@@ -476,6 +476,8 @@ void SetupConfig()
 #region Main Methods
 Program()
 {
+    _scheduler = new Scheduler(this, true);
+
     _logger = new Logger(_setupBuilder);
     _logger.RegisterType(LogLevel.Info, "> INFO:", new Color(0, 170, 255));
     _logger.RegisterType(LogLevel.Warning, "> WARN:", new Color(255, 255, 0));
@@ -497,9 +499,6 @@ Program()
     _guidanceActivateAction = new ScheduledAction(ActivateGuidance, 0, true);
     _randomHeadingVectorAction = new ScheduledAction(ComputeRandomHeadingVector, 0, false);
 
-    // Scheduler assignment
-    _scheduler = new Scheduler(this, true);
-
     // Setting up scheduled tasks
     _scheduler.AddScheduledAction(_launchSM.Update, UpdatesPerSecond);
     _scheduler.AddScheduledAction(_guidanceActivateAction);
@@ -508,9 +507,6 @@ Program()
     _scheduler.AddScheduledAction(PrintEcho, 1);
     _scheduler.AddScheduledAction(NetworkTargets, 6);
     _scheduler.AddScheduledAction(_randomHeadingVectorAction);
-
-    // Setting up sequential tasks
-    _scheduler.AddQueuedAction(KillPower, MaxGuidanceTime);
 
     _runtimeTracker = new RuntimeTracker(this, 120, 0.005);
 
@@ -991,7 +987,6 @@ void ClearLists()
     _rotors.Clear();
     _reactors.Clear();
     _antennas.Clear();
-    _beacons.Clear();
     _sensors.Clear();
     _warheads.Clear();
     _cameras.Clear();
@@ -1324,7 +1319,6 @@ bool SetupErrorChecking()
     EchoBlockCount(_artMasses.Count, "art. mass block");
     EchoBlockCount(_sensors.Count, "sensor");
     EchoBlockCount(_warheads.Count, "warhead");
-    EchoBlockCount(_beacons.Count, "beacon");
     EchoBlockCount(_cameras.Count, "camera");
     EchoBlockCount(_timers.Count, "timer");
     EchoBlockCount(_unsortedThrusters.Count, "total thruster");
@@ -1402,7 +1396,6 @@ bool CollectBlocks(IMyTerminalBlock block)
             || AddToListIfType(block, _connectors)
             || AddToListIfType(block, _rotors)
             || AddToListIfType(block, _reactors)
-            || AddToListIfType(block, _beacons)
             || AddToListIfType(block, _sensors)
             || AddToListIfType(block, _timers)
             || AddToListIfType(block, _gasTanks))
@@ -1619,20 +1612,15 @@ void OnDetach()
     foreach (var a in _antennas)
     {
         a.Radius = 1f;
+        a.EnableBroadcasting = !_shouldStealth;
         a.Enabled = false;
-        a.EnableBroadcasting = false;
-        a.Enabled = true; // TODO: this used to be a bug workaround, not sure if it is still needed tbh
         a.HudText = GetAntennaName(a.HudText);
-    }
-
-    foreach (var b in _beacons)
-    {
-        b.Radius = 1f;
-        b.Enabled = true;
     }
 
     ApplyThrustOverride(_sideThrusters, MinThrust, false);
     ApplyThrustOverride(_detachThrusters, 1f);
+
+    _scheduler.AddQueuedAction(EnableAntennas, AntennaEnableDelay);
 }
 
 // Disables missile thrust for drifting.
@@ -1662,6 +1650,16 @@ void OnFlight()
     Me.CubeGrid.CustomName = _missileGroupNameTag;
 
     _killAllowed = true;
+
+    _scheduler.AddQueuedAction(KillPower, MaxGuidanceTime);
+}
+
+void EnableAntennas()
+{
+    foreach (var a in _antennas)
+    {
+        a.Enabled = true;
+    }
 }
 #endregion
 
@@ -1911,37 +1909,35 @@ void Control(MatrixD missileMatrix, Vector3D accelCmd, Vector3D gravityVec, Vect
         ApplySideThrust(_sideThrusters, sideVelocity, gravityVec, mass);
     }
 
-    // Get pitch and yaw angles
-    double yaw, pitch, roll;
-    GetRotationAnglesSimultaneous(accelCmd, -gravityVec, missileMatrix, out pitch, out yaw, out roll);
+    Vector3D rotationVectorPYR = GetRotationVector(accelCmd, -gravityVec, missileMatrix);
 
     // Angle controller
-    double yawSpeed = _yawPID.Control(yaw);
-    double pitchSpeed = _pitchPID.Control(pitch);
+    Vector3D rotationSpeedPYR;
+    rotationSpeedPYR.X = _pitchPID.Control(rotationVectorPYR.X);
+    rotationSpeedPYR.Y = _yawPID.Control(rotationVectorPYR.Y);
 
     // Handle roll more simply
-    double rollSpeed = 0;
     if (Math.Abs(_missileSpinRPM) > 1e-3 && InFlight)
     {
-        rollSpeed = _missileSpinRPM * RpmToRad;
+        rotationSpeedPYR.Z = _missileSpinRPM * RpmToRad;
     }
     else
     {
-        rollSpeed = roll;
+        rotationSpeedPYR.Z = rotationVectorPYR.Z;
     }
 
     // Yaw and pitch slowdown to avoid overshoot
-    if (Math.Abs(yaw) < GyroSlowdownAngle)
+    if (Math.Abs(rotationVectorPYR.X) < GyroSlowdownAngle)
     {
-        yawSpeed = UpdatesPerSecond * .5 * yaw;
+        rotationSpeedPYR.X = UpdatesPerSecond * .5 * rotationVectorPYR.X;
     }
 
-    if (Math.Abs(pitch) < GyroSlowdownAngle)
+    if (Math.Abs(rotationVectorPYR.Y) < GyroSlowdownAngle)
     {
-        pitchSpeed = UpdatesPerSecond * .5 * pitch;
+        rotationSpeedPYR.Y = UpdatesPerSecond * .5 * rotationVectorPYR.Y;
     }
 
-    ApplyGyroOverride(pitchSpeed, yawSpeed, rollSpeed, _gyros, missileMatrix);
+    ApplyGyroOverride(rotationSpeedPYR, _gyros, missileMatrix);
 }
 
 #endregion
@@ -2022,14 +2018,6 @@ void ScaleAntennaRange(double dist)
         a.Radius = (float)dist;
         a.EnableBroadcasting = !_shouldStealth;
         a.HudText = GetAntennaName(a.HudText);
-    }
-
-    foreach (IMyBeacon thisBeacon in _beacons)
-    {
-        if (thisBeacon.Closed)
-            continue;
-
-        thisBeacon.Radius = (float)dist;
     }
 }
 
@@ -2540,7 +2528,7 @@ public static class VectorMath
     }
 }
 
-/// Whip's GetRotationAnglesSimultaneous - Last modified: 2022/08/10
+/// Whip's GetRotationVector - Last modified: 2023/11/19
 /// <summary>
 /// <para>
 ///     This method computes the axis-angle rotation required to align the
@@ -2573,37 +2561,38 @@ public static class VectorMath
 /// <param name="desiredUpVector">
 ///     Desired up direction in world frame.
 ///     This is the secondary constraint used to align roll. 
-///     Set to <c>Vector3D.Zero</c> if roll control is not desired.
+///     Set to <c>null</c> if roll control is not desired.
 /// </param>
 /// <param name="worldMatrix">
 ///     World matrix describing current orientation.
 ///     The translation part of the matrix is ignored; only the orientation matters.
 /// </param>
-/// <param name="pitch">Pitch angle to desired orientation (rads).</param>
-/// <param name="yaw">Yaw angle to desired orientation (rads).</param>
-/// <param name="roll">Roll angle to desired orientation (rads).</param>
-public static void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, Vector3D desiredUpVector, MatrixD worldMatrix, out double pitch, out double yaw, out double roll)
+/// <returns>
+///     Pitch-Yaw-Roll rotation vector to the desired orientation (rads). 
+/// </returns>
+public static Vector3D GetRotationVector(Vector3D desiredForwardVector, Vector3D? desiredUpVector, MatrixD worldMatrix)
 {
-    desiredForwardVector = VectorMath.SafeNormalize(desiredForwardVector);
+    var transposedWm = MatrixD.Transpose(worldMatrix);
+    var forwardVector = Vector3D.Rotate(VectorMath.SafeNormalize(desiredForwardVector), transposedWm);
 
-    MatrixD transposedWm;
-    MatrixD.Transpose(ref worldMatrix, out transposedWm);
-    Vector3D.Rotate(ref desiredForwardVector, ref transposedWm, out desiredForwardVector);
-    Vector3D.Rotate(ref desiredUpVector, ref transposedWm, out desiredUpVector);
+    Vector3D leftVector = Vector3D.Zero;
+    if (desiredUpVector.HasValue)
+    {
+        desiredUpVector = Vector3D.Rotate(desiredUpVector.Value, transposedWm);
+        leftVector = Vector3D.Cross(desiredUpVector.Value, forwardVector);
+    }
 
-    Vector3D leftVector = Vector3D.Cross(desiredUpVector, desiredForwardVector);
     Vector3D axis;
     double angle;
-    
-    if (Vector3D.IsZero(desiredUpVector) || Vector3D.IsZero(leftVector))
+    if (!desiredUpVector.HasValue || Vector3D.IsZero(leftVector))
     {
         /*
          * Simple case where we have no valid roll constraint:
          * We merely cross the current forward vector (Vector3D.Forward) on the 
-         * desiredForwardVector.
+         * forwardVector.
          */
-        axis = new Vector3D(-desiredForwardVector.Y, desiredForwardVector.X, 0);
-        angle = Math.Acos(MathHelper.Clamp(-desiredForwardVector.Z, -1.0, 1.0));
+        axis = new Vector3D(-forwardVector.Y, forwardVector.X, 0);
+        angle = Math.Acos(MathHelper.Clamp(-forwardVector.Z, -1.0, 1.0));
     }
     else
     {
@@ -2612,10 +2601,10 @@ public static void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, 
          * can extract the error from it in axis-angle representation.
          */
         leftVector = VectorMath.SafeNormalize(leftVector);
-        Vector3D upVector = Vector3D.Cross(desiredForwardVector, leftVector);
-        MatrixD targetOrientation = new MatrixD()
+        var upVector = Vector3D.Cross(forwardVector, leftVector);
+        var targetOrientation = new MatrixD()
         {
-            Forward = desiredForwardVector,
+            Forward = forwardVector,
             Left = leftVector,
             Up = upVector,
         };
@@ -2628,6 +2617,7 @@ public static void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, 
         angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1.0, 1.0));
     }
 
+    Vector3D rotationVectorPYR;
     if (Vector3D.IsZero(axis))
     {
         /*
@@ -2635,39 +2625,42 @@ public static void GetRotationAnglesSimultaneous(Vector3D desiredForwardVector, 
          * exactly aligned or exactly anti-aligned. In the latter case, we just
          * assume the yaw is PI to get us away from the singularity.
          */
-        angle = desiredForwardVector.Z < 0 ? 0 : Math.PI;
-        yaw = angle;
-        pitch = 0;
-        roll = 0;
-        return;
+        angle = forwardVector.Z < 0 ? 0 : Math.PI;
+        rotationVectorPYR = new Vector3D(0, angle, 0);
+    }
+    else
+    {
+        rotationVectorPYR = VectorMath.SafeNormalize(axis) * angle;
     }
 
-    Vector3D axisAngle = VectorMath.SafeNormalize(axis) * angle;
-    yaw = axisAngle.Y;
-    pitch = axisAngle.X;
-    roll = axisAngle.Z;
+    return rotationVectorPYR;
 }
 
 /*
-Whip's ApplyGyroOverride - Last modified: 2020/08/27
+Whip's ApplyGyroOverride - Last modified: 2023/11/19
 
 Takes pitch, yaw, and roll speeds relative to the gyro's backwards
 ass rotation axes. 
 */
-void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyroList, MatrixD worldMatrix)
+void ApplyGyroOverride(Vector3D rotationSpeedPYR, List<IMyGyro> gyros, MatrixD worldMatrix)
+{
+    var worldRotationPYR = Vector3D.TransformNormal(rotationSpeedPYR, worldMatrix);
+
+    foreach (var g in gyros)
+    {
+        var gyroRotationPYR = Vector3D.TransformNormal(worldRotationPYR, Matrix.Transpose(g.WorldMatrix));
+
+        g.Pitch = (float)gyroRotationPYR.X;
+        g.Yaw = (float)gyroRotationPYR.Y;
+        g.Roll = (float)gyroRotationPYR.Z;
+        g.GyroOverride = true;
+    }
+}
+
+void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyros, MatrixD worldMatrix)
 {
     var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
-    var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
-
-    foreach (var thisGyro in gyroList)
-    {
-        var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(thisGyro.WorldMatrix));
-
-        thisGyro.Pitch = (float)transformedRotationVec.X;
-        thisGyro.Yaw = (float)transformedRotationVec.Y;
-        thisGyro.Roll = (float)transformedRotationVec.Z;
-        thisGyro.GyroOverride = true;
-    }
+    ApplyGyroOverride(rotationVec, gyros, worldMatrix);
 }
 
 #region Scheduler
