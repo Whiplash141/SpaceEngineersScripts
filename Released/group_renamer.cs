@@ -50,8 +50,8 @@ replace "<old phrase>" with "<new phrase>"
 // NO TOUCH BELOW HERE
 //-------------------------------------------------------------
 
-const string VERSION = "7.1.1";
-const string DATE = "2020/11/29";
+const string VERSION = "7.1.2";
+const string DATE = "2023/12/18";
 
 MyIni _ini = new MyIni();
 
@@ -200,11 +200,12 @@ void RenameBlocksToDefault(List<IMyTerminalBlock> blocks, bool shouldNumber = tr
 
 void PrefixBlockName(List<IMyTerminalBlock> blocks, string prefixName)
 {
+    string space = addSpaceAfterPrefix ? " " : "";
     foreach (var block in blocks)
     {
         if (!block.CustomName.StartsWith(prefixName))
         {
-            block.CustomName = $"{prefixName} {block.CustomName}";
+            block.CustomName = $"{prefixName}{space}{block.CustomName}";
         }
     }
 
@@ -213,11 +214,12 @@ void PrefixBlockName(List<IMyTerminalBlock> blocks, string prefixName)
 
 void SuffixBlockName(List<IMyTerminalBlock> blocks, string suffixName)
 {
+    string space = addSpaceBeforeSuffix ? " " : "";
     foreach (var block in blocks)
     {
         if (!block.CustomName.EndsWith(suffixName))
         {
-            block.CustomName = $"{block.CustomName} {suffixName}";
+            block.CustomName = $"{block.CustomName}{space}{suffixName}";
         }
     }
 
