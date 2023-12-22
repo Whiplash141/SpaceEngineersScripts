@@ -1,6 +1,6 @@
 
 #region WHAM
-const string Version = "170.16.3";
+const string Version = "170.17.0";
 const string Date = "2023/12/22";
 const string CompatVersion = "95.0.0";
 
@@ -1602,6 +1602,7 @@ void OnDetach()
     foreach (var c in _connectors)
     {
         c.Disconnect();
+        c.Enabled = false;
     }
 
     foreach (var r in _rotors)
