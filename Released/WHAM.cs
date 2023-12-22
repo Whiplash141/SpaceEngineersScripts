@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.16.2";
-const string Date = "2023/11/23";
+const string Version = "170.16.3";
+const string Date = "2023/12/22";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -1286,7 +1286,7 @@ bool SetupErrorChecking()
 {
     bool setupFailed = false;
 
-    setupFailed |= LogIfTrue(_requireAntenna ? LogLevel.Error : LogLevel.Warning , _antennas.Count == 0, "No antennas found");
+    setupFailed |= LogIfTrue(_requireAntenna ? LogLevel.Error : LogLevel.Warning , _antennas.Count == 0, "No antennas found") && _requireAntenna;
     setupFailed |= LogIfTrue(LogLevel.Error, _gyros.Count == 0, "No gyros found");
     setupFailed |= LogIfTrue(LogLevel.Error, _shipControllers.Count == 0, "No remotes found");
 
