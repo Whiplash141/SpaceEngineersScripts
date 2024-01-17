@@ -9,7 +9,7 @@ HOW DO I USE THIS?
 2. Place a ship controller.
 3. Add "Horizon" to the name of text panels and text surfaces
     - Configure which surface the script is shown on in the
-      Custom Data of the text surface (not needed for regular LCDs)
+        Custom Data of the text surface (not needed for regular LCDs)
 4. Enjoy!
 
 
@@ -18,7 +18,7 @@ HOW DO I USE THIS?
 =================================================
     DO NOT MODIFY VARIABLES IN THE SCRIPT!
 
- USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
+    USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 =================================================
 
 
@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 */
 
-const string VERSION = "1.9.1";
-const string DATE = "2021/04/22";
+const string VERSION = "1.12.2";
+const string DATE = "2024/01/17";
 
 #region Fields
 List<IMyShipController> Controllers
@@ -62,63 +62,49 @@ List<IMyShipController> Controllers
     }
 }
 
-double _altitudeTransitionThreshold = 1000;
+public enum AccelMode { m_per_s2, G_force }
+
 IMyShipController reference = null;
-IMyShipController lastActiveShipController = null;
-string _textSurfaceNameTag = "Horizon";
-string _soundBlockNameTag = "Horizon";
-string _referenceNameTag = "Reference";
-string _lastSetupResult = "";
-Vector3D _sunRotationAxis = new Vector3D(0, -1, 0);
-Color _skyColor = new Color(10, 30, 50);
-Color _groundColor = new Color(10, 10, 10);
-Color _spaceBackgroundColor = new Color(0, 0, 0);
-Color _progradeColor = new Color(150, 150, 0);
-Color _retrogradeColor = new Color(150, 0, 0);
-Color _textColor = new Color(150, 150, 150, 100);
-Color _textBoxColor = new Color(150, 150, 150, 100);
-Color _textBoxBackground = new Color(10, 10, 10, 150);
-Color _horizonLineColor = new Color(0, 0, 0);
-Color _elevationLineColor = new Color(150, 150, 150);
-Color _orientationLineColor = new Color(150, 150, 150);
-Color _altitudeWarningColor = Color.Red;
-Color _xAxisColor = new Color(100, 50, 0, 150);
-Color _yAxisColor = new Color(0, 100, 0, 150);
-Color _zAxisColor = new Color(0, 50, 100, 150);
-bool _showXYZAxis = true;
-double _collisionSoundInterval = 0.166;
-double _timeToCollisionThreshold = 5;
 
 double _collisionSoundTimeSum = 141;
 bool _lastCollisionWarningState = false;
 bool _clearSpriteCache = false;
 
 #region Ini Keys
-const string INI_SECTION_GENERAL = "Artificial Horizon - General";
-const string INI_GENERAL_TEXT_NAME = "Text surface name tag";
-const string INI_GENERAL_SOUND_NAME = "Collision warning sound name tag";
-const string INI_GENERAL_SOUND_INTERVAL = "Collision warning sound loop interval (s)";
-const string INI_GENERAL_COLLISION_THRESH = "Collision warning time threshold (s)";
-const string INI_GENERAL_REF_NAME = "Optional reference name tag";
-const string INI_GENERAL_ALT_TRANS = "Surface to Sealevel transition alt. (m)"; //TODO: Add comment
-const string INI_GENERAL_SHOW_XYZ = "Show XYZ axes in space";
-const string INI_GENERAL_SUN_ROTATION = "Sun rotation axis";
+ConfigSection
+    _configGeneral = new ConfigSection("Artificial Horizon - General"),
+    _configColor = new ConfigSection("Artificial Horizon - Colors");
 
-const string INI_SECTION_COLORS = "Artificial Horizon - Colors";
-const string INI_COLORS_SKY = "Sky background";
-const string INI_COLORS_GROUND = "Ground background";
-const string INI_COLORS_SPACE = "Space background";
-const string INI_COLORS_PROGRADE = "Prograde velocity";
-const string INI_COLORS_RETROGRADE = "Retrograde velocity";
-const string INI_COLORS_TEXT = "Text";
-const string INI_COLORS_TEXT_BOX_OUTLINE = "Text box outline";
-const string INI_COLORS_TEXT_BOX_BACKGROUND = "Text box background";
-const string INI_COLORS_HORIZON_LINE = "Horizon line";
-const string INI_COLORS_ELEVATION_LINE = "Elevation lines";
-const string INI_COLORS_ORENTATION = "Orientation indicator";
-const string INI_COLORS_X_AXIS = "Space x-axis";
-const string INI_COLORS_Y_AXIS = "Space y-axis";
-const string INI_COLORS_Z_AXIS = "Space z-axis";
+// General
+ConfigString _textSurfaceNameTag = new ConfigString("Text surface name tag", "Horizon");
+public ConfigDouble TimeToCollisionThreshold = new ConfigDouble("Collision warning time threshold (s)", 5, " Time before predicted collision that the AH will\n warn you to pull up (-1 disables warning)");
+ConfigString _soundBlockNameTag = new ConfigString("Collision warning sound name tag", "Horizon");
+ConfigDouble _collisionSoundInterval = new ConfigDouble("Collision warning sound loop interval (s)", 0.166);
+ConfigString _referenceNameTag = new ConfigString("Optional reference name tag", "Reference");
+public ConfigDouble AltitudeTransitionThreshold = new ConfigDouble("Surface to Sealevel transition alt. (m)", 1000);
+public ConfigBool ShowXYZAxis = new ConfigBool("Show XYZ axes in space", true);
+ConfigBool _drawTitleScreen = new ConfigBool("Draw title screen", true);
+public ConfigVector3 SunRotationAxis = new ConfigVector3("Sun rotation axis", new Vector3(0, -1, 0));
+public ConfigEnum<AccelMode> AccelerationMode = new ConfigEnum<AccelMode>("Acceleration display mode", AccelMode.m_per_s2, " Accepted values are:\n m_per_s2 or G_force");
+
+// Colors
+public ConfigColor
+    SkyColor = new ConfigColor("Sky background", new Color(10, 30, 50)),
+    GroundColor = new ConfigColor("Ground background", new Color(10, 10, 10)),
+    SpaceBackgroundColor = new ConfigColor("Space background", new Color(0, 0, 0)),
+    ProgradeColor = new ConfigColor("Prograde velocity", new Color(150, 150, 0)),
+    RetrogradeColor = new ConfigColor("Retrograde velocity", new Color(150, 0, 0)),
+    TextColor = new ConfigColor("Text", new Color(150, 150, 150, 100)),
+    TextBoxColor = new ConfigColor("Text box outline", new Color(150, 150, 150, 100)),
+    TextBoxBackground = new ConfigColor("Text box background", new Color(10, 10, 10, 150)),
+    HorizonLineColor = new ConfigColor("Horizon line", new Color(0, 0, 0)),
+    ElevationLineColor = new ConfigColor("Elevation lines", new Color(150, 150, 150)),
+    OrientationLineColor = new ConfigColor("Orientation indicator", new Color(150, 150, 150)),
+    XAxisColor = new ConfigColor("Space x-axis", new Color(100, 50, 0, 150)),
+    YAxisColor = new ConfigColor("Space y-axis", new Color(0, 100, 0, 150)),
+    ZAxisColor = new ConfigColor("Space z-axis", new Color(0, 50, 100, 150));
+
+public Color AltitudeWarningColor { get; private set; } = Color.Red;
 
 const string INI_SECTION_TEXT_SURF = "Artificial Horizon - Text Surface Config";
 const string INI_TEXT_SURF_TEMPLATE = "Show on screen {0}";
@@ -130,7 +116,7 @@ readonly List<IMyShipController> _allControllers = new List<IMyShipController>()
 readonly List<IMyShipController> _taggedControllers = new List<IMyShipController>();
 readonly List<IMyTextSurface> _textSurfaces = new List<IMyTextSurface>();
 readonly List<IMySoundBlock> _soundBlocks = new List<IMySoundBlock>();
-readonly MyIni _ini = new MyIni();
+MyIni _ini = new MyIni();
 readonly MyIni _textSurfaceIni = new MyIni();
 readonly ArtificialHorizon _artificialHorizon;
 readonly Scheduler _scheduler;
@@ -138,38 +124,46 @@ readonly ScheduledAction _scheduledSetup;
 readonly RuntimeTracker _runtimeTracker;
 readonly RunningSymbol _runningSymbol = new RunningSymbol(new string[] { "", ".", "..", "...", "....", "...", "..", "." });
 readonly CircularBuffer<Action> _buffer;
+readonly ArtificialHorizonTitleScreen _titleScreen;
 #endregion
 
 #region Main methods
 Program()
 {
+    _configGeneral.AddValues(
+        _textSurfaceNameTag,
+        TimeToCollisionThreshold,
+        _soundBlockNameTag,
+        _collisionSoundInterval,
+        _referenceNameTag,
+        AltitudeTransitionThreshold,
+        ShowXYZAxis,
+        _drawTitleScreen,
+        SunRotationAxis,
+        AccelerationMode
+    );
+
+    _configColor.AddValues(
+        SkyColor,
+        GroundColor,
+        SpaceBackgroundColor,
+        ProgradeColor,
+        RetrogradeColor,
+        TextColor,
+        TextBoxColor,
+        TextBoxBackground,
+        HorizonLineColor,
+        ElevationLineColor,
+        OrientationLineColor,
+        XAxisColor,
+        YAxisColor,
+        ZAxisColor
+    );
+
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
-
+    _titleScreen = new ArtificialHorizonTitleScreen(VERSION, this);
     _runtimeTracker = new RuntimeTracker(this);
-
-    _artificialHorizon = new ArtificialHorizon(
-            _sunRotationAxis,
-            _skyColor,
-            _groundColor,
-            _progradeColor,
-            _retrogradeColor,
-            _textColor,
-            _textBoxColor,
-            _textBoxBackground,
-            _horizonLineColor,
-            _elevationLineColor,
-            _spaceBackgroundColor,
-            _orientationLineColor,
-            _altitudeWarningColor,
-            _xAxisColor,
-            _yAxisColor,
-            _zAxisColor,
-            _altitudeTransitionThreshold,
-            _timeToCollisionThreshold,
-            _showXYZAxis,
-            this);
-
-    Setup();
+    _artificialHorizon = new ArtificialHorizon(this);
 
     _scheduledSetup = new ScheduledAction(Setup, 0.1);
 
@@ -192,7 +186,11 @@ Program()
     _scheduler.AddScheduledAction(_scheduledSetup);
     _scheduler.AddScheduledAction(PrintDetailedInfo, 1);
     _scheduler.AddScheduledAction(PlaySounds, 6);
+    _scheduler.AddScheduledAction(_titleScreen.RestartDraw, 0.2);
+    _scheduler.AddScheduledAction(DrawTitleScreen, 6);
     _scheduler.AddScheduledAction(MoveNextScreens, 60);
+
+    Setup();
 }
 
 void Main(string arg)
@@ -202,29 +200,27 @@ void Main(string arg)
     _runtimeTracker.AddInstructions();
 }
 
+void DrawTitleScreen()
+{
+    if (_drawTitleScreen)
+    {
+        _titleScreen.Draw();
+    }
+}
+
 void CalculateAHParams()
 {
-    reference = GetControlledShipController(Controllers); // Primary, get active controller
+    reference = GetControlledShipController(Controllers, reference); // Primary, get active controller
     if (reference == null)
     {
-        if (lastActiveShipController != null)
-        {
-            // Backup, use last active controller
-            reference = lastActiveShipController;
-        }
-        else if (reference == null && Controllers.Count != 0)
-        {
-            // Last case, resort to the first controller in the list
-            reference = Controllers[0];
-        }
-        else
+        if (Controllers.Count == 0)
         {
             return;
         }
+        reference = Controllers[0];
     }
 
     _artificialHorizon.CalculateParameters(reference, 6);
-    lastActiveShipController = reference;
 }
 
 void PlaySounds()
@@ -270,7 +266,7 @@ void PrintDetailedInfo()
 {
     Echo($"WMI Artificial Horizon Redux{_runningSymbol.Iterate()}\n(Version {VERSION} - {DATE})\n\nCustomize variables in Custom Data!");
     Echo($"\nNext refresh in {Math.Max(_scheduledSetup.RunInterval - _scheduledSetup.TimeSinceLastRun, 0):N0} seconds");
-    Echo($"{_lastSetupResult}");
+    Echo($"{Log.Default.Output}");
     Echo($"Text surfaces: {_textSurfaces.Count}\n");
     Echo($"Reference seat:\n\"{(reference?.CustomName)}\"");
     Echo(_runtimeTracker.Write());
@@ -281,71 +277,14 @@ void PrintDetailedInfo()
 void ParseIni()
 {
     _ini.Clear();
-    if (_ini.TryParse(Me.CustomData))
-    {
-        // General
-        _textSurfaceNameTag = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_TEXT_NAME).ToString(_textSurfaceNameTag);
-        _timeToCollisionThreshold = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_COLLISION_THRESH).ToDouble(_timeToCollisionThreshold);
-        _soundBlockNameTag = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_SOUND_NAME).ToString(_soundBlockNameTag);
-        _collisionSoundInterval = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_SOUND_INTERVAL).ToDouble(_collisionSoundInterval);
-        _referenceNameTag = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_REF_NAME).ToString(_referenceNameTag);
-        _altitudeTransitionThreshold = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_ALT_TRANS).ToDouble(_altitudeTransitionThreshold);
-        _showXYZAxis = _ini.Get(INI_SECTION_GENERAL, INI_GENERAL_SHOW_XYZ).ToBoolean(_showXYZAxis);
-        _sunRotationAxis = MyIniHelper.GetVector3D(INI_SECTION_GENERAL, INI_GENERAL_SUN_ROTATION, _ini, _sunRotationAxis);
-
-        // Colors
-        _skyColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_SKY, _ini, _skyColor);
-        _groundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_GROUND, _ini, _groundColor);
-        _spaceBackgroundColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_SPACE, _ini, _spaceBackgroundColor);
-        _progradeColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_PROGRADE, _ini, _progradeColor);
-        _retrogradeColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_RETROGRADE, _ini, _retrogradeColor);
-        _textColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_TEXT, _ini, _textColor);
-        _textBoxColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_TEXT_BOX_OUTLINE, _ini, _textBoxColor);
-        _textBoxBackground = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_TEXT_BOX_BACKGROUND, _ini, _textBoxBackground);
-        _horizonLineColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_HORIZON_LINE, _ini, _horizonLineColor);
-        _elevationLineColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_ELEVATION_LINE, _ini, _elevationLineColor);
-        _orientationLineColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_ORENTATION, _ini, _orientationLineColor);
-        _xAxisColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_X_AXIS, _ini, _xAxisColor);
-        _yAxisColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_Y_AXIS, _ini, _yAxisColor);
-        _zAxisColor = MyIniHelper.GetColor(INI_SECTION_COLORS, INI_COLORS_Z_AXIS, _ini, _zAxisColor);
-    }
-    else if (!string.IsNullOrWhiteSpace(Me.CustomData))
+    if (!_ini.TryParse(Me.CustomData) && !string.IsNullOrWhiteSpace(Me.CustomData))
     {
         _ini.EndContent = Me.CustomData;
     }
 
-    WriteIni();
-}
+    _configGeneral.Update(ref _ini);
+    _configColor.Update(ref _ini);
 
-void WriteIni()
-{
-    // General
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_TEXT_NAME, _textSurfaceNameTag);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_COLLISION_THRESH, _timeToCollisionThreshold);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_SOUND_NAME, _soundBlockNameTag);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_SOUND_INTERVAL, _collisionSoundInterval);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_REF_NAME, _referenceNameTag);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_ALT_TRANS, _altitudeTransitionThreshold);
-    _ini.Set(INI_SECTION_GENERAL, INI_GENERAL_SHOW_XYZ, _showXYZAxis);
-    MyIniHelper.SetVector3D(INI_SECTION_GENERAL, INI_GENERAL_SUN_ROTATION, ref _sunRotationAxis, _ini);
-
-    // Colors
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_SKY, _skyColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_GROUND, _groundColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_SPACE, _spaceBackgroundColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_PROGRADE, _progradeColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_RETROGRADE, _retrogradeColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_TEXT, _textColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_TEXT_BOX_OUTLINE, _textBoxColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_TEXT_BOX_BACKGROUND, _textBoxBackground, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_HORIZON_LINE, _horizonLineColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_ELEVATION_LINE, _elevationLineColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_ORENTATION, _orientationLineColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_X_AXIS, _xAxisColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_Y_AXIS, _yAxisColor, _ini);
-    MyIniHelper.SetColor(INI_SECTION_COLORS, INI_COLORS_Z_AXIS, _zAxisColor, _ini);
-
-    _ini.SetComment(INI_SECTION_GENERAL, INI_GENERAL_COLLISION_THRESH, "Time before predicted collision that the AH will\nwarn you to pull up (-1 disables warning)");
 
     string output = _ini.ToString();
     if (!string.Equals(output, Me.CustomData))
@@ -357,33 +296,9 @@ void WriteIni()
 void Setup()
 {
     _clearSpriteCache = !_clearSpriteCache;
-    
-    ParseIni();
-    Log.Clear();
 
-    if (_artificialHorizon != null)
-    {
-        _artificialHorizon.UpdateFields(
-                _sunRotationAxis,
-                _skyColor,
-                _groundColor,
-                _progradeColor,
-                _retrogradeColor,
-                _textColor,
-                _textBoxColor,
-                _textBoxBackground,
-                _horizonLineColor,
-                _elevationLineColor,
-                _spaceBackgroundColor,
-                _orientationLineColor,
-                _altitudeWarningColor,
-                _xAxisColor,
-                _yAxisColor,
-                _zAxisColor,
-                _altitudeTransitionThreshold,
-                _timeToCollisionThreshold,
-                _showXYZAxis);
-    }
+    ParseIni();
+    Log.Default.Clear();
 
     _textSurfaces.Clear();
     _taggedControllers.Clear();
@@ -392,22 +307,22 @@ void Setup()
     GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, PopulateLists);
 
     if (_textSurfaces.Count == 0)
-        Log.Error($"No text panels or text surface providers with name tag '{_textSurfaceNameTag}' were found.");
+        Log.Default.Error($"No text panels or text surface providers with name tag '{_textSurfaceNameTag}' were found.");
 
     if (_allControllers.Count == 0)
-        Log.Error($"No ship controllers were found.");
+        Log.Default.Error($"No ship controllers were found.");
     else
     {
         if (_taggedControllers.Count == 0)
-            Log.Info($"No ship controllers with name tag \"{_referenceNameTag}\" were found. Using all available ship controllers. (This is NOT an error!)");
+            Log.Default.Info($"No ship controllers with name tag \"{_referenceNameTag}\" were found. Using all available ship controllers. (This is NOT an error!)");
         else
-            Log.Info($"One or more ship controllers with name tag \"{_referenceNameTag}\" were found. Using these to orient the artificial horizon.");
+            Log.Default.Info($"One or more ship controllers with name tag \"{_referenceNameTag}\" were found. Using these to orient the artificial horizon.");
     }
 
     if (_soundBlocks.Count == 0)
-        Log.Info($"No optional sound blocks with name tag \"{_soundBlockNameTag}\" were found. Sounds will not be played when ground collision is imminent.");
+        Log.Default.Info($"No optional sound blocks with name tag \"{_soundBlockNameTag}\" were found. Sounds will not be played when ground collision is imminent.");
 
-    _lastSetupResult = Log.Write();
+    Log.Default.Write();
 }
 
 bool PopulateLists(IMyTerminalBlock block)
@@ -415,7 +330,7 @@ bool PopulateLists(IMyTerminalBlock block)
     if (!block.IsSameConstructAs(Me))
         return false;
 
-    if (StringContains(block.CustomName, _textSurfaceNameTag))
+    if (StringExtensions.Contains(block.CustomName, _textSurfaceNameTag))
     {
         AddTextSurfaces(block, _textSurfaces);
     }
@@ -424,18 +339,18 @@ bool PopulateLists(IMyTerminalBlock block)
     if (controller != null)
     {
         _allControllers.Add(controller);
-        if (StringContains(block.CustomName, _referenceNameTag))
+        if (StringExtensions.Contains(block.CustomName, _referenceNameTag))
             _taggedControllers.Add(controller);
         return false;
     }
 
     var sound = block as IMySoundBlock;
-    if (sound != null && StringContains(block.CustomName, _soundBlockNameTag))
+    if (sound != null && StringExtensions.Contains(block.CustomName, _soundBlockNameTag))
     {
         _soundBlocks.Add(sound);
         if (!sound.IsSoundSelected)
         {
-            Log.Warning($"Sound block named \"{sound.CustomName}\" does not have a sound selected.");
+            Log.Default.Warning($"Sound block named \"{sound.CustomName}\" does not have a sound selected.");
         }
     }
 
@@ -480,51 +395,18 @@ void AddTextSurfaces(IMyTerminalBlock block, List<IMyTextSurface> textSurfaces)
 }
 #endregion
 
-#region General methods
-IMyShipController GetControlledShipController(List<IMyShipController> SCs)
-{
-    foreach (IMyShipController thisController in SCs)
-    {
-        if (thisController.IsUnderControl && thisController.CanControlShip)
-            return thisController;
-    }
-
-    return null;
-}
-
-public static bool StringContains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
-{
-    return source?.IndexOf(toCheck, comp) >= 0;
-}
-#endregion
-
 #region Artificial horizon
 class ArtificialHorizon
 {
     #region Fields
     public bool CollisionWarning { get; private set; } = false;
 
-    Color _skyColor;
-    Color _groundColor;
-    Color _progradeColor;
-    Color _retrogradeColor;
-    Color _textColor;
-    Color _horizonLineColor;
-    Color _elevationLineColor;
-    Color _spaceBackgroundColor;
-    Color _textBoxBorderColor;
-    Color _textBoxBackgroundColor;
-    Color _orientationColor;
-    Color _altitudeWarningColor;
-    Color _xAxisColor;
-    Color _yAxisColor;
-    Color _zAxisColor;
+    const float G = 9.80665f;
+
     double _bearing;
     double _surfaceAltitude;
     double _sealevelAltitude;
-    double _altitudeTransitionThreshold;
     double _lastSurfaceAltitude = 0;
-    double _collisionTimeThreshold;
     double _verticalSpeed;
     float _speed;
     float _pitch;
@@ -535,10 +417,8 @@ class ArtificialHorizon
     float _collisionTimeProportion;
     bool _inGravity;
     bool _movingBackwards;
-    bool _showXYZAxis = true;
     bool _showPullUp = false;
     bool _lastCollisionWarning = false;
-    Vector3D _sunRotationAxis;
     Vector3D _gravity;
     Vector3D _velocity;
     Vector3D _lastVelocity;
@@ -562,7 +442,7 @@ class ArtificialHorizon
     {
         get
         {
-            return _surfaceAltitude >= _altitudeTransitionThreshold ? _sealevelAltitude : _surfaceAltitude;
+            return _surfaceAltitude >= _program.AltitudeTransitionThreshold ? _sealevelAltitude : _surfaceAltitude;
         }
     }
 
@@ -570,7 +450,7 @@ class ArtificialHorizon
     {
         get
         {
-            return _surfaceAltitude >= _altitudeTransitionThreshold ? "Sea level" : "Surface";
+            return _surfaceAltitude >= _program.AltitudeTransitionThreshold ? "Sea level" : "Surface";
         }
     }
 
@@ -586,8 +466,7 @@ class ArtificialHorizon
     const float AXIS_LINE_WIDTH = 8f;
     const float AXIS_TEXT_OFFSET = 24f;
     const float AXIS_LENGTH_SCALE = 0.6f;
-    readonly string[] _axisIcon = new string[3];
-    readonly byte[] _axisDrawOrder = new byte[3];
+    readonly AxisEnum[] _axisDrawOrder = new AxisEnum[3];
     readonly Vector2 RETROGRADE_CROSS_SIZE = new Vector2(32, 4);
     readonly Vector2 VELOCITY_INDICATOR_SIZE = new Vector2(64, 64);
     readonly Vector2 ELEVATION_LADDER_SIZE = new Vector2(175, 32);
@@ -604,93 +483,11 @@ class ArtificialHorizon
     #endregion
 
     #region Ctor and updating fields
-    public ArtificialHorizon(
-            Vector3D sunRotationAxis,
-            Color skyColor,
-            Color groundColor,
-            Color progradeColor,
-            Color retrogradeColor,
-            Color textColor,
-            Color textBoxColor,
-            Color textBackgroundColor,
-            Color horizonLineColor,
-            Color elevationLineColor,
-            Color spaceBackgroundColor,
-            Color orientationColor,
-            Color altitudeWarningColor,
-            Color xAxisColor,
-            Color yAxisColor,
-            Color zAxisColor,
-            double altitudeTransitionThreshold,
-            double collisionTimeThreshold,
-            bool showXYZAxis,
-            Program program)
+    public ArtificialHorizon(Program program)
     {
-        UpdateFields(
-                sunRotationAxis,
-                skyColor,
-                groundColor,
-                progradeColor,
-                retrogradeColor,
-                textColor,
-                textBoxColor,
-                textBackgroundColor,
-                horizonLineColor,
-                elevationLineColor,
-                spaceBackgroundColor,
-                orientationColor,
-                altitudeWarningColor,
-                xAxisColor,
-                yAxisColor,
-                zAxisColor,
-                altitudeTransitionThreshold,
-                collisionTimeThreshold,
-                showXYZAxis);
         _pullUpStringBuilder.Append(PULL_UP_TEXT);
         _heightStringBuilder.Append("X");
         _program = program;
-    }
-
-    public void UpdateFields(
-            Vector3D sunRotationAxis,
-            Color skyColor,
-            Color groundColor,
-            Color progradeColor,
-            Color retrogradeColor,
-            Color textColor,
-            Color textBoxColor,
-            Color textBackgroundColor,
-            Color horizonLineColor,
-            Color elevationLineColor,
-            Color spaceBackgroundColor,
-            Color orientationColor,
-            Color altitudeWarningColor,
-            Color xAxisColor,
-            Color yAxisColor,
-            Color zAxisColor,
-            double altitudeTransitionThreshold,
-            double collisionTimeThreshold,
-            bool showXYZAxis)
-    {
-        _sunRotationAxis = sunRotationAxis;
-        _skyColor = skyColor;
-        _groundColor = groundColor;
-        _progradeColor = progradeColor;
-        _retrogradeColor = retrogradeColor;
-        _textColor = textColor;
-        _textBoxBorderColor = textBoxColor;
-        _textBoxBackgroundColor = textBackgroundColor;
-        _horizonLineColor = horizonLineColor;
-        _elevationLineColor = elevationLineColor;
-        _spaceBackgroundColor = spaceBackgroundColor;
-        _orientationColor = orientationColor;
-        _altitudeWarningColor = altitudeWarningColor;
-        _xAxisColor = xAxisColor;
-        _yAxisColor = yAxisColor;
-        _zAxisColor = zAxisColor;
-        _altitudeTransitionThreshold = altitudeTransitionThreshold;
-        _collisionTimeThreshold = collisionTimeThreshold;
-        _showXYZAxis = showXYZAxis;
     }
     #endregion
 
@@ -756,11 +553,11 @@ class ArtificialHorizon
         {
             velocitySum += _velocityBuffer.MoveNext();
         }
-        
+
         double terrainHeightDerivative = velocitySum / _velocityBuffer.Capacity;
         double timeTillGroundCollision = _surfaceAltitude / (terrainHeightDerivative);
-        _collisionTimeProportion = (float)(timeTillGroundCollision / _collisionTimeThreshold);
-        CollisionWarning = terrainHeightDerivative > 0 && _speed > 10 && timeTillGroundCollision <= _collisionTimeThreshold;
+        _collisionTimeProportion = (float)(timeTillGroundCollision / _program.TimeToCollisionThreshold);
+        CollisionWarning = terrainHeightDerivative > 0 && _speed > 10 && timeTillGroundCollision <= _program.TimeToCollisionThreshold;
         if (_lastCollisionWarning != CollisionWarning)
             _showPullUp = true;
         else
@@ -769,14 +566,14 @@ class ArtificialHorizon
         _lastCollisionWarning = CollisionWarning;
         _lastSurfaceAltitude = _surfaceAltitude;
 
-        Vector3D eastVec = Vector3D.Cross(_gravity, _sunRotationAxis);
+        Vector3D eastVec = Vector3D.Cross(_gravity, _program.SunRotationAxis.Value);
         Vector3D northVec = Vector3D.Cross(eastVec, _gravity);
         Vector3D heading = VectorMath.Rejection(controller.WorldMatrix.Forward, _gravity);
 
         _bearing = MathHelper.ToDegrees(VectorMath.AngleBetween(heading, northVec));
         if (Vector3D.Dot(controller.WorldMatrix.Forward, eastVec) < 0)
             _bearing = 360 - _bearing;
-            
+
         _verticalSpeed = VectorMath.ScalarProjection(_velocity, -_gravity);
     }
 
@@ -810,11 +607,6 @@ class ArtificialHorizon
         if (!Vector2.IsZero(ref _zAxisFlattened, MathHelper.EPSILON))
             _zAxisDirn = Vector2.Normalize(_zAxisFlattened);
 
-        // Getting the icons for the axes based on if they are pointing at or away from the user
-        _axisIcon[0] = GetAxisIcon(xTrans.Z);
-        _axisIcon[1] = GetAxisIcon(yTrans.Z);
-        _axisIcon[2] = GetAxisIcon(zTrans.Z);
-
         _axisZCosVector = new Vector3D(xTrans.Z, yTrans.Z, zTrans.Z);
         double max = _axisZCosVector.Max();
         double min = _axisZCosVector.Min();
@@ -823,44 +615,40 @@ class ArtificialHorizon
         AxisEnum usedAxes = AxisEnum.None;
         if (max == _axisZCosVector.X)
         {
-            _axisDrawOrder[2] = (byte)AxisEnum.X;
+            _axisDrawOrder[2] = AxisEnum.X;
             usedAxes |= AxisEnum.X;
         }
         else if (max == _axisZCosVector.Y)
         {
-            _axisDrawOrder[2] = (byte)AxisEnum.Y;
+            _axisDrawOrder[2] = AxisEnum.Y;
             usedAxes |= AxisEnum.Y;
         }
         else
         {
-            _axisDrawOrder[2] = (byte)AxisEnum.Z;
+            _axisDrawOrder[2] = AxisEnum.Z;
             usedAxes |= AxisEnum.Z;
         }
 
         if (min == _axisZCosVector.X)
         {
-            _axisDrawOrder[0] = (byte)AxisEnum.X;
+            _axisDrawOrder[0] = AxisEnum.X;
             usedAxes |= AxisEnum.X;
 
         }
         else if (min == _axisZCosVector.Y)
         {
-            _axisDrawOrder[0] = (byte)AxisEnum.Y;
+            _axisDrawOrder[0] = AxisEnum.Y;
             usedAxes |= AxisEnum.Y;
         }
         else
         {
-            _axisDrawOrder[0] = (byte)AxisEnum.Z;
+            _axisDrawOrder[0] = AxisEnum.Z;
             usedAxes |= AxisEnum.Z;
         }
 
-        _axisDrawOrder[1] = (byte)MathHelper.Clamp((byte)(ALL_AXIS_ENUMS & ~usedAxes), 0, (byte)ALL_AXIS_ENUMS);
+        _axisDrawOrder[1] = (AxisEnum)MathHelper.Clamp((byte)(ALL_AXIS_ENUMS & ~usedAxes), 0, (byte)ALL_AXIS_ENUMS);
     }
 
-    string GetAxisIcon(double z)
-    {
-        return z < 0 ? "CircleHollow" : "Circle";
-    }
     #endregion
 
     #region Draw functions
@@ -869,7 +657,7 @@ class ArtificialHorizon
         surface.ContentType = ContentType.SCRIPT;
         surface.Script = "";
         surface.BackgroundAlpha = 0;
-        surface.ScriptBackgroundColor = _inGravity ? _groundColor : _spaceBackgroundColor;
+        surface.ScriptBackgroundColor = _inGravity ? _program.GroundColor : _program.SpaceBackgroundColor;
 
         Vector2 surfaceSize = surface.TextureSize;
         Vector2 screenCenter = surfaceSize * 0.5f;
@@ -887,30 +675,31 @@ class ArtificialHorizon
             {
                 frame.Add(new MySprite());
             }
-            
+
             if (_inGravity)
             {
                 DrawArtificialHorizon(frame, screenCenter, scale, minSideLength);
-                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{Altitude:0}", $"{_bearing:0}Â°");
+                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{Altitude:0}", $"{_bearing:0}°");
                 DrawAltitudeWarning(frame, screenCenter, avgViewportSize, scale, surface);
             }
             else
             {
                 DrawSpace(frame, screenCenter, minSideLength * 0.5f, scale);
-                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{_acceleration:n1}");
+                var acc = _program.AccelerationMode == AccelMode.G_force ? _acceleration / G : _acceleration; 
+                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{acc:n1}");
             }
 
             // Draw orientation indicator
-            DrawLine(frame, new Vector2(0, screenCenter.Y), new Vector2(screenCenter.X - 64 * scale, screenCenter.Y), HORIZON_THICKNESS * scale, _orientationColor);
-            DrawLine(frame, new Vector2(screenCenter.X + 64 * scale, screenCenter.Y), new Vector2(screenCenter.X * 2f, screenCenter.Y), HORIZON_THICKNESS * scale, _orientationColor);
+            DrawLine(frame, new Vector2(0, screenCenter.Y), new Vector2(screenCenter.X - 64 * scale, screenCenter.Y), HORIZON_THICKNESS * scale, _program.OrientationLineColor);
+            DrawLine(frame, new Vector2(screenCenter.X + 64 * scale, screenCenter.Y), new Vector2(screenCenter.X * 2f, screenCenter.Y), HORIZON_THICKNESS * scale, _program.OrientationLineColor);
 
             Vector2 scaledIconSize = VELOCITY_INDICATOR_SIZE * scale;
-            MySprite centerSprite = new MySprite(SpriteType.TEXTURE, "AH_BoreSight", size: scaledIconSize * 1.2f, position: screenCenter + Vector2.UnitY * scaledIconSize * 0.5f, color: _orientationColor);
+            MySprite centerSprite = new MySprite(SpriteType.TEXTURE, "AH_BoreSight", size: scaledIconSize * 1.2f, position: screenCenter + Vector2.UnitY * scaledIconSize * 0.5f, color: _program.OrientationLineColor);
             centerSprite.RotationOrScale = -MathHelper.PiOver2;
             frame.Add(centerSprite);
 
             // Draw velocity indicator
-            MySprite velocitySprite = new MySprite(SpriteType.TEXTURE, "AH_VelocityVector", size: scaledIconSize, color: !_movingBackwards ? _progradeColor : _retrogradeColor);
+            MySprite velocitySprite = new MySprite(SpriteType.TEXTURE, "AH_VelocityVector", size: scaledIconSize, color: !_movingBackwards ? _program.ProgradeColor : _program.RetrogradeColor);
             float sign = _movingBackwards ? -1 : 1;
             velocitySprite.Position = screenCenter + (squareViewportSize * 0.5f * _flattenedVelocity * sign);
             frame.Add(velocitySprite);
@@ -918,7 +707,7 @@ class ArtificialHorizon
             if (_movingBackwards)
             {
                 Vector2 retrogradeCrossSize = RETROGRADE_CROSS_SIZE * scale;
-                MySprite retrograteSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: retrogradeCrossSize, color: _retrogradeColor);
+                MySprite retrograteSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: retrogradeCrossSize, color: _program.RetrogradeColor);
                 retrograteSprite.Position = velocitySprite.Position;
                 retrograteSprite.RotationOrScale = MathHelper.PiOver4;
                 frame.Add(retrograteSprite);
@@ -934,23 +723,28 @@ class ArtificialHorizon
         float textSize = STATUS_TEXT_SIZE * scale;
         Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);//+ new Vector2(screenSize.X * -0.40f, boxSize.Y * 0.5f);
         Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f); //+ new Vector2(screenSize.X * 0.40f, boxSize.Y * 0.5f);
-        string leftTitle = "SPEED";
-        string rightTitle = _inGravity ? "ALT" : "ACCEL";
 
-        DrawTextBox(frame, surface, boxSize, leftBoxPos, _textColor, _textBoxBorderColor, _textBoxBackgroundColor, textSize, leftText, leftTitle);
-        DrawTextBox(frame, surface, boxSize, rightBoxPos, _textColor, _textBoxBorderColor, _textBoxBackgroundColor, textSize, rightText, rightTitle);
+        string leftUnits = "m/s";
+        string leftTitle = $" SPD [{leftUnits}]";
+
+        string rightUnits = _inGravity ? "m" : (_program.AccelerationMode == AccelMode.G_force ? "g" : "m/s²");
+        string rightTitle = _inGravity ? "ALT" : "ACC";
+        rightTitle = $"{rightTitle} [{rightUnits}] ";
+
+        DrawTextBox(frame, surface, boxSize, leftBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, leftText, leftTitle, TextAlignment.LEFT);
+        DrawTextBox(frame, surface, boxSize, rightBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, rightText, rightTitle, TextAlignment.RIGHT);
 
         if (_inGravity)
         {
-            MySprite altMode = MySprite.CreateText(AltitudeLabel, "Debug", _textColor, textSize * 0.75f, TextAlignment.CENTER);
+            MySprite altMode = MySprite.CreateText(AltitudeLabel, "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
             altMode.Position = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.0f);
             frame.Add(altMode);
-            
-            MySprite verticalSpeedLabel = MySprite.CreateText(VERTICAL_SPEED, "Debug", _textColor, textSize * 0.75f, TextAlignment.CENTER);
+
+            MySprite verticalSpeedLabel = MySprite.CreateText(VERTICAL_SPEED, "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
             verticalSpeedLabel.Position = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.0f);
             frame.Add(verticalSpeedLabel);
-            
-            MySprite verticalSpeed = MySprite.CreateText($"{_verticalSpeed:n1}", "Debug", _textColor, textSize * 0.75f, TextAlignment.CENTER);
+
+            MySprite verticalSpeed = MySprite.CreateText($"{_verticalSpeed:n1}", "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
             verticalSpeed.Position = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.5f);
             frame.Add(verticalSpeed);
         }
@@ -958,14 +752,14 @@ class ArtificialHorizon
         if (!string.IsNullOrWhiteSpace(topText))
         {
             Vector2 topBoxPos = screenCenter + new Vector2(0, screenSize.Y * -0.40f);
-            DrawTextBox(frame, surface, boxSize, topBoxPos, _textColor, _textBoxBorderColor, _textBoxBackgroundColor, textSize, topText); //, drawBackground: false);
+            DrawTextBox(frame, surface, boxSize, topBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, topText); //, drawBackground: false);
         }
     }
 
-    void DrawTextBox(MySpriteDrawFrame frame, IMyTextSurface surface, Vector2 size, Vector2 position, Color textColor, Color borderColor, Color backgroundColor, float textSize, string text, string title = "")
+    void DrawTextBox(MySpriteDrawFrame frame, IMyTextSurface surface, Vector2 size, Vector2 position, Color textColor, Color borderColor, Color backgroundColor, float textSize, string text, string title = "", TextAlignment titleAlignment = TextAlignment.CENTER)
     {
         Vector2 measuredTextSize = surface.MeasureStringInPixels(_heightStringBuilder, "Debug", textSize);
-        
+
         Vector2 textPos = position;
         textPos.Y -= measuredTextSize.Y * 0.5f;
 
@@ -988,6 +782,20 @@ class ArtificialHorizon
         if (!string.IsNullOrWhiteSpace(title))
         {
             MySprite titleSprite = MySprite.CreateText(title, "Debug", textColor, scale: textSize);
+            titleSprite.Alignment = titleAlignment;
+            switch(titleAlignment)
+            {
+                case TextAlignment.CENTER:
+                default:
+                    break;
+                case TextAlignment.LEFT:
+                    titlePos.X -= 0.5f * size.X;
+                    break;
+                case TextAlignment.RIGHT:
+                    titlePos.X += 0.5f * size.X;
+                    break;
+
+            }
             titleSprite.Position = titlePos;
             frame.Add(titleSprite);
         }
@@ -1002,7 +810,7 @@ class ArtificialHorizon
         _pitchOffset.X = -_rollSin * minSideLength * 0.5f;
         float pitchProportion = _pitch / MathHelper.PiOver2;
 
-        MySprite skySprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _skyColor, size: skySpriteSize);
+        MySprite skySprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _program.SkyColor, size: skySpriteSize);
         skySprite.RotationOrScale = _roll;
 
         Vector2 skyMidPt = screenCenter + new Vector2(0, -skySpriteSize.Y * 0.5f); //surfaceSize.Y * new Vector2(0.5f, -1f);
@@ -1010,7 +818,7 @@ class ArtificialHorizon
         frame.Add(skySprite);
 
         // Draw horizon line
-        MySprite horizonLineSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _horizonLineColor, size: new Vector2(skySpriteSize.X, HORIZON_THICKNESS * scale));
+        MySprite horizonLineSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _program.HorizonLineColor, size: new Vector2(skySpriteSize.X, HORIZON_THICKNESS * scale));
         horizonLineSprite.RotationOrScale = _roll;
         horizonLineSprite.Position = screenCenter + _pitchOffset * pitchProportion;
         frame.Add(horizonLineSprite);
@@ -1019,7 +827,7 @@ class ArtificialHorizon
         {
             if (i == 0)
                 continue;
-            DrawElevationLadder(frame, screenCenter, ELEVATION_LADDER_SIZE, pitchProportion, i, scale, _elevationLineColor, true);
+            DrawElevationLadder(frame, screenCenter, ELEVATION_LADDER_SIZE, pitchProportion, i, scale, _program.ElevationLineColor, true);
         }
     }
 
@@ -1032,13 +840,13 @@ class ArtificialHorizon
                 float textSize = PULL_UP_TEXT_SIZE * scale;
                 Vector2 textBoxSize = surface.MeasureStringInPixels(_pullUpStringBuilder, "Debug", textSize) + scale * 24f;
                 Vector2 textPosition = screenCenter + new Vector2(0, screenSize.Y * 0.25f);
-                DrawTextBox(frame, surface, textBoxSize, textPosition, _altitudeWarningColor, _altitudeWarningColor, _textBoxBackgroundColor, textSize, PULL_UP_TEXT);
+                DrawTextBox(frame, surface, textBoxSize, textPosition, _program.AltitudeWarningColor, _program.AltitudeWarningColor, _program.TextBoxBackground, textSize, PULL_UP_TEXT);
             }
 
             Vector2 warningCrossSize = PULL_UP_CROSS_SIZE * scale;
             Vector2 warningCrossPosition = new Vector2(-screenSize.X * 0.5f * _collisionTimeProportion, 0);
             MySprite warningCrossHalf = MySprite.CreateSprite("AH_BoreSight", screenCenter + warningCrossPosition, warningCrossSize);
-            warningCrossHalf.Color = _altitudeWarningColor;
+            warningCrossHalf.Color = _program.AltitudeWarningColor;
             warningCrossHalf.RotationOrScale = 0;
 
             frame.Add(warningCrossHalf);
@@ -1056,7 +864,7 @@ class ArtificialHorizon
         string textureName = pitchProportion <= 0 ? "AH_GravityHudPositiveDegrees" : "AH_GravityHudNegativeDegrees";
         Vector2 scaledSize = size * scale;
 
-        MySprite ladderSprite = new MySprite(SpriteType.TEXTURE, textureName, color: _elevationLineColor, size: scaledSize);
+        MySprite ladderSprite = new MySprite(SpriteType.TEXTURE, textureName, color: _program.ElevationLineColor, size: scaledSize);
         ladderSprite.RotationOrScale = _roll + (pitchProportion <= 0 ? MathHelper.Pi : 0);
         ladderSprite.Position = midPoint + (pitchProportion + basePitchProportion) * _pitchOffset;
         frame.Add(ladderSprite);
@@ -1067,7 +875,7 @@ class ArtificialHorizon
         Vector2 textHorizontalOffset = new Vector2(_rollCos, _rollSin) * (scaledSize.X + 48f * scale) * 0.5f;
         Vector2 textVerticalOffset = Vector2.UnitY * -24f * scale * (pitchProportion <= 0 ? 0 : 1);
 
-        MySprite text = MySprite.CreateText($"{elevationAngleDeg}", "Debug", _elevationLineColor);
+        MySprite text = MySprite.CreateText($"{elevationAngleDeg}", "Debug", _program.ElevationLineColor);
         text.RotationOrScale = ELEVATION_TEXT_SIZE * scale;
         text.Position = ladderSprite.Position + textHorizontalOffset + textVerticalOffset;
         frame.Add(text);
@@ -1078,7 +886,7 @@ class ArtificialHorizon
 
     void DrawSpace(MySpriteDrawFrame frame, Vector2 screenCenter, float halfExtent, float scale)
     {
-        if (!_showXYZAxis)
+        if (!_program.ShowXYZAxis)
             return;
 
         float textSize = scale * STATUS_TEXT_SIZE;
@@ -1089,111 +897,265 @@ class ArtificialHorizon
         Vector2 yPos = screenCenter + _yAxisFlattened * halfExtent;
         Vector2 zPos = screenCenter + _zAxisFlattened * halfExtent;
 
-        MySprite xLine = DrawLine(screenCenter, xPos, lineSize, _xAxisColor);
-        MySprite yLine = DrawLine(screenCenter, yPos, lineSize, _yAxisColor);
-        MySprite zLine = DrawLine(screenCenter, zPos, lineSize, _zAxisColor);
-
-        MySprite xLabel = MySprite.CreateText("X", "Debug", _xAxisColor, textSize, TextAlignment.CENTER);
+        MySprite xLabel = MySprite.CreateText("X", "Debug", _program.XAxisColor, textSize, TextAlignment.CENTER);
         xLabel.Position = xPos + offset * _xAxisSign - Vector2.UnitY * markerSize.Y;
 
-        MySprite yLabel = MySprite.CreateText("Y", "Debug", _yAxisColor, textSize, TextAlignment.CENTER);
+        MySprite yLabel = MySprite.CreateText("Y", "Debug", _program.YAxisColor, textSize, TextAlignment.CENTER);
         yLabel.Position = yPos + offset * _yAxisSign - Vector2.UnitY * markerSize.Y; ;
 
-        MySprite zLabel = MySprite.CreateText("Z", "Debug", _zAxisColor, textSize, TextAlignment.CENTER);
+        MySprite zLabel = MySprite.CreateText("Z", "Debug", _program.ZAxisColor, textSize, TextAlignment.CENTER);
         zLabel.Position = zPos + offset * _zAxisSign - Vector2.UnitY * markerSize.Y; ;
 
         foreach (var axis in _axisDrawOrder)
         {
-            if (axis == (byte)AxisEnum.X)
+            if (axis == AxisEnum.X)
             {
-                DrawArrowHead(frame, xPos, AXIS_MARKER_SIZE * scale, _xAxisDirn, _axisZCosVector.X, _xAxisColor, _axisArrowBackColor);
-                frame.Add(xLine);
+                DrawArrowHead(frame, xPos, AXIS_MARKER_SIZE * scale, _xAxisDirn, _axisZCosVector.X, _program.XAxisColor, _axisArrowBackColor);
+                DrawLine(frame, screenCenter, xPos, lineSize, _program.XAxisColor, true);
                 frame.Add(xLabel);
             }
-            else if (axis == (byte)AxisEnum.Y)
+            else if (axis == AxisEnum.Y)
             {
-                DrawArrowHead(frame, yPos, AXIS_MARKER_SIZE * scale, _yAxisDirn, _axisZCosVector.Y, _yAxisColor, _axisArrowBackColor);
-                frame.Add(yLine);
+                DrawArrowHead(frame, yPos, AXIS_MARKER_SIZE * scale, _yAxisDirn, _axisZCosVector.Y, _program.YAxisColor, _axisArrowBackColor);
+                DrawLine(frame, screenCenter, yPos, lineSize, _program.YAxisColor, true);
                 frame.Add(yLabel);
             }
             else
             {
-                DrawArrowHead(frame, zPos, AXIS_MARKER_SIZE * scale, _zAxisDirn, _axisZCosVector.Z, _zAxisColor, _axisArrowBackColor);
-                frame.Add(zLine);
+                DrawArrowHead(frame, zPos, AXIS_MARKER_SIZE * scale, _zAxisDirn, _axisZCosVector.Z, _program.ZAxisColor, _axisArrowBackColor);
+                DrawLine(frame, screenCenter, zPos, lineSize, _program.ZAxisColor, true);
                 frame.Add(zLabel);
             }
         }
-    }
-
-    MySprite DrawLine(Vector2 point1, Vector2 point2, float width, Color color)
-    {
-        Vector2 position = 0.5f * (point1 + point2);
-        Vector2 diff = point1 - point2;
-        float length = diff.Length();
-        if (length > 0)
-            diff /= length;
-
-        Vector2 size = new Vector2(length, width);
-        float angle = (float)Math.Acos(Vector2.Dot(diff, Vector2.UnitX));
-        angle *= Math.Sign(Vector2.Dot(diff, Vector2.UnitY));
-
-        MySprite sprite = MySprite.CreateSprite("SquareSimple", position, size);
-        sprite.RotationOrScale = angle;
-        sprite.Color = color;
-        return sprite;
-    }
-
-    void DrawLine(MySpriteDrawFrame frame, Vector2 point1, Vector2 point2, float width, Color color)
-    {
-        Vector2 position = 0.5f * (point1 + point2);
-        Vector2 diff = point1 - point2;
-        float length = diff.Length();
-        if (length > 0)
-            diff /= length;
-
-        Vector2 size = new Vector2(length, width);
-        float angle = (float)Math.Acos(Vector2.Dot(diff, Vector2.UnitX));
-        angle *= Math.Sign(Vector2.Dot(diff, Vector2.UnitY));
-
-        MySprite sprite = MySprite.CreateSprite("SquareSimple", position, size);
-        sprite.RotationOrScale = angle;
-        sprite.Color = color;
-        frame.Add(sprite);
-    }
-
-    void DrawArrowHead(MySpriteDrawFrame frame, Vector2 position, Vector2 arrowSize, Vector2 flattenedDirection, double depthSin, Color color, Color backColor)
-    {
-        if (Math.Abs(flattenedDirection.LengthSquared() - 1) < MathHelper.EPSILON)
-            flattenedDirection.Normalize();
-
-        arrowSize.Y *= (float)Math.Sqrt(1 - depthSin * depthSin);
-        Vector2 baseSize = Vector2.One * arrowSize.X;
-        baseSize.Y *= (float)Math.Abs(depthSin);
-
-        float angle = (float)Math.Acos(Vector2.Dot(flattenedDirection, -Vector2.UnitY));
-        angle *= Math.Sign(Vector2.Dot(flattenedDirection, Vector2.UnitX));
-
-        Vector2 trianglePosition = position + flattenedDirection * arrowSize.Y * 0.5f;
-
-        MySprite circle = MySprite.CreateSprite("Circle", position, baseSize);
-        circle.Color = depthSin >= 0 ? color : backColor;
-        circle.RotationOrScale = angle;
-
-        MySprite triangle = MySprite.CreateSprite("Triangle", trianglePosition, arrowSize);
-        triangle.Color = color;
-        triangle.RotationOrScale = angle;
-
-        frame.Add(triangle);
-        frame.Add(circle);
     }
     #endregion
 }
 #endregion
 
-#region Other classes
-#region MyIni helper
+class ArtificialHorizonTitleScreen
+{
+    // General
+    readonly Color _topBarColor = new Color(25, 25, 25);
+    readonly Color _white = new Color(200, 200, 200);
+    readonly Color _black = Color.Black;
+    const float TextSize = 1.3f;
+    const string TitleFormat = "Artificial Horizon Redux - v{0}";
+    readonly string _titleText;
+    Program _program;
+    int _idx = 0;
+
+    // Specific
+    const float SpriteScale = 1f;
+    readonly Vector2 _spritePos = new Vector2(0, 30);
+    enum FrameId { Neg60, Neg40, Neg20, Level, Pos20, Pos40, Pos60 }
+
+    struct AnimationParams
+    {
+        public readonly float AngleRad;
+
+        public AnimationParams(float angleDeg)
+        {
+            AngleRad = MathHelper.ToRadians(angleDeg);
+        }
+    }
+
+    readonly AnimationParams[] _animSequence = new AnimationParams[] {
+new AnimationParams(0),
+new AnimationParams(20),
+new AnimationParams(40),
+new AnimationParams(60),
+new AnimationParams(60),
+new AnimationParams(60),
+new AnimationParams(60),
+new AnimationParams(60),
+new AnimationParams(40),
+new AnimationParams(20),
+new AnimationParams(0),
+new AnimationParams(-20),
+new AnimationParams(-40),
+new AnimationParams(-60),
+new AnimationParams(-60),
+new AnimationParams(-60),
+new AnimationParams(-60),
+new AnimationParams(-60),
+new AnimationParams(-40),
+new AnimationParams(-20),
+};
+
+    bool _clearSpriteCache = false;
+    IMyTextSurface _surface = null;
+
+    public ArtificialHorizonTitleScreen(string version, Program program)
+    {
+        _titleText = string.Format(TitleFormat, version);
+        _program = program;
+        _surface = _program.Me.GetSurface(0);
+    }
+
+    public void Draw()
+    {
+        if (_surface == null)
+            return;
+
+        AnimationParams anim = _animSequence[_idx];
+        _idx = ++_idx % _animSequence.Length;
+
+        SetupDrawSurface(_surface);
+
+        Vector2 screenCenter = _surface.TextureSize * 0.5f;
+        Vector2 scale = _surface.SurfaceSize / 512f;
+        float minScale = Math.Min(scale.X, scale.Y);
+
+        var frame = _surface.DrawFrame();
+
+        if (_clearSpriteCache)
+        {
+            frame.Add(new MySprite());
+        }
+
+        DrawHorizon(frame, screenCenter + _spritePos * minScale, SpriteScale * minScale, anim.AngleRad);
+        DrawTitleBar(ref frame, _surface, _topBarColor, _white, _titleText, minScale, textSize: TextSize);
+
+        frame.Dispose();
+    }
+
+    public void RestartDraw()
+    {
+        _clearSpriteCache = !_clearSpriteCache;
+    }
+
+    #region Draw Helper Functions
+    void SetupDrawSurface(IMyTextSurface _surface)
+    {
+        _surface.ScriptBackgroundColor = _black;
+        _surface.ContentType = ContentType.SCRIPT;
+        _surface.Script = "";
+    }
+
+    void DrawHorizon(MySpriteDrawFrame frame, Vector2 centerPos, float scale, float rotation)
+    {
+        float sin = (float)Math.Sin(rotation);
+        float cos = (float)Math.Cos(rotation);
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 0f) * scale + centerPos, new Vector2(280f, 280f) * scale, _program.SkyColor, null, TextAlignment.CENTER, 0f)); // sky
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(cos * 0f - sin * 140f, sin * 0f + cos * 140f) * scale + centerPos, new Vector2(700f, 280f) * scale, _program.GroundColor, null, TextAlignment.CENTER, rotation)); // ground
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(90f, 0f) * scale + centerPos, new Vector2(100f, 10f) * scale, _white, null, TextAlignment.CENTER, 0f)); // horizon line right
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-90f, 0f) * scale + centerPos, new Vector2(100f, 10f) * scale, _white, null, TextAlignment.CENTER, 0f)); // horizon line left
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(8f, 15f) * scale + centerPos, new Vector2(10f, 30f) * scale, _white, null, TextAlignment.CENTER, -0.7854f)); // pip right
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-8f, 15f) * scale + centerPos, new Vector2(10f, 30f) * scale, _white, null, TextAlignment.CENTER, 0.7854f)); // pip left
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 300f) * scale + centerPos, new Vector2(900f, 300f) * scale, _black, null, TextAlignment.CENTER, 0f)); // mask bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, -300f) * scale + centerPos, new Vector2(900f, 300f) * scale, _black, null, TextAlignment.CENTER, 0f)); // mask top
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-300f, 0f) * scale + centerPos, new Vector2(300f, 300f) * scale, _black, null, TextAlignment.CENTER, 0f)); // mask left
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(300f, 0f) * scale + centerPos, new Vector2(300f, 300f) * scale, _black, null, TextAlignment.CENTER, 0f)); // mask right
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, 145f) * scale + centerPos, new Vector2(280f, 10f) * scale, _white, null, TextAlignment.CENTER, 0f)); // border bottom
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(0f, -145f) * scale + centerPos, new Vector2(280f, 10f) * scale, _white, null, TextAlignment.CENTER, 0f)); // border top
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(-145f, 0f) * scale + centerPos, new Vector2(10f, 300f) * scale, _white, null, TextAlignment.CENTER, 0f)); // border left
+        frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(145f, 0f) * scale + centerPos, new Vector2(10f, 300f) * scale, _white, null, TextAlignment.CENTER, 0f)); // border right
+    }
+    #endregion
+}
+
+#endregion
+
+#region INCLUDES
 public static class MyIniHelper
 {
+    #region List<string>
+    /// <summary>
+    /// Deserializes a List<string> from MyIni
+    /// </summary>
+    public static void GetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string raw = ini.Get(section, name).ToString(null);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            // Preserve contents
+            return;
+        }
+
+        list.Clear();
+        string[] split = raw.Split('\n');
+        foreach (var s in split)
+        {
+            list.Add(s);
+        }
+    }
+
+    /// <summary>
+    /// Serializes a List<string> to MyIni
+    /// </summary>
+    public static void SetStringList(string section, string name, MyIni ini, List<string> list)
+    {
+        string output = string.Join($"\n", list);
+        ini.Set(section, name, output);
+    }
+    #endregion
+    
+    #region List<int>
+    const char LIST_DELIMITER = ',';
+
+    /// <summary>
+    /// Deserializes a List<int> from MyIni
+    /// </summary>
+    public static void GetListInt(string section, string name, MyIni ini, List<int> list)
+    {
+        list.Clear();
+        string raw = ini.Get(section, name).ToString();
+        string[] split = raw.Split(LIST_DELIMITER);
+        foreach (var s in split)
+        {
+            int i;
+            if (int.TryParse(s, out i))
+            {
+                list.Add(i);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Serializes a List<int> to MyIni
+    /// </summary>
+    public static void SetListInt(string section, string name, MyIni ini, List<int> list)
+    {
+        string output = string.Join($"{LIST_DELIMITER}", list);
+        ini.Set(section, name, output);
+    }
+    #endregion
+
+    #region Vector2
+        /// <summary>
+    /// Adds a Vector3D to a MyIni object
+    /// </summary>
+    public static void SetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
+    {
+        string vectorString = string.Format("{0}, {1}", vector.X, vector.Y);
+        ini.Set(sectionName, vectorName, vectorString);
+    }
+
+    /// <summary>
+    /// Parses a MyIni object for a Vector3D
+    /// </summary>
+    public static Vector2 GetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
+    {
+        string vectorString = ini.Get(sectionName, vectorName).ToString("null");
+        string[] stringSplit = vectorString.Split(',');
+
+        float x, y;
+        if (stringSplit.Length != 2)
+        {
+            if (defaultVector.HasValue)
+                return defaultVector.Value;
+            else
+                return default(Vector2);
+        }
+
+        float.TryParse(stringSplit[0].Trim(), out x);
+        float.TryParse(stringSplit[1].Trim(), out y);
+
+        return new Vector2(x, y);
+    }
+    #endregion
+
+    #region Vector3D
     /// <summary>
     /// Adds a Vector3D to a MyIni object
     /// </summary>
@@ -1214,14 +1176,61 @@ public static class MyIniHelper
             return defaultVector.Value;
         return default(Vector3D);
     }
+    #endregion
 
+    #region ColorChar
+    /// <summary>
+    /// Adds a color character to a MyIni object
+    /// </summary>
+    public static void SetColorChar(string sectionName, string charName, char colorChar, MyIni ini)
+    {
+        int rgb = (int)colorChar - 0xe100;
+        int b = rgb & 7;
+        int g = rgb >> 3 & 7;
+        int r = rgb >> 6 & 7;
+        string colorString = $"{r}, {g}, {b}";
+
+        ini.Set(sectionName, charName, colorString);
+    }
+
+    /// <summary>
+    /// Parses a MyIni for a color character 
+    /// </summary>
+    public static char GetColorChar(string sectionName, string charName, MyIni ini, char defaultChar = (char)(0xe100))
+    {
+        string rgbString = ini.Get(sectionName, charName).ToString("null");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0;
+        if (rgbSplit.Length != 3)
+            return defaultChar;
+
+        int.TryParse(rgbSplit[0].Trim(), out r);
+        int.TryParse(rgbSplit[1].Trim(), out g);
+        int.TryParse(rgbSplit[2].Trim(), out b);
+
+        r = MathHelper.Clamp(r, 0, 7);
+        g = MathHelper.Clamp(g, 0, 7);
+        b = MathHelper.Clamp(b, 0, 7);
+
+        return (char)(0xe100 + (r << 6) + (g << 3) + b);
+    }
+    #endregion
+
+    #region Color
     /// <summary>
     /// Adds a Color to a MyIni object
     /// </summary>
-    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini)
+    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini, bool writeAlpha = true)
     {
-        string colorString = string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A);
-        ini.Set(sectionName, itemName, colorString);
+        if (writeAlpha)
+        {
+            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A));
+        }
+        else
+        {
+            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}", color.R, color.G, color.B));
+        }
     }
 
     /// <summary>
@@ -1233,7 +1242,7 @@ public static class MyIniHelper
         string[] rgbSplit = rgbString.Split(',');
 
         int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length != 4)
+        if (rgbSplit.Length < 3)
         {
             if (defaultChar.HasValue)
                 return defaultChar.Value;
@@ -1244,7 +1253,7 @@ public static class MyIniHelper
         int.TryParse(rgbSplit[0].Trim(), out r);
         int.TryParse(rgbSplit[1].Trim(), out g);
         int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        bool hasAlpha = rgbSplit.Length >= 4 && int.TryParse(rgbSplit[3].Trim(), out a);
         if (!hasAlpha)
             a = 255;
 
@@ -1255,14 +1264,12 @@ public static class MyIniHelper
 
         return new Color(r, g, b, a);
     }
+    #endregion
 }
-#endregion
-
-#region Vector math
 public static class VectorMath
 {
     /// <summary>
-    ///  Normalizes a vector only if it is non-zero and non-unit
+    /// Normalizes a vector only if it is non-zero and non-unit
     /// </summary>
     public static Vector3D SafeNormalize(Vector3D a)
     {
@@ -1278,17 +1285,17 @@ public static class VectorMath
     /// <summary>
     /// Reflects vector a over vector b with an optional rejection factor
     /// </summary>
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1) //reflect a over b
+    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1)
     {
-        Vector3D project_a = Projection(a, b);
-        Vector3D reject_a = a - project_a;
-        return project_a - reject_a * rejectionFactor;
+        Vector3D proj = Projection(a, b);
+        Vector3D rej = a - proj;
+        return proj - rej * rejectionFactor;
     }
 
     /// <summary>
     /// Rejects vector a on vector b
     /// </summary>
-    public static Vector3D Rejection(Vector3D a, Vector3D b) //reject a on b
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return Vector3D.Zero;
@@ -1303,7 +1310,7 @@ public static class VectorMath
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return Vector3D.Zero;
-
+        
         if (Vector3D.IsUnit(ref b))
             return a.Dot(b) * b;
 
@@ -1325,9 +1332,9 @@ public static class VectorMath
     }
 
     /// <summary>
-    /// Computes angle between 2 vectors
+    /// Computes angle between 2 vectors in radians.
     /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b) //returns radians
+    public static double AngleBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return 0;
@@ -1336,9 +1343,9 @@ public static class VectorMath
     }
 
     /// <summary>
-    /// Computes cosine of the angle between 2 vectors
+    /// Computes cosine of the angle between 2 vectors.
     /// </summary>
-    public static double CosBetween(Vector3D a, Vector3D b, bool useSmallestAngle = false) //returns radians
+    public static double CosBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
             return 0;
@@ -1353,13 +1360,11 @@ public static class VectorMath
     public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
     {
         double dot = Vector3D.Dot(a, b);
-        double num = a.LengthSquared() * b.LengthSquared() * tolerance * tolerance;
-        return dot * dot > num;
+        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
+        return Math.Abs(dot) * dot > num;
     }
 }
-#endregion
 
-#region Circular Buffer
 /// <summary>
 /// A simple, generic circular buffer class with a fixed capacity.
 /// </summary>
@@ -1414,7 +1419,6 @@ public class CircularBuffer<T>
         return _array[_getIndex];
     }
 }
-#endregion
 
 #region Scheduler
 /// <summary>
@@ -1422,16 +1426,23 @@ public class CircularBuffer<T>
 /// </summary>
 public class Scheduler
 {
-    ScheduledAction _currentlyQueuedAction = null;
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
-    
+    bool _inUpdate = false;
+
     readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
     readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
     readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
     readonly Program _program;
-    
-    const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
 
     /// <summary>
     /// Constructs a scheduler object with timing based on the runtime of the input program.
@@ -1447,24 +1458,34 @@ public class Scheduler
     /// </summary>
     public void Update()
     {
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * RUNTIME_TO_REALTIME);
-        
-        if (_ignoreFirstRun && _firstRun)
-            deltaTime = 0;
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
 
-        _firstRun = false;
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
         _actionsToDispose.Clear();
         foreach (ScheduledAction action in _scheduledActions)
         {
-            action.Update(deltaTime);
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
             if (action.JustRan && action.DisposeAfterRun)
             {
                 _actionsToDispose.Add(action);
             }
         }
 
-        // Remove all actions that we should dispose
-        _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
 
         if (_currentlyQueuedAction == null)
         {
@@ -1476,12 +1497,23 @@ public class Scheduler
         // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
-            _currentlyQueuedAction.Update(deltaTime);
+            _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
         }
     }
 
@@ -1491,7 +1523,10 @@ public class Scheduler
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
@@ -1499,39 +1534,94 @@ public class Scheduler
     /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, true);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
     /// <summary>
     /// Adds a ScheduledAction to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
+    public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
     }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
 }
 
 public class ScheduledAction
 {
     public bool JustRan { get; private set; } = false;
     public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public readonly double RunInterval;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
 
-    readonly double _runFrequency;
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
     readonly Action _action;
 
     /// <summary>
@@ -1542,20 +1632,19 @@ public class ScheduledAction
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
-        _runFrequency = runFrequency;
-        RunInterval = 1.0 / _runFrequency;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
         DisposeAfterRun = removeAfterRun;
-        TimeSinceLastRun = timeOffset;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
     }
 
-    public void Update(double deltaTime)
+    public void Update(long deltaTicks)
     {
-        TimeSinceLastRun += deltaTime;
+        TicksSinceLastRun += deltaTicks;
 
-        if (TimeSinceLastRun >= RunInterval)
+        if (TicksSinceLastRun >= RunIntervalTicks)
         {
             _action.Invoke();
-            TimeSinceLastRun = 0;
+            TicksSinceLastRun = 0;
 
             JustRan = true;
         }
@@ -1567,7 +1656,6 @@ public class ScheduledAction
 }
 #endregion
 
-#region Runtime tracking
 /// <summary>
 /// Class that tracks runtime history.
 /// </summary>
@@ -1575,18 +1663,29 @@ public class RuntimeTracker
 {
     public int Capacity { get; set; }
     public double Sensitivity { get; set; }
-    public double MaxRuntime { get; private set; }
-    public double MaxInstructions { get; private set; }
-    public double AverageRuntime { get; private set; }
-    public double AverageInstructions { get; private set; }
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
+    
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
 
-    private readonly Queue<double> _runtimes = new Queue<double>();
-    private readonly Queue<double> _instructions = new Queue<double>();
-    private readonly StringBuilder _sb = new StringBuilder();
-    private readonly int _instructionLimit;
-    private readonly Program _program;
-
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.01)
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
         _program = program;
         Capacity = capacity;
@@ -1597,339 +1696,588 @@ public class RuntimeTracker
     public void AddRuntime()
     {
         double runtime = _program.Runtime.LastRunTimeMs;
-        AverageRuntime = Sensitivity * (runtime - AverageRuntime) + AverageRuntime;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
 
         _runtimes.Enqueue(runtime);
         if (_runtimes.Count == Capacity)
         {
             _runtimes.Dequeue();
         }
-
+        
         MaxRuntime = _runtimes.Max();
     }
 
     public void AddInstructions()
     {
         double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
         AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-
+        
         _instructions.Enqueue(instructions);
         if (_instructions.Count == Capacity)
         {
             _instructions.Dequeue();
         }
-
+        
         MaxInstructions = _instructions.Max();
     }
 
     public string Write()
     {
-        _sb.Clear();
-        _sb.AppendLine("\n_____________________________\nGeneral Runtime Info\n");
-        _sb.AppendLine($"Avg instructions: {AverageInstructions:n2}");
-        _sb.AppendLine($"Max instructions: {MaxInstructions:n0}");
-        _sb.AppendLine($"Avg complexity: {MaxInstructions / _instructionLimit:0.000}%");
-        _sb.AppendLine($"Avg runtime: {AverageRuntime:n4} ms");
-        _sb.AppendLine($"Max runtime: {MaxRuntime:n4} ms");
-        return _sb.ToString();
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
     }
 }
-#endregion
 
-#region Running symbol
 public class RunningSymbol
 {
-    int _runningSymbolVariant = 0;
-    int _runningSymbolCount = 0;
-    int _increment = 1;
-    string[] _runningSymbols = new string[] { "âˆ’", "\\", "|", "/" };
+    int _index = 0;
+    string[] _runningSymbols = new string[] { "", ".", "..", "...", "..", "." };
 
-    public RunningSymbol() { }
-
-    public RunningSymbol(int increment)
-    {
-        _increment = increment;
-    }
+    public RunningSymbol() {}
 
     public RunningSymbol(string[] runningSymbols)
     {
         if (runningSymbols.Length != 0)
-            _runningSymbols = runningSymbols;
-    }
-
-    public RunningSymbol(int increment, string[] runningSymbols)
-    {
-        _increment = increment;
-        if (runningSymbols.Length != 0)
-            _runningSymbols = runningSymbols;
-    }
-
-    public string Iterate(int ticks = 1)
-    {
-        if (_runningSymbolCount >= _increment)
         {
-            _runningSymbolCount = 0;
-            _runningSymbolVariant++;
-            _runningSymbolVariant = _runningSymbolVariant++ % _runningSymbols.Length;
+            _runningSymbols = runningSymbols;
         }
-        _runningSymbolCount += ticks;
+    }
+
+    public string Iterate()
+    {
+        _index = ++_index % _runningSymbols.Length;
 
         return this.ToString();
     }
 
     public override string ToString()
     {
-        return _runningSymbols[_runningSymbolVariant];
+        return _runningSymbols[_index];
     }
 }
-#endregion
-
-#region Script Logging
-public static class Log
+public class Log
 {
-    static StringBuilder _builder = new StringBuilder();
-    static List<string> _errorList = new List<string>();
-    static List<string> _warningList = new List<string>();
-    static List<string> _infoList = new List<string>();
-    const int _logWidth = 530; //chars, conservative estimate
+    public static Log Default = new Log();
 
-    public static void Clear()
+    public StringBuilder Output = new StringBuilder();
+    public StringBuilder ErrorOutput = new StringBuilder();
+    public StringBuilder WarningOutput = new StringBuilder();
+    public StringBuilder InfoOutput = new StringBuilder();
+
+    int _errorCount = 0;
+    int _warningCount = 0;
+    int _infoCount = 0;
+
+    const string ErrorTag = "[color=#FFFF0000]ERROR {0}: [/color]{1}";
+    const string WarningTag = "[color=#FFFFFF00]WARNING {0}: [/color]{1}";
+    const string InfoTag = "[color=#FF00AAFF]INFO {0}: [/color]{1}";
+
+    public void Clear()
     {
-        _builder.Clear();
-        _errorList.Clear();
-        _warningList.Clear();
-        _infoList.Clear();
+        Output.Clear();
+        ErrorOutput.Clear();
+        WarningOutput.Clear();
+        InfoOutput.Clear();
+        _errorCount = 0;
+        _warningCount = 0;
+        _infoCount = 0;
     }
 
-    public static void Error(string text)
+    public void Error(string text)
     {
-        _errorList.Add(text);
+        ErrorOutput.AppendLine(string.Format(ErrorTag, ++_errorCount, text));
     }
 
-    public static void Warning(string text)
+    public void Warning(string text)
     {
-        _warningList.Add(text);
+        WarningOutput.AppendLine(string.Format(WarningTag, ++_warningCount, text));
     }
 
-    public static void Info(string text)
+    public void Info(string text)
     {
-        _infoList.Add(text);
+        InfoOutput.AppendLine(string.Format(InfoTag, ++_infoCount, text));
     }
 
-    public static string Write(bool preserveLog = false)
+    public void Write()
     {
-        if (_errorList.Count != 0 && _warningList.Count != 0 && _infoList.Count != 0)
-            WriteLine("");
-
-        if (_errorList.Count != 0)
+        if (_errorCount > 0)
         {
-            for (int i = 0; i < _errorList.Count; i++)
-            {
-                WriteLine("");
-                WriteElememt(i + 1, "ERROR", _errorList[i]);
-                //if (i < _errorList.Count - 1)
-            }
+            Output.Append(ErrorOutput);
         }
 
-        if (_warningList.Count != 0)
+        if (_warningCount > 0)
         {
-            for (int i = 0; i < _warningList.Count; i++)
-            {
-                WriteLine("");
-                WriteElememt(i + 1, "WARNING", _warningList[i]);
-                //if (i < _warningList.Count - 1)
-            }
+            Output.Append(WarningOutput);
         }
 
-        if (_infoList.Count != 0)
+        if (_infoCount > 0)
         {
-            for (int i = 0; i < _infoList.Count; i++)
-            {
-                WriteLine("");
-                WriteElememt(i + 1, "Info", _infoList[i]);
-                //if (i < _infoList.Count - 1)
-            }
+            Output.Append(InfoOutput);
         }
-
-        string output = _builder.ToString();
-
-        if (!preserveLog)
-            Clear();
-
-        return output;
-    }
-
-    private static void WriteElememt(int index, string header, string content)
-    {
-        WriteLine($"{header} {index}:");
-
-        string wrappedContent = TextHelper.WrapText(content, 1, _logWidth);
-        string[] wrappedSplit = wrappedContent.Split('\n');
-
-        foreach (var line in wrappedSplit)
-        {
-            _builder.Append("  ").Append(line).Append('\n');
-        }
-    }
-
-    private static void WriteLine(string text)
-    {
-        _builder.Append(text).Append('\n');
     }
 }
 
-// Whip's TextHelper Class v2
-public class TextHelper
+public static class StringExtensions
 {
-    static StringBuilder textSB = new StringBuilder();
-    const float adjustedPixelWidth = (512f / 0.778378367f);
-    const int monospaceCharWidth = 24 + 1; //accounting for spacer
-    const int spaceWidth = 8;
-
-    #region bigass dictionary
-    static Dictionary<char, int> _charWidths = new Dictionary<char, int>()
-{
-{'.', 9},
-{'!', 8},
-{'?', 18},
-{',', 9},
-{':', 9},
-{';', 9},
-{'"', 10},
-{'\'', 6},
-{'+', 18},
-{'-', 10},
-
-{'(', 9},
-{')', 9},
-{'[', 9},
-{']', 9},
-{'{', 9},
-{'}', 9},
-
-{'\\', 12},
-{'/', 14},
-{'_', 15},
-{'|', 6},
-
-{'~', 18},
-{'<', 18},
-{'>', 18},
-{'=', 18},
-
-{'0', 19},
-{'1', 9},
-{'2', 19},
-{'3', 17},
-{'4', 19},
-{'5', 19},
-{'6', 19},
-{'7', 16},
-{'8', 19},
-{'9', 19},
-
-{'A', 21},
-{'B', 21},
-{'C', 19},
-{'D', 21},
-{'E', 18},
-{'F', 17},
-{'G', 20},
-{'H', 20},
-{'I', 8},
-{'J', 16},
-{'K', 17},
-{'L', 15},
-{'M', 26},
-{'N', 21},
-{'O', 21},
-{'P', 20},
-{'Q', 21},
-{'R', 21},
-{'S', 21},
-{'T', 17},
-{'U', 20},
-{'V', 20},
-{'W', 31},
-{'X', 19},
-{'Y', 20},
-{'Z', 19},
-
-{'a', 17},
-{'b', 17},
-{'c', 16},
-{'d', 17},
-{'e', 17},
-{'f', 9},
-{'g', 17},
-{'h', 17},
-{'i', 8},
-{'j', 8},
-{'k', 17},
-{'l', 8},
-{'m', 27},
-{'n', 17},
-{'o', 17},
-{'p', 17},
-{'q', 17},
-{'r', 10},
-{'s', 17},
-{'t', 9},
-{'u', 17},
-{'v', 15},
-{'w', 27},
-{'x', 15},
-{'y', 17},
-{'z', 16}
-};
-    #endregion
-
-    public static int GetWordWidth(string word)
+    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
     {
-        int wordWidth = 0;
-        foreach (char c in word)
-        {
-            int thisWidth = 0;
-            bool contains = _charWidths.TryGetValue(c, out thisWidth);
-            if (!contains)
-                thisWidth = monospaceCharWidth; //conservative estimate
-
-            wordWidth += (thisWidth + 1);
-        }
-        return wordWidth;
-    }
-
-    public static string WrapText(string text, float fontSize, float pixelWidth = adjustedPixelWidth)
-    {
-        textSB.Clear();
-        var words = text.Split(' ');
-        var screenWidth = (pixelWidth / fontSize);
-        int currentLineWidth = 0;
-        foreach (var word in words)
-        {
-            if (currentLineWidth == 0)
-            {
-                textSB.Append($"{word}");
-                currentLineWidth += GetWordWidth(word);
-                continue;
-            }
-
-            currentLineWidth += spaceWidth + GetWordWidth(word);
-            if (currentLineWidth > screenWidth) //new line
-            {
-                currentLineWidth = GetWordWidth(word);
-                textSB.Append($"\n{word}");
-            }
-            else
-            {
-                textSB.Append($" {word}");
-            }
-        }
-
-        return textSB.ToString();
+        return source?.IndexOf(toCheck, comp) >= 0;
     }
 }
-#endregion
-#endregion
 
+/// <summary>
+/// Draws a line of specified width and color between two points.
+/// </summary>
+public static void DrawLine(MySpriteDrawFrame frame, Vector2 point1, Vector2 point2, float width, Color color, bool roundedEnds = false)
+{
+    Vector2 position = 0.5f * (point1 + point2);
+    Vector2 diff = point1 - point2;
+    float length = diff.Length();
+    if (length > 0)
+        diff /= length;
+
+    Vector2 size = new Vector2(length, width);
+    float angle = (float)Math.Acos(Vector2.Dot(diff, Vector2.UnitX));
+    angle *= Math.Sign(Vector2.Dot(diff, Vector2.UnitY));
+
+    MySprite sprite = MySprite.CreateSprite("SquareSimple", position, size);
+    sprite.RotationOrScale = angle;
+    sprite.Color = color;
+    frame.Add(sprite);
+
+    if (roundedEnds)
+    {
+        MySprite end = MySprite.CreateSprite("Circle", point1, new Vector2(width,width));
+        end.Color = color;
+        frame.Add(end);
+        end.Position = point2;
+        frame.Add(end);
+    }
+}
+
+public static void DrawArrowHead(MySpriteDrawFrame frame, Vector2 position, Vector2 arrowSize, Vector2 flattenedDirection, double depthSin, Color color, Color backColor)
+{
+    if (Math.Abs(flattenedDirection.LengthSquared() - 1) < MathHelper.EPSILON)
+        flattenedDirection.Normalize();
+
+    arrowSize.Y *= (float)Math.Sqrt(1 - depthSin * depthSin);
+    Vector2 baseSize = Vector2.One * arrowSize.X;
+    baseSize.Y *= (float)Math.Abs(depthSin);
+
+    float angle = (float)Math.Acos(Vector2.Dot(flattenedDirection, -Vector2.UnitY));
+    if (Vector2.Dot(flattenedDirection, Vector2.UnitX) < 0)
+    {
+        angle *= -1f;
+    }
+
+    Vector2 trianglePosition = position + flattenedDirection * arrowSize.Y * 0.5f;
+
+    MySprite circle = MySprite.CreateSprite("Circle", position, baseSize);
+    circle.Color = depthSin >= 0 ? color : backColor;
+    circle.RotationOrScale = angle;
+
+    MySprite triangle = MySprite.CreateSprite("Triangle", trianglePosition, arrowSize);
+    triangle.Color = color;
+    triangle.RotationOrScale = angle;
+
+    frame.Add(triangle);
+    frame.Add(circle);
+}
+
+public static Vector2 DrawTitleBar(ref MySpriteDrawFrame frame, IMyTextSurface surf, Color barColor, Color textColor, string text, float scale, float textSize = 1.5f, float barHeightPx = 64f, float baseTextHeightPx = 28.8f, string font = "Debug")
+{
+    float titleBarHeight = scale * barHeightPx;
+    float scaledTextSize = textSize * scale;
+    Vector2 topLeft = 0.5f * (surf.TextureSize - surf.SurfaceSize);
+    Vector2 titleBarSize = new Vector2(surf.SurfaceSize.X, titleBarHeight);
+    Vector2 titleBarPos = topLeft + titleBarSize * 0.5f;
+    Vector2 titleBarTextPos = titleBarPos - Vector2.UnitY * (0.5f * scaledTextSize * baseTextHeightPx);
+
+    frame.Add(new MySprite(
+        SpriteType.TEXTURE,
+        "SquareSimple",
+        titleBarPos,
+        titleBarSize,
+        barColor,
+        null,
+        TextAlignment.CENTER));
+
+    frame.Add(new MySprite(
+        SpriteType.TEXT,
+        text,
+        titleBarTextPos,
+        null,
+        textColor,
+        font,
+        TextAlignment.CENTER,
+        scaledTextSize));
+
+    return titleBarPos;
+}
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigDouble : ConfigValue<double>
+{
+    public ConfigDouble(string name, double value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetDouble(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigVector3 : ConfigValue<Vector3>
+{
+    public ConfigVector3(string name, Vector3 value = default(Vector3), string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        // Source formatting example: {X:2.75 Y:-14.4 Z:11.29}
+        string source = val.ToString("");
+        int xIndex = source.IndexOf("X:");
+        int yIndex = source.IndexOf("Y:");
+        int zIndex = source.IndexOf("Z:");
+        int closingBraceIndex = source.IndexOf("}");
+        if (xIndex == -1 || yIndex == -1 || zIndex == -1 || closingBraceIndex == -1)
+        {
+            SetDefault();
+            return false;
+        }
+
+        Vector3 vec = default(Vector3);
+        string str = source.Substring(xIndex + 2, yIndex - (xIndex + 2));
+        if (!float.TryParse(str, out vec.X))
+        {
+            SetDefault();
+            return false;
+        }
+
+        str = source.Substring(yIndex + 2, zIndex - (yIndex + 2));
+        if (!float.TryParse(str, out vec.Y))
+        {
+            SetDefault();
+            return false;
+        }
+
+        str = source.Substring(zIndex + 2, closingBraceIndex - (zIndex + 2));
+        if (!float.TryParse(str, out vec.Z))
+        {
+            SetDefault();
+            return false;
+        }
+
+        _value = vec;
+        return true;
+    }
+}
+
+public class ConfigColor : ConfigValue<Color>
+{
+    public ConfigColor(string name, Color value = default(Color), string comment = null) : base(name, value, comment) { }
+    public override string ToString()
+    {
+        return string.Format("{0}, {1}, {2}, {3}", Value.R, Value.G, Value.B, Value.A);
+    }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string rgbString = val.ToString("");
+        string[] rgbSplit = rgbString.Split(',');
+
+        int r = 0, g = 0, b = 0, a = 0;
+        if (rgbSplit.Length != 4 ||
+            !int.TryParse(rgbSplit[0].Trim(), out r) ||
+            !int.TryParse(rgbSplit[1].Trim(), out g) ||
+            !int.TryParse(rgbSplit[2].Trim(), out b))
+        {
+            SetDefault();
+            return false;
+        }
+
+        bool hasAlpha = int.TryParse(rgbSplit[3].Trim(), out a);
+        if (!hasAlpha)
+        {
+            a = 255;
+        }
+
+        r = MathHelper.Clamp(r, 0, 255);
+        g = MathHelper.Clamp(g, 0, 255);
+        b = MathHelper.Clamp(b, 0, 255);
+        a = MathHelper.Clamp(a, 0, 255);
+        _value = new Color(r, g, b, a);
+        return true;
+    }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
+    {}
+
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
 #endregion
