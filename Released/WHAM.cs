@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.17.0";
-const string Date = "2023/12/22";
+const string Version = "170.21.1";
+const string Date = "2024/02/03";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -59,10 +59,10 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 #region Global Fields
 
-enum GuidanceAlgoType { ProNav, WhipNav, HybridNav, ZeroEffortMiss };
+enum GuidanceAlgoType { ProNav, WhipNav, HybridNav, QuadraticIntercept };
 
-MissileGuidanceBase _selectedGuidance;
-Dictionary<GuidanceAlgoType, MissileGuidanceBase> _guidanceAlgorithms;
+GuidanceBase _selectedGuidance;
+Dictionary<GuidanceAlgoType, GuidanceBase> _guidanceAlgorithms;
 
 const string MissileNamePattern = "({0} {1})";
 const string MissileGroupPattern = "{0} {1}";
@@ -72,6 +72,8 @@ Vector3D
     _shooterLeftVec,
     _shooterUpVec,
     _shooterPos,
+    _shooterVel,
+    _lastShooterPos,
     _shooterPosCached,
     _randomizedHeadingVector,
     _targetPos,
@@ -214,7 +216,6 @@ List<IMyReactor> _reactors = new List<IMyReactor>();
 List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
 List<IMySensorBlock> _sensors = new List<IMySensorBlock>();
 List<IMyWarhead> _warheads = new List<IMyWarhead>();
-List<IMyTimerBlock> _timers = new List<IMyTimerBlock>();
 List<IMyCameraBlock> _cameras = new List<IMyCameraBlock>();
 List<IMyCameraBlock> _homingCameras = new List<IMyCameraBlock>();
 List<IMyGasTank> _gasTanks = new List<IMyGasTank>();
@@ -292,7 +293,7 @@ ScheduledAction
     _guidanceActivateAction,
     _randomHeadingVectorAction;
 
-enum LaunchStage { Idle = 0, Intiate = 1, Detach = 2, Drift = 3, Flight = 4 }
+enum LaunchStage { None = 0, Intiate = 1, Detach = 2, Drift = 3, Flight = 4, Idle = None }
 StateMachine _launchSM = new StateMachine();
 LaunchState _initiateState, _detachState, _driftState;
 State _flightState;
@@ -329,7 +330,7 @@ ConfigDouble
     _gyroDerivativeGain = new ConfigDouble("Derivative gain", 10);
 
 ConfigSection _homingConfig = new ConfigSection("Homing Parameters");
-ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>("Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms:\n ProNav, WhipNav, HybridNav, ZeroEffortMiss");
+ConfigEnum<GuidanceAlgoType> _guidanceAlgoType = new ConfigEnum<GuidanceAlgoType>("Guidance algorithm", GuidanceAlgoType.ProNav, " Valid guidance algorithms:\n ProNav, WhipNav, HybridNav, QuadraticIntercept");
 ConfigDouble
     _navConstant = new ConfigDouble("Navigation constant", 3),
     _accelNavConstant = new ConfigDouble("Acceleration constant", 1.5),
@@ -342,18 +343,6 @@ ConfigDouble
     _offsetLeft = new ConfigDouble("Hit offset left (m)", 0);
 
 ConfigSection _evasionConfig = new ConfigSection("Evasion Parameters");
-ConfigDouble _missileSpinRPM = new ConfigDouble("Spin rate (RPM)", 0);
-ConfigBool
-    _evadeWithSpiral = new ConfigBool("Use spiral", false),
-    _evadeWithRandomizedHeading = new ConfigBool("Use random flight path", true, " AKA \"Drunken Missile Mode\"");
-
-ConfigSection _spiralConfig = new ConfigSection("Spiral Parameters");
-ConfigDouble
-    _spiralDegrees = new ConfigDouble("Spiral angle (deg)", 15),
-    _timeMaxSpiral = new ConfigDouble("Spiral time (sec)", 3),
-    _spiralActivationRange = new ConfigDouble("Spiral activation range (m)", 1000);
-
-ConfigSection _randomConfig = new ConfigSection("Random Fligh Path Parameters");
 ConfigDouble
     _randomVectorInterval = new ConfigDouble("Direction change interval (sec)", 0.5),
     _maxRandomAccelRatio = new ConfigDouble("Max acceleration ratio", 0.25);
@@ -370,6 +359,7 @@ ConfigBool
     _ignoreIdForDetonation = new ConfigBool("Ignore target ID for detonation", false);
 
 ConfigSection _miscConfig = new ConfigSection(IniSectionMisc);
+ConfigDouble _missileSpinRPM = new ConfigDouble("Spin rate (RPM)", 0);
 ConfigBool
     _allowRemoteFire = new ConfigBool("Allow remote firing", false),
     _requireAntenna = new ConfigBool("Require antenna on missile", true,
@@ -384,6 +374,69 @@ ConfigSection _fuelConservationConfig = new ConfigSection("Fuel Conservation");
 ConfigBool _conserveFuel = new ConfigBool("Conserve fuel", false, " If enabled, the missile will cut thrust when near max speed to attempt\n to save fuel/power. This will make the missile LESS ACCURATE!");
 ConfigDouble _fuelConservationMaxSpeed = new ConfigDouble("Max speed (m/s)", 95);
 ConfigDouble _fuelConservationAngle = new ConfigDouble("Angle tolerance (deg)", 2.5, " Smaller angles make the missile more accurate but will use more fuel");
+
+ConfigSection _stageTriggerConfig = new ConfigSection("WHAM - Stage Trigger");
+ConfigEnum<LaunchStage> _triggerOnStage = new ConfigEnum<LaunchStage>("Trigger on launch stage", LaunchStage.None, " Valid launch stages are:\n Intiate, Detach, Drift, Flight");
+
+ConfigSection _rangeTriggerConfig = new ConfigSection("WHAM - Range Trigger");
+ConfigNullable<double, ConfigDouble> _triggerAtRange = new ConfigNullable<double, ConfigDouble>(new ConfigDouble("Trigger at range (m)", 200, " Range from target to trigger this timer"));
+
+class RangeTimer
+{
+    IMyTimerBlock _timer;
+    double _rangeSq;
+    bool _latched = false;
+
+    public RangeTimer(IMyTimerBlock t, double r)
+    {
+        _timer = t;
+        _rangeSq = r * r;
+    }
+
+    public void Update(double rSq)
+    {
+        if (_latched)
+        {
+            return;
+        }
+
+        if (rSq <= _rangeSq)
+        {
+            _timer.Trigger();
+            _latched = true;
+        }
+    }
+}
+
+class StageTimer
+{
+    IMyTimerBlock _timer;
+    LaunchStage _stage;
+    bool _latched = false;
+
+    public StageTimer(IMyTimerBlock t, LaunchStage s)
+    {
+        _timer = t;
+        _stage = s;
+    }
+
+    public void Update(LaunchStage s)
+    {
+        if (_latched)
+        {
+            return;
+        }
+        
+        if (_stage <= s)
+        {
+            _timer.Trigger();
+            _latched = true;
+        }
+    }
+}
+
+List<RangeTimer> _rangeTimers = new List<RangeTimer>();
+List<StageTimer> _stageTimers = new List<StageTimer>();
 
 ConfigSection[] _config;
 
@@ -400,8 +453,6 @@ void SetupConfig()
         _homingConfig,
         _beamRideConfig,
         _evasionConfig,
-        _spiralConfig,
-        _randomConfig,
         _raycastConfig,
         _fuelConservationConfig,
         _miscConfig,
@@ -412,43 +463,39 @@ void SetupConfig()
         _missileTag,
         _missileNumber,
         _fireControlGroupNameTag,
-        _detachThrustTag);
+        _detachThrustTag
+    );
 
     _delaysConfig.AddValues(
         _guidanceDelay,
         _disconnectDelay,
         _detachDuration,
-        _mainIgnitionDelay);
+        _mainIgnitionDelay
+    );
 
     _gyrosConfig.AddValues(
         _gyroProportionalGain,
         _gyroIntegralGain,
-        _gyroDerivativeGain);
+        _gyroDerivativeGain
+    );
 
     _homingConfig.AddValues(
         _guidanceAlgoType,
         _navConstant,
         _accelNavConstant,
         _maxAimDispersion,
-        _topDownAttackHeight);
+        _topDownAttackHeight
+    );
 
     _beamRideConfig.AddValues(
         _offsetUp,
-        _offsetLeft);
+        _offsetLeft
+    );
 
     _evasionConfig.AddValues(
-        _missileSpinRPM,
-        _evadeWithSpiral,
-        _evadeWithRandomizedHeading);
-
-    _spiralConfig.AddValues(
-        _spiralDegrees,
-        _timeMaxSpiral,
-        _spiralActivationRange);
-
-    _randomConfig.AddValues(
         _randomVectorInterval,
-        _maxRandomAccelRatio);
+        _maxRandomAccelRatio
+    );
 
     _raycastConfig.AddValues(
         _useCamerasForHoming,
@@ -457,17 +504,29 @@ void SetupConfig()
         _minimumArmingRange,
         _raycastIgnoreFriends,
         _raycastIgnorePlanetSurface,
-        _ignoreIdForDetonation);
+        _ignoreIdForDetonation
+    );
 
     _fuelConservationConfig.AddValues(
         _conserveFuel,
         _fuelConservationMaxSpeed,
-        _fuelConservationAngle);
+        _fuelConservationAngle
+    );
 
     _miscConfig.AddValues(
+        _missileSpinRPM,
         _allowRemoteFire,
         _antennaMode,
-        _requireAntenna);
+        _requireAntenna
+    );
+
+    _stageTriggerConfig.AddValues(
+        _triggerOnStage
+    );
+
+    _rangeTriggerConfig.AddValues(
+        _triggerAtRange
+    );
 }
 #endregion
 
@@ -500,7 +559,7 @@ Program()
     _randomHeadingVectorAction = new ScheduledAction(ComputeRandomHeadingVector, 0, false);
 
     // Setting up scheduled tasks
-    _scheduler.AddScheduledAction(_launchSM.Update, UpdatesPerSecond);
+    _scheduler.AddScheduledAction(LaunchStaging, UpdatesPerSecond);
     _scheduler.AddScheduledAction(_guidanceActivateAction);
     _scheduler.AddScheduledAction(GuidanceNavAndControl, UpdatesPerSecond);
     _scheduler.AddScheduledAction(CheckProximity, UpdatesPerSecond);
@@ -514,12 +573,12 @@ Program()
     _raycastHoming.AddEntityTypeToFilter(MyDetectedEntityType.FloatingObject, MyDetectedEntityType.Planet, MyDetectedEntityType.Asteroid);
 
     // Populate guidance algos
-    _guidanceAlgorithms = new Dictionary<GuidanceAlgoType, MissileGuidanceBase>()
+    _guidanceAlgorithms = new Dictionary<GuidanceAlgoType, GuidanceBase>()
     {
         { GuidanceAlgoType.ProNav, new ProNavGuidance(UpdatesPerSecond, _navConstant) },
         { GuidanceAlgoType.WhipNav, new WhipNavGuidance(UpdatesPerSecond, _navConstant) },
         { GuidanceAlgoType.HybridNav, new HybridNavGuidance(UpdatesPerSecond, _navConstant) },
-        { GuidanceAlgoType.ZeroEffortMiss, new ZeroEffortMissGuidance(UpdatesPerSecond, _navConstant) },
+        { GuidanceAlgoType.QuadraticIntercept, new QuadraticInterceptGuidance(new ProNavGuidance(UpdatesPerSecond, _navConstant)) },
     };
 
     // Enable raycast spooling
@@ -577,7 +636,6 @@ void Main(string arg, UpdateType updateSource)
 
     var lastRuntime = Math.Min(RuntimeToRealtime * Math.Max(Runtime.TimeSinceLastRun.TotalSeconds, 0), SecondsPerUpdate);
     _timeTotal += lastRuntime;
-    _timeSpiral += lastRuntime;
     _timeSinceLastIngest += lastRuntime;
 
     if (_shouldKill)
@@ -609,6 +667,16 @@ void ActiveHomingScans()
     else if (_raycastHoming.LockLost)
     {
         _guidanceMode = GuidanceMode.SemiActive;
+    }
+}
+
+void LaunchStaging()
+{
+    _launchSM.Update();
+
+    foreach (var t in _stageTimers)
+    {
+        t.Update((LaunchStage)_launchSM.StateId);
     }
 }
 
@@ -684,7 +752,6 @@ void SaveIniConfig()
         c.WriteToIni(ref _ini);
     }
 
-    _timeMaxSpiral.Value = Math.Max(_timeMaxSpiral, 0.1);
     _maxRandomAccelRatio.Value = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
 
     _guidanceActivateAction.RunInterval = _guidanceDelay;
@@ -778,27 +845,32 @@ void IgcMessageHandling(bool shouldFire)
         }
 
         // Handle unicast messages
-        bool fireCommanded = false;
+        bool locallyFired = false;
         bool remotelyFired = false;
         while (_unicastListener.HasPendingMessage)
         {
             MyIGCMessage message = _unicastListener.AcceptMessage();
             if (message.Tag == IgcTagFire)
             {
-                fireCommanded = true;
-                if (!remotelyFired && GridTerminalSystem.GetBlockWithId(message.Source) != null)
+                if (GridTerminalSystem.GetBlockWithId(message.Source) != null)
                 {
+                    locallyFired = true;
                     _senderKeycode = message.Source;
+                    break;
                 }
             }
             else if (message.Tag == IgcTagRegister)
             {
-                _senderKeycode = message.Source;
-                remotelyFired = true;
+                if (_allowRemoteFire)
+                {
+                    remotelyFired = true;
+                    _senderKeycode = message.Source;
+                    break;
+                }
             }
         }
 
-        if (fireCommanded)
+        if (locallyFired || remotelyFired)
         {
             _postSetupAction = PostSetupAction.Fire;
             InitiateSetup(remotelyFired);
@@ -867,15 +939,15 @@ void IgcMessageHandling(bool shouldFire)
             _guidanceMode = GuidanceMode.BeamRiding;
         }
 
-        /* Item1.Col0: Hit position */
-        /* Item1.Col1: Target position */
-        /* Item1.Col2: Target velocity */
-        /* Item2.Col0: Precision offset */
-        /* Item2.Col1: Shooter position */
-        /* Item2.Col2: <NOT USED> */
-        /* Item3:      Time since last lock */
-        /* Item4:      Target ID */
-        /* Item5:      Key code */
+        // Item1.Col0: Hit position
+        // Item1.Col1: Target position
+        // Item1.Col2: Target velocity
+        // Item2.Col0: Precision offset
+        // Item2.Col1: Shooter position
+        // Item2.Col2: <NOT USED>
+        // Item3:      Time since last lock
+        // Item4:      Target ID
+        // Item5:      Key code
         while (_broadcastListenerHoming.HasPendingMessage)
         {
             MyIGCMessage message = _broadcastListenerHoming.AcceptMessage();
@@ -1125,6 +1197,18 @@ IEnumerator<SetupStatus> SetupStateMachine(bool reload = false)
         {
             relNav.NavConstant = _navConstant;
             relNav.NavAccelConstant = _accelNavConstant;
+            continue;
+        }
+
+        var interceptGuid = guid.Value as InterceptPointGuidance;
+        if (interceptGuid != null)
+        {
+            var relNavImpl = interceptGuid.Implementation as RelNavGuidance;
+            if (relNavImpl != null)
+            {
+                relNavImpl.NavConstant = _navConstant;
+                relNavImpl.NavAccelConstant = _accelNavConstant;
+            }
         }
     }
     _selectedGuidance = _guidanceAlgorithms[_guidanceAlgoType]; // TODO: Ensure value in bounds or just let it crash?
@@ -1320,7 +1404,8 @@ bool SetupErrorChecking()
     EchoBlockCount(_sensors.Count, "sensor");
     EchoBlockCount(_warheads.Count, "warhead");
     EchoBlockCount(_cameras.Count, "camera");
-    EchoBlockCount(_timers.Count, "timer");
+    EchoBlockCount(_stageTimers.Count, "stage timer trigger");
+    EchoBlockCount(_rangeTimers.Count, "range timer trigger");
     EchoBlockCount(_unsortedThrusters.Count, "total thruster");
     EchoBlockCount(_mainThrusters.Count, "main thruster");
     EchoBlockCount(_sideThrusters.Count, "side thruster");
@@ -1356,6 +1441,35 @@ bool CollectBlocks(IMyTerminalBlock block)
     else
     {
         block.CustomName = $"{_missileNameTag} {name}";
+    }
+
+    var timer = block as IMyTimerBlock;
+    if (timer != null)
+    {
+        _ini.Clear();
+        string cd = timer.CustomData;
+        if (!_ini.TryParse(cd) && !string.IsNullOrWhiteSpace(cd))
+        {
+            _ini.EndContent = cd;
+        }
+
+        _stageTriggerConfig.Update(ref _ini);
+        if (_triggerOnStage != LaunchStage.None)
+        {
+            _stageTimers.Add(new StageTimer(timer, _triggerOnStage));
+        }
+
+        _rangeTriggerConfig.Update(ref _ini);
+        if (_triggerAtRange.HasValue)
+        {
+            _rangeTimers.Add(new RangeTimer(timer, _triggerAtRange.Value));
+        }
+
+        string output = _ini.ToString();
+        if (output != cd)
+        {
+            timer.CustomData = output;
+        }
     }
 
     IMyThrust thrust;
@@ -1397,7 +1511,6 @@ bool CollectBlocks(IMyTerminalBlock block)
             || AddToListIfType(block, _rotors)
             || AddToListIfType(block, _reactors)
             || AddToListIfType(block, _sensors)
-            || AddToListIfType(block, _timers)
             || AddToListIfType(block, _gasTanks))
     {
         /* Nothing to do here */
@@ -1579,11 +1692,6 @@ void OnInitiate()
     {
         t.Stockpile = false;
     }
-
-    foreach (var t in _timers)
-    {
-        t.Trigger();
-    }
 }
 
 // Detaches missile from the firing ship.
@@ -1682,21 +1790,19 @@ void GuidanceNavAndControl()
     Vector3D missilePos, missileVel, gravityVec;
     MatrixD missileMatrix;
     double missileMass, missileAccel;
-    bool pastArmingRange, shouldSpiral;
+    bool pastArmingRange;
 
     Navigation(_minimumArmingRange,
-        _enableEvasion,
-        _evadeWithSpiral,
         out missileMatrix,
         out missilePos,
         out missileVel,
         out _shooterPos,
+        out _shooterVel,
         out gravityVec,
         out missileMass,
         out missileAccel,
         out _distanceFromShooter,
-        out pastArmingRange,
-        out shouldSpiral);
+        out pastArmingRange);
 
     Vector3D accelCmd = GuidanceMain(
         _guidanceMode,
@@ -1706,7 +1812,6 @@ void GuidanceNavAndControl()
         gravityVec,
         missileAccel,
         pastArmingRange,
-        shouldSpiral,
         out _shouldProximityScan);
 
     ScaleAntennaRange(_distanceFromShooter + 100);
@@ -1716,24 +1821,24 @@ void GuidanceNavAndControl()
 
 void Navigation(
     double minArmingRange,
-    bool enableEvasion,
-    bool evadeWithSpiral,
     out MatrixD missileMatrix,
     out Vector3D missilePos,
     out Vector3D missileVel,
     out Vector3D shooterPos,
+    out Vector3D shooterVel,
     out Vector3D gravity,
     out double missileMass,
     out double missileAcceleration,
     out double distanceFromShooter,
-    out bool pastMinArmingRange,
-    out bool shouldSpiral)
+    out bool pastMinArmingRange)
 {
     missilePos = _missileReference.CenterOfMass;
     missileVel = _missileReference.GetShipVelocities().LinearVelocity;
     missileMatrix = MissileMatrix;
 
     shooterPos = _shooterPosCached + _offsetLeft * _shooterLeftVec + _offsetUp * _shooterUpVec;
+    shooterVel = (shooterPos - _lastShooterPos) * UpdatesPerSecond;
+    _lastShooterPos = shooterPos;
 
     gravity = _missileReference.GetNaturalGravity();
 
@@ -1745,7 +1850,6 @@ void Navigation(
     missileAcceleration = missileThrust / missileMass;
 
     pastMinArmingRange = Vector3D.DistanceSquared(missilePos, shooterPos) >= minArmingRange * minArmingRange;
-    shouldSpiral = enableEvasion && evadeWithSpiral;
 }
 
 Vector3D GuidanceMain(
@@ -1756,7 +1860,6 @@ Vector3D GuidanceMain(
     Vector3D gravity,
     double missileAcceleration,
     bool pastMinArmingRange,
-    bool shouldSpiral,
     out bool shouldProximityScan)
 {
     Vector3D accelCmd;
@@ -1786,16 +1889,13 @@ Vector3D GuidanceMain(
         double closingSpeedSq = (missileVel - _targetVel).LengthSquared();
         shouldProximityScan = pastMinArmingRange && (closingSpeedSq > distanceToTgtSq); // Roughly 1 second till impact
 
-        // Only spiral if we are close enough to the target to conserve fuel
-        shouldSpiral &= ((_spiralActivationRange * _spiralActivationRange > distanceToTgtSq) && (closingSpeedSq * 4.0 < distanceToTgtSq)); // TODO: Don't hard code this lol
+        foreach (var t in _rangeTimers)
+        {
+            t.Update(distanceToTgtSq);
+        }
     }
 
-    if (shouldSpiral)
-    {
-        accelCmd = missileAcceleration * SpiralTrajectory(accelCmd, missileMatrix.Up);
-    }
-
-    if (_enableEvasion && _evadeWithRandomizedHeading)
+    if (_enableEvasion)
     {
         accelCmd += missileAcceleration * _randomizedHeadingVector;
     }
@@ -1835,24 +1935,9 @@ Vector3D BeamRideGuidance(
         destinationVec += signLeft * 100 * _shooterLeftVec + signUp * 100 * _shooterUpVec;
     }
 
-    Vector3D missileToTargetVec = destinationVec - missilePos;
+    Vector3D accelCmd = _selectedGuidance.Update(missilePos, missileVel, missileAcceleration, destinationVec, _shooterVel, gravity);
 
-    Vector3D accelCmd;
-    if (InFlight)
-    {
-        accelCmd = CalculateDriftCompensation(missileVel, missileToTargetVec, missileAcceleration, 0.5, gravity, 60);
-    }
-    else
-    {
-        accelCmd = missileToTargetVec;
-    }
-
-    if (!Vector3D.IsZero(gravity))
-    {
-        accelCmd = MissileGuidanceBase.GravityCompensation(missileAcceleration, accelCmd, gravity);
-    }
-
-    return VectorMath.SafeNormalize(accelCmd) * missileAcceleration;
+    return accelCmd * missileAcceleration;
 }
 
 Vector3D HomingGuidance(
@@ -2262,38 +2347,9 @@ void KillPower()
 #endregion
 
 #region Vector Math Functions
-// Computes optimal drift compensation vector to eliminate drift in a specified time
-static Vector3D CalculateDriftCompensation(Vector3D velocity, Vector3D directHeading, double accel, double timeConstant, Vector3D gravityVec, double maxDriftAngle = 60)
-{
-    if (directHeading.LengthSquared() == 0)
-        return velocity;
-
-    if (Vector3D.Dot(velocity, directHeading) < 0)
-        return directHeading;
-
-    if (velocity.LengthSquared() < 100)
-        return directHeading;
-
-    var normalVelocity = VectorMath.Rejection(velocity, directHeading);
-    var normal = VectorMath.SafeNormalize(normalVelocity);
-    var parallel = VectorMath.SafeNormalize(directHeading);
-
-    var normalAccel = Vector3D.Dot(normal, normalVelocity) / timeConstant;
-    normalAccel = Math.Min(normalAccel, accel * Math.Sin(MathHelper.ToRadians(maxDriftAngle)));
-
-    var normalAccelerationVector = normalAccel * normal;
-
-    double parallelAccel = 0;
-    var diff = accel * accel - normalAccelerationVector.LengthSquared();
-    if (diff > 0)
-        parallelAccel = Math.Sqrt(diff);
-
-    return parallelAccel * parallel - normal * normalAccel;
-}
-
 void ComputeRandomHeadingVector()
 {
-    if (!_enableEvasion || !_evadeWithRandomizedHeading || !_enableGuidance || _missileReference == null)
+    if (!_enableEvasion || !_enableGuidance || _missileReference == null)
     {
         return;
     }
@@ -2310,25 +2366,6 @@ Vector3D ComputeRandomDispersion()
                                         2 * _bellCurveRandom.NextDouble() - 1,
                                         2 * _bellCurveRandom.NextDouble() - 1);
     return _maxAimDispersion * direction;
-}
-
-//Whip's Spiral Trajectory Method v2
-double _timeSpiral = 0;
-Vector3D SpiralTrajectory(Vector3D desiredForwardVector, Vector3D desiredUpVector)
-{
-    if (_timeSpiral > _timeMaxSpiral)
-        _timeSpiral = 0;
-
-    double angle = 2 * Math.PI * _timeSpiral / _timeMaxSpiral;
-
-    Vector3D forward = VectorMath.SafeNormalize(desiredForwardVector);
-    Vector3D right = VectorMath.SafeNormalize(Vector3D.Cross(forward, desiredUpVector));
-    Vector3D up = Vector3D.Cross(right, forward);
-
-    double lateralProportion = Math.Sin(_spiralDegrees * DegToRad);
-    double forwardProportion = Math.Sqrt(1 - lateralProportion * lateralProportion);
-
-    return forward * forwardProportion + lateralProportion * (Math.Sin(angle) * up + Math.Cos(angle) * right);
 }
 
 double CalculateGridRadiusFromAxis(IMyCubeGrid grid, Vector3D axis)
@@ -2428,7 +2465,413 @@ void Save()
 
 #region INCLUDES
 
-enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
+class BatesDistributionRandom
+{
+    Random _rnd = new Random();
+    readonly int _count;
+
+    public BatesDistributionRandom(int count)
+    {
+        if (count < 1)
+        {
+            throw new Exception($"count must be greater than 1");
+        }
+        _count = count;
+    }
+
+    public double NextDouble()
+    {
+        double num = 0;
+        for (int i = 0; i < _count; ++i)
+        {
+            num += _rnd.NextDouble();
+        }
+        return num / _count;
+    }
+}
+
+public interface IConfigValue
+{
+    void WriteToIni(ref MyIni ini, string section);
+    bool ReadFromIni(ref MyIni ini, string section);
+    bool Update(ref MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigDouble : ConfigValue<double>
+{
+    public ConfigDouble(string name, double value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetDouble(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
+    {}
+
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigInt : ConfigValue<int>
+{
+    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
+    where ConfigImplementation : IConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+    
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Reset()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(ref MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ref ini, section);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(ref MyIni ini, string section)
+    {
+        Implementation.WriteToIni(ref ini, section);
+        if (!HasValue)
+        {
+            ini.Set(section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(ref MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ref ini, section);
+        WriteToIni(ref ini, section);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(ref MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ref ini, Section);
+        }
+    }
+
+    public void WriteToIni(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+
+    public void Update(ref MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ref ini, Section);
+        }
+        SetComment(ref ini);
+    }
+}
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+/// <summary>
+/// A simple, generic circular buffer class with a variable capacity.
+/// </summary>
+/// <typeparam name="T"></typeparam>
+public class DynamicCircularBuffer<T>
+{
+    public int Count
+    {
+        get
+        {
+            return _list.Count;
+        }
+    }
+    
+    List<T> _list = new List<T>();
+    int _getIndex = 0;
+
+    /// <summary>
+    /// Adds an item to the buffer.
+    /// </summary>
+    /// <param name="item"></param>
+    public void Add(T item)
+    {
+        _list.Add(item);
+    }
+    
+    /// <summary>
+    /// Clears the buffer.
+    /// </summary>
+    public void Clear()
+    {
+        _list.Clear();
+        _getIndex = 0;
+    }
+
+    /// <summary>
+    /// Retrieves the current item in the buffer and increments the buffer index.
+    /// </summary>
+    /// <returns></returns>
+    public T MoveNext()
+    {
+        if (_list.Count == 0)
+            return default(T);
+        T val = _list[_getIndex];
+        _getIndex = ++_getIndex % _list.Count;
+        return val;
+    }
+
+    /// <summary>
+    /// Retrieves the current item in the buffer without incrementing the buffer index.
+    /// </summary>
+    /// <returns></returns>
+    public T Peek()
+    {
+        if (_list.Count == 0)
+            return default(T);
+        return _list[_getIndex];
+    }
+}
 
 public static class VectorMath
 {
@@ -2529,376 +2972,288 @@ public static class VectorMath
     }
 }
 
-/// Whip's GetRotationVector - Last modified: 2023/11/19
+abstract class GuidanceBase
+{
+    public double DeltaTime { get; private set; }
+    public double UpdatesPerSecond { get; private set; }
+
+    Vector3D? _lastVelocity;
+
+    public GuidanceBase(double updatesPerSecond)
+    {
+        UpdatesPerSecond = updatesPerSecond;
+        DeltaTime = 1.0 / UpdatesPerSecond;
+    }
+
+    public void ClearAcceleration()
+    {
+        _lastVelocity = null;
+    }
+
+    public Vector3D Update(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D? gravity = null)
+    {
+        Vector3D targetAcceleration = Vector3D.Zero;
+        if (_lastVelocity.HasValue)
+            targetAcceleration = (targetVelocity - _lastVelocity.Value) * UpdatesPerSecond;
+        _lastVelocity = targetVelocity;
+
+        Vector3D pointingVector = GetPointingVector(missilePosition, missileVelocity, missileAcceleration, targetPosition, targetVelocity, targetAcceleration);
+
+        if (gravity.HasValue && gravity.Value.LengthSquared() > 1e-3)
+        {
+            pointingVector = GravityCompensation(missileAcceleration, pointingVector, gravity.Value);
+        }
+        return VectorMath.SafeNormalize(pointingVector);
+    }
+    
+    public static Vector3D GravityCompensation(double missileAcceleration, Vector3D desiredDirection, Vector3D gravity)
+    {
+        Vector3D directionNorm = VectorMath.SafeNormalize(desiredDirection);
+        Vector3D gravityCompensationVec = -(VectorMath.Rejection(gravity, desiredDirection));
+        
+        double diffSq = missileAcceleration * missileAcceleration - gravityCompensationVec.LengthSquared();
+        if (diffSq < 0) // Impossible to hover
+        {
+            return desiredDirection - gravity; // We will sink, but at least approach the target.
+        }
+        
+        return directionNorm * Math.Sqrt(diffSq) + gravityCompensationVec;
+    }
+
+    public abstract Vector3D GetPointingVector(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration);
+}
+
+abstract class RelNavGuidance : GuidanceBase
+{
+    public double NavConstant;
+    public double NavAccelConstant;
+
+    public RelNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond)
+    {
+        NavConstant = navConstant;
+        NavAccelConstant = navAccelConstant;
+    }
+
+    protected abstract Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration);
+
+    public override Vector3D GetPointingVector(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration)
+    {
+        Vector3D missileToTarget = targetPosition - missilePosition;
+        Vector3D missileToTargetNorm = Vector3D.Normalize(missileToTarget);
+        Vector3D relativeVelocity = targetVelocity - missileVelocity;
+        Vector3D lateralTargetAcceleration = (targetAcceleration - Vector3D.Dot(targetAcceleration, missileToTargetNorm) * missileToTargetNorm);
+
+        Vector3D lateralAcceleration = GetLatax(missileToTarget, missileToTargetNorm, relativeVelocity, lateralTargetAcceleration);
+
+        double missileAccelSq = missileAcceleration * missileAcceleration;
+        double diff = missileAccelSq - Math.Min(missileAccelSq, lateralAcceleration.LengthSquared());
+        return lateralAcceleration + Math.Sqrt(diff) * missileToTargetNorm;
+    }
+}
+
+
+class HybridNavGuidance : RelNavGuidance
+{
+    public HybridNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
+
+    protected override Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
+    {
+        Vector3D omega = Vector3D.Cross(missileToTarget, relativeVelocity) / Math.Max(missileToTarget.LengthSquared(), 1); // to combat instability at close range
+        Vector3D parallelVelocity = relativeVelocity.Dot(missileToTargetNorm) * missileToTargetNorm;
+        Vector3D normalVelocity = (relativeVelocity - parallelVelocity);
+        return NavConstant * (relativeVelocity.Length() * Vector3D.Cross(omega, missileToTargetNorm) + 0.1 * normalVelocity)
+             + NavAccelConstant * lateralTargetAcceleration;
+    }
+}
+
+abstract class InterceptPointGuidance : GuidanceBase
+{
+
+    public readonly GuidanceBase Implementation;
+
+    public InterceptPointGuidance(GuidanceBase implementation) : base(implementation.UpdatesPerSecond)
+    {
+        Implementation = implementation;
+    }
+
+    protected abstract Vector3D GetInterceptPoint(Vector3D missilePosition, Vector3D missileVelocity, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration);
+
+    public override Vector3D GetPointingVector(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration)
+    {
+        Vector3D interceptPoint = GetInterceptPoint(missilePosition, missileVelocity, targetPosition, targetVelocity, targetAcceleration);
+
+        return Implementation.GetPointingVector(missilePosition, missileVelocity, missileAcceleration, interceptPoint, Vector3D.Zero, targetAcceleration);
+    }
+}
+
 /// <summary>
-/// <para>
-///     This method computes the axis-angle rotation required to align the
-///     reference world matrix with the desired forward and up vectors.
-/// </para>
-/// <para>
-///     The desired forward and up vectors are used to construct the desired
-///     target orientation relative to the current world matrix orientation.
-///     The current orientation of the craft with respect to itself will be the
-///     identity matrix, thus the error between our desired orientation and our
-///     target orientation is simply the target orientation itself:
-///     M_target = M_current * M_error =>
-///     M_target = I * M_error =>
-///     M_target = M_error
-/// </para>
-/// <para>
-///     This is designed for use with Keen's gyroscopes where:
-///     + pitch = -X rotation,
-///     + yaw   = -Y rotation,
-///     + roll  = -Z rotation
-/// </para>
+/// Whip's Proportional Navigation Intercept
+/// Derived from: https://en.wikipedia.org/wiki/Proportional_navigation
+/// And: http://www.moddb.com/members/blahdy/blogs/gamedev-introduction-to-proportional-navigation-part-i
+/// And: http://www.dtic.mil/dtic/tr/fulltext/u2/a556639.pdf
+/// And: http://nptel.ac.in/courses/101108054/module8/lecture22.pdf
 /// </summary>
-/// <remarks>
-///     Dependencies: <c>VectorMath.SafeNormalize</c>
-/// </remarks>
-/// <param name="desiredForwardVector">
-///     Desired forward direction in world frame.
-///     This is the primary constraint used to allign pitch and yaw.
-/// </param>
-/// <param name="desiredUpVector">
-///     Desired up direction in world frame.
-///     This is the secondary constraint used to align roll. 
-///     Set to <c>null</c> if roll control is not desired.
-/// </param>
-/// <param name="worldMatrix">
-///     World matrix describing current orientation.
-///     The translation part of the matrix is ignored; only the orientation matters.
-/// </param>
-/// <returns>
-///     Pitch-Yaw-Roll rotation vector to the desired orientation (rads). 
-/// </returns>
-public static Vector3D GetRotationVector(Vector3D desiredForwardVector, Vector3D? desiredUpVector, MatrixD worldMatrix)
+class ProNavGuidance : RelNavGuidance
 {
-    var transposedWm = MatrixD.Transpose(worldMatrix);
-    var forwardVector = Vector3D.Rotate(VectorMath.SafeNormalize(desiredForwardVector), transposedWm);
+    public ProNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
 
-    Vector3D leftVector = Vector3D.Zero;
-    if (desiredUpVector.HasValue)
+    protected override Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
     {
-        desiredUpVector = Vector3D.Rotate(desiredUpVector.Value, transposedWm);
-        leftVector = Vector3D.Cross(desiredUpVector.Value, forwardVector);
-    }
-
-    Vector3D axis;
-    double angle;
-    if (!desiredUpVector.HasValue || Vector3D.IsZero(leftVector))
-    {
-        /*
-         * Simple case where we have no valid roll constraint:
-         * We merely cross the current forward vector (Vector3D.Forward) on the 
-         * forwardVector.
-         */
-        axis = new Vector3D(-forwardVector.Y, forwardVector.X, 0);
-        angle = Math.Acos(MathHelper.Clamp(-forwardVector.Z, -1.0, 1.0));
-    }
-    else
-    {
-        /*
-         * Here we need to construct the target orientation matrix so that we
-         * can extract the error from it in axis-angle representation.
-         */
-        leftVector = VectorMath.SafeNormalize(leftVector);
-        var upVector = Vector3D.Cross(forwardVector, leftVector);
-        var targetOrientation = new MatrixD()
-        {
-            Forward = forwardVector,
-            Left = leftVector,
-            Up = upVector,
-        };
-
-        axis = new Vector3D(targetOrientation.M32 - targetOrientation.M23,
-                            targetOrientation.M13 - targetOrientation.M31,
-                            targetOrientation.M21 - targetOrientation.M12);
-
-        double trace = targetOrientation.M11 + targetOrientation.M22 + targetOrientation.M33;
-        angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1.0, 1.0));
-    }
-
-    Vector3D rotationVectorPYR;
-    if (Vector3D.IsZero(axis))
-    {
-        /*
-         * Degenerate case where we get a zero axis. This means we are either
-         * exactly aligned or exactly anti-aligned. In the latter case, we just
-         * assume the yaw is PI to get us away from the singularity.
-         */
-        angle = forwardVector.Z < 0 ? 0 : Math.PI;
-        rotationVectorPYR = new Vector3D(0, angle, 0);
-    }
-    else
-    {
-        rotationVectorPYR = VectorMath.SafeNormalize(axis) * angle;
-    }
-
-    return rotationVectorPYR;
-}
-
-/*
-Whip's ApplyGyroOverride - Last modified: 2023/11/19
-
-Takes pitch, yaw, and roll speeds relative to the gyro's backwards
-ass rotation axes. 
-*/
-void ApplyGyroOverride(Vector3D rotationSpeedPYR, List<IMyGyro> gyros, MatrixD worldMatrix)
-{
-    var worldRotationPYR = Vector3D.TransformNormal(rotationSpeedPYR, worldMatrix);
-
-    foreach (var g in gyros)
-    {
-        var gyroRotationPYR = Vector3D.TransformNormal(worldRotationPYR, Matrix.Transpose(g.WorldMatrix));
-
-        g.Pitch = (float)gyroRotationPYR.X;
-        g.Yaw = (float)gyroRotationPYR.Y;
-        g.Roll = (float)gyroRotationPYR.Z;
-        g.GyroOverride = true;
+        Vector3D omega = Vector3D.Cross(missileToTarget, relativeVelocity) / Math.Max(missileToTarget.LengthSquared(), 1); //to combat instability at close range
+        return NavConstant * relativeVelocity.Length() * Vector3D.Cross(omega, missileToTargetNorm)
+             + NavAccelConstant * lateralTargetAcceleration;
     }
 }
 
-void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyros, MatrixD worldMatrix)
-{
-    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
-    ApplyGyroOverride(rotationVec, gyros, worldMatrix);
-}
-
-#region Scheduler
 /// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
+/// Solves a quadratic in the form: 0 = a*x^2 + b*x + c.
+/// If only one solution exists, xMin = xMax.
 /// </summary>
-public class Scheduler
+/// <param name="a">Coefficient of the x^2 term</param>
+/// <param name="b">Coefficient of the x term</param>
+/// <param name="c">Constant term</param>
+/// <param name="xMax">Larger of the two solutions</param>
+/// <param name="xMin">Smaller of the two solutions</param>
+/// <param name="epsilon">Small floating point epsilon to prevent division by zero.</param>
+/// <returns>True if a solution exists.</returns>
+public static bool SolveQuadratic(double a, double b, double c, out double xMax, out double xMin, double epsilon = 1e-12)
 {
-    public double CurrentTimeSinceLastRun { get; private set; } = 0;
-    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+    xMin = xMax = 0;
 
-    QueuedAction _currentlyQueuedAction = null;
-    bool _firstRun = true;
-    bool _inUpdate = false;
-
-    readonly bool _ignoreFirstRun;
-    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
-    readonly Program _program;
-
-    public const long TicksPerSecond = 60;
-    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
-    const long ClockTicksPerGameTick = 166666L;
-
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
-    public Scheduler(Program program, bool ignoreFirstRun = false)
+    // Linear
+    if (Math.Abs(a) < epsilon)
     {
-        _program = program;
-        _ignoreFirstRun = ignoreFirstRun;
+        if (Math.Abs(b) < epsilon)
+        {
+            return false;
+        }
+        xMax = xMin = -c / b;
+        return true;
     }
 
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
-    public void Update()
+    // Quadratic
+    double d = b * b - 4.0 * a * c;
+    if (d < 0 || Math.Abs(a) < epsilon)
     {
-        _inUpdate = true;
-        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
+        return false;
+    }
+    double sqrtD = Math.Sqrt(d);
+    double inv2a = 1.0 / (2.0 * a);
+    double x1 = (-b + sqrtD) * inv2a;
+    double x2 = (-b - sqrtD) * inv2a;
+    xMax = Math.Max(x1, x2);
+    xMin = Math.Min(x1, x2);
+    return true;
+}
 
-        if (_firstRun)
+class QuadraticInterceptGuidance : InterceptPointGuidance
+{
+    public QuadraticInterceptGuidance(GuidanceBase implementation) : base(implementation) {}
+    
+    protected override Vector3D GetInterceptPoint(Vector3D missilePosition, Vector3D missileVelocity, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration)
+    {
+        Vector3D relativePosition = targetPosition - missilePosition;
+        double missileSpeed = missileVelocity.Length();
+
+        double a = targetVelocity.LengthSquared() - missileSpeed * missileSpeed;
+        double b = 2 * Vector3D.Dot(relativePosition, targetVelocity);
+        double c = relativePosition.LengthSquared();
+
+        double interceptTime = 0;
+
+        double timeMin, timeMax;
+        if (SolveQuadratic(a, b, c, out timeMax, out timeMin))
         {
-            if (_ignoreFirstRun)
+            if (timeMin > 0)
             {
-                deltaTicks = 0;
+                interceptTime = timeMin;
             }
-            _firstRun = false;
-        }
-
-        _actionsToDispose.Clear();
-        foreach (ScheduledAction action in _scheduledActions)
-        {
-            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
-            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
-            action.Update(deltaTicks);
-            if (action.JustRan && action.DisposeAfterRun)
+            else if (timeMax > 0)
             {
-                _actionsToDispose.Add(action);
-            }
-        }
-
-        if (_actionsToDispose.Count > 0)
-        {
-            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
-        }
-
-        if (_currentlyQueuedAction == null)
-        {
-            // If queue is not empty, populate current queued action
-            if (_queuedActions.Count != 0)
-                _currentlyQueuedAction = _queuedActions.Dequeue();
-        }
-
-        // If queued action is populated
-        if (_currentlyQueuedAction != null)
-        {
-            _currentlyQueuedAction.Update(deltaTicks);
-            if (_currentlyQueuedAction.JustRan)
-            {
-                if (!_currentlyQueuedAction.DisposeAfterRun)
-                {
-                    _queuedActions.Enqueue(_currentlyQueuedAction);
-                }
-                // Set the queued action to null for the next cycle
-                _currentlyQueuedAction = null;
+                interceptTime = timeMax;
             }
         }
-        _inUpdate = false;
 
-        if (_actionsToAdd.Count > 0)
-        {
-            _scheduledActions.AddRange(_actionsToAdd);
-            _actionsToAdd.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
-    {
-        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(ScheduledAction scheduledAction)
-    {
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
-    {
-        if (updateInterval <= 0)
-        {
-            updateInterval = 0.001; // avoids divide by zero
-        }
-        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
-        _queuedActions.Enqueue(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(QueuedAction scheduledAction)
-    {
-        _queuedActions.Enqueue(scheduledAction);
+        return targetPosition + targetVelocity * interceptTime;
     }
 }
 
-public class QueuedAction : ScheduledAction
+class WhipNavGuidance : RelNavGuidance
 {
-    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
-        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
-    { }
-}
+    public WhipNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
 
-public class ScheduledAction
-{
-    public bool JustRan { get; private set; } = false;
-    public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
-    public long TicksSinceLastRun { get; private set; } = 0;
-    public double RunInterval
+    protected override Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
     {
-        get
-        {
-            return RunIntervalTicks * Scheduler.TickDurationSeconds;
-        }
-        set
-        {
-            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
-        }
-    }
-    public long RunIntervalTicks
-    {
-        get
-        {
-            return _runIntervalTicks;
-        }
-        set
-        {
-            if (value == _runIntervalTicks)
-                return;
-
-            _runIntervalTicks = value < 0 ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
-        }
-    }
-
-    public double RunFrequency
-    {
-        get
-        {
-            return _runFrequency;
-        }
-        set
-        {
-            if (value == _runFrequency)
-                return;
-
-            if (value == 0)
-                RunIntervalTicks = long.MaxValue;
-            else
-                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
-        }
-    }
-
-    long _runIntervalTicks;
-    double _runFrequency;
-    readonly Action _action;
-
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
-    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
-    {
-        _action = action;
-        RunFrequency = runFrequency; // Implicitly sets RunInterval
-        DisposeAfterRun = removeAfterRun;
-        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
-    }
-
-    public void Update(long deltaTicks)
-    {
-        TicksSinceLastRun += deltaTicks;
-
-        if (TicksSinceLastRun >= RunIntervalTicks)
-        {
-            _action.Invoke();
-            TicksSinceLastRun = 0;
-
-            JustRan = true;
-        }
-        else
-        {
-            JustRan = false;
-        }
+        Vector3D parallelVelocity = relativeVelocity.Dot(missileToTargetNorm) * missileToTargetNorm;
+        Vector3D normalVelocity = (relativeVelocity - parallelVelocity);
+        return NavConstant * 0.1 * normalVelocity
+             + NavAccelConstant * lateralTargetAcceleration;
     }
 }
-#endregion
+public class Logger
+{
+    public static string GetHexColor(Color c)
+    {
+        return $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+    }
+    
+    struct LogType
+    {
+        public static LogType Default = new LogType("", null, null);
+        
+        const string ColorFormat = "[color={1}]{0}[/color]";
+        const string NoColorFormat = "{0}";
+        
+        public readonly string Prefix;
+        public readonly string PrefixColorHex;
+        public readonly string TextColorHex;
+        
+        readonly string _prefixFormat;
+        readonly string _textFormat;
+
+        public LogType(string prefix, Color? prefixColor, Color? textColor)
+        {
+            Prefix = prefix;
+            PrefixColorHex = prefixColor.HasValue ? GetHexColor(prefixColor.Value) : null;
+            _prefixFormat = prefixColor.HasValue ? ColorFormat : NoColorFormat;
+            TextColorHex = textColor.HasValue ? GetHexColor(textColor.Value) : null;
+            _textFormat = textColor.HasValue ? ColorFormat : NoColorFormat;
+        }
+
+        public void Write(StringBuilder buffer, string text)
+        {
+            if (!string.IsNullOrWhiteSpace(Prefix))
+            {
+                buffer.Append(string.Format(_prefixFormat, Prefix, PrefixColorHex)).Append(" ");
+            }
+            buffer.AppendLine(string.Format(_textFormat, text, TextColorHex));
+        }
+    }
+
+    Dictionary<Enum, LogType> _logTypes = new Dictionary<Enum, LogType>();
+    
+    StringBuilder _buffer;
+
+    public Logger(StringBuilder buffer)
+    {
+        _buffer = buffer;
+    }
+
+    public void RegisterType(Enum type, string prefix, Color? prefixColor = null, Color? textColor = null)
+    {
+        _logTypes[type] = new LogType(prefix, prefixColor, textColor);
+    }
+
+    public void Log(Enum type, string text)
+    {
+        LogType logType;
+        if (!_logTypes.TryGetValue(type, out logType))
+        {
+            logType = LogType.Default;
+        }
+        logType.Write(_buffer, text);
+    }
+}
 
 /// <summary>
 /// Discrete time PID controller class.
@@ -2968,96 +3323,6 @@ public class PID
         _errorSum = 0;
         _lastError = 0;
         _firstRun = true;
-    }
-}
-
-/// <summary>
-/// Class that tracks runtime history.
-/// </summary>
-public class RuntimeTracker
-{
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
-    
-    readonly Queue<double> _runtimes = new Queue<double>();
-    readonly Queue<double> _instructions = new Queue<double>();
-    readonly int _instructionLimit;
-    readonly Program _program;
-    const double MS_PER_TICK = 16.6666;
-    
-    const string Format = "General Runtime Info\n"
-            + "- Avg runtime: {0:n4} ms\n"
-            + "- Last runtime: {1:n4} ms\n"
-            + "- Max runtime: {2:n4} ms\n"
-            + "- Avg instructions: {3:n2}\n"
-            + "- Last instructions: {4:n0}\n"
-            + "- Max instructions: {5:n0}\n"
-            + "- Avg complexity: {6:0.000}%";
-
-    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
-    {
-        _program = program;
-        Capacity = capacity;
-        Sensitivity = sensitivity;
-        _instructionLimit = _program.Runtime.MaxInstructionCount;
-    }
-
-    public void AddRuntime()
-    {
-        double runtime = _program.Runtime.LastRunTimeMs;
-        LastRuntime = runtime;
-        AverageRuntime += (Sensitivity * runtime);
-        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
-        if (roundedTicksSinceLastRuntime == 1)
-        {
-            AverageRuntime *= (1 - Sensitivity); 
-        }
-        else if (roundedTicksSinceLastRuntime > 1)
-        {
-            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
-        }
-
-        _runtimes.Enqueue(runtime);
-        if (_runtimes.Count == Capacity)
-        {
-            _runtimes.Dequeue();
-        }
-        
-        MaxRuntime = _runtimes.Max();
-    }
-
-    public void AddInstructions()
-    {
-        double instructions = _program.Runtime.CurrentInstructionCount;
-        LastInstructions = instructions;
-        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
-        
-        _instructions.Enqueue(instructions);
-        if (_instructions.Count == Capacity)
-        {
-            _instructions.Dequeue();
-        }
-        
-        MaxInstructions = _instructions.Max();
-    }
-
-    public string Write()
-    {
-        return string.Format(
-            Format,
-            AverageRuntime,
-            LastRuntime,
-            MaxRuntime,
-            AverageInstructions,
-            LastInstructions,
-            MaxInstructions,
-            AverageInstructions / _instructionLimit);
     }
 }
 
@@ -3573,480 +3838,331 @@ class RaycastHoming
 }
 #endregion
 
-#region MissileGuidanceBase
-abstract class MissileGuidanceBase
+/// <summary>
+/// Class that tracks runtime history.
+/// </summary>
+public class RuntimeTracker
 {
-    protected double _deltaTime;
-    protected double _updatesPerSecond;
-
-    Vector3D? _lastVelocity;
-
-    public MissileGuidanceBase(double updatesPerSecond)
-    {
-        _updatesPerSecond = updatesPerSecond;
-        _deltaTime = 1.0 / _updatesPerSecond;
-    }
-
-    public void ClearAcceleration()
-    {
-        _lastVelocity = null;
-    }
-
-    public Vector3D Update(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D? gravity = null)
-    {
-        Vector3D targetAcceleration = Vector3D.Zero;
-        if (_lastVelocity.HasValue)
-            targetAcceleration = (targetVelocity - _lastVelocity.Value) * _updatesPerSecond;
-        _lastVelocity = targetVelocity;
-
-        Vector3D pointingVector = GetPointingVector(missilePosition, missileVelocity, missileAcceleration, targetPosition, targetVelocity, targetAcceleration);
-
-        if (gravity.HasValue && gravity.Value.LengthSquared() > 1e-3)
-        {
-            pointingVector = GravityCompensation(missileAcceleration, pointingVector, gravity.Value);
-        }
-        return VectorMath.SafeNormalize(pointingVector);
-    }
+    public int Capacity { get; set; }
+    public double Sensitivity { get; set; }
+    public double MaxRuntime {get; private set;}
+    public double MaxInstructions {get; private set;}
+    public double AverageRuntime {get; private set;}
+    public double AverageInstructions {get; private set;}
+    public double LastRuntime {get; private set;}
+    public double LastInstructions {get; private set;}
     
-    public static Vector3D GravityCompensation(double missileAcceleration, Vector3D desiredDirection, Vector3D gravity)
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
+
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
     {
-        Vector3D directionNorm = VectorMath.SafeNormalize(desiredDirection);
-        Vector3D gravityCompensationVec = -(VectorMath.Rejection(gravity, desiredDirection));
-        
-        double diffSq = missileAcceleration * missileAcceleration - gravityCompensationVec.LengthSquared();
-        if (diffSq < 0) // Impossible to hover
+        _program = program;
+        Capacity = capacity;
+        Sensitivity = sensitivity;
+        _instructionLimit = _program.Runtime.MaxInstructionCount;
+    }
+
+    public void AddRuntime()
+    {
+        double runtime = _program.Runtime.LastRunTimeMs;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
         {
-            return desiredDirection - gravity; // We will sink, but at least approach the target.
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
+
+        _runtimes.Enqueue(runtime);
+        if (_runtimes.Count == Capacity)
+        {
+            _runtimes.Dequeue();
         }
         
-        return directionNorm * Math.Sqrt(diffSq) + gravityCompensationVec;
+        MaxRuntime = _runtimes.Max();
     }
 
-    protected abstract Vector3D GetPointingVector(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration);
-}
-
-abstract class RelNavGuidance : MissileGuidanceBase
-{
-    public double NavConstant;
-    public double NavAccelConstant;
-
-    public RelNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond)
+    public void AddInstructions()
     {
-        NavConstant = navConstant;
-        NavAccelConstant = navAccelConstant;
+        double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
+        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
+        
+        _instructions.Enqueue(instructions);
+        if (_instructions.Count == Capacity)
+        {
+            _instructions.Dequeue();
+        }
+        
+        MaxInstructions = _instructions.Max();
     }
 
-    abstract protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration);
-
-    override protected Vector3D GetPointingVector(Vector3D missilePosition, Vector3D missileVelocity, double missileAcceleration, Vector3D targetPosition, Vector3D targetVelocity, Vector3D targetAcceleration)
+    public string Write()
     {
-        Vector3D missileToTarget = targetPosition - missilePosition;
-        Vector3D missileToTargetNorm = Vector3D.Normalize(missileToTarget);
-        Vector3D relativeVelocity = targetVelocity - missileVelocity;
-        Vector3D lateralTargetAcceleration = (targetAcceleration - Vector3D.Dot(targetAcceleration, missileToTargetNorm) * missileToTargetNorm);
-
-        Vector3D lateralAcceleration = GetLatax(missileToTarget, missileToTargetNorm, relativeVelocity, lateralTargetAcceleration);
-
-        if (Vector3D.IsZero(lateralAcceleration))
-            return missileToTarget;
-
-        double diff = missileAcceleration * missileAcceleration - lateralAcceleration.LengthSquared();
-        if (diff < 0)
-            return lateralAcceleration; //fly parallel to the target
-        return lateralAcceleration + Math.Sqrt(diff) * missileToTargetNorm;
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
     }
 }
 
+#region Scheduler
 /// <summary>
-/// Whip's Proportional Navigation Intercept
-/// Derived from: https://en.wikipedia.org/wiki/Proportional_navigation
-/// And: http://www.moddb.com/members/blahdy/blogs/gamedev-introduction-to-proportional-navigation-part-i
-/// And: http://www.dtic.mil/dtic/tr/fulltext/u2/a556639.pdf
-/// And: http://nptel.ac.in/courses/101108054/module8/lecture22.pdf
+/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
 /// </summary>
-class ProNavGuidance : RelNavGuidance
+public class Scheduler
 {
-    public ProNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
-    override protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
+    QueuedAction _currentlyQueuedAction = null;
+    bool _firstRun = true;
+    bool _inUpdate = false;
+
+    readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
+    readonly Program _program;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
+
+    /// <summary>
+    /// Constructs a scheduler object with timing based on the runtime of the input program.
+    /// </summary>
+    public Scheduler(Program program, bool ignoreFirstRun = false)
     {
-        Vector3D omega = Vector3D.Cross(missileToTarget, relativeVelocity) / Math.Max(missileToTarget.LengthSquared(), 1); //to combat instability at close range
-        return NavConstant * relativeVelocity.Length() * Vector3D.Cross(omega, missileToTargetNorm)
-             + NavAccelConstant * lateralTargetAcceleration;
+        _program = program;
+        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Updates all ScheduledAcions in the schedule and the queue.
+    /// </summary>
+    public void Update()
+    {
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
+
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
+        _actionsToDispose.Clear();
+        foreach (ScheduledAction action in _scheduledActions)
+        {
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
+            if (action.JustRan && action.DisposeAfterRun)
+            {
+                _actionsToDispose.Add(action);
+            }
+        }
+
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
+
+        if (_currentlyQueuedAction == null)
+        {
+            // If queue is not empty, populate current queued action
+            if (_queuedActions.Count != 0)
+                _currentlyQueuedAction = _queuedActions.Dequeue();
+        }
+
+        // If queued action is populated
+        if (_currentlyQueuedAction != null)
+        {
+            _currentlyQueuedAction.Update(deltaTicks);
+            if (_currentlyQueuedAction.JustRan)
+            {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
+                // Set the queued action to null for the next cycle
+                _currentlyQueuedAction = null;
+            }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Adds an Action to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
+    {
+        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(ScheduledAction scheduledAction)
+    {
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds an Action to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
+    {
+        if (updateInterval <= 0)
+        {
+            updateInterval = 0.001; // avoids divide by zero
+        }
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
+        _queuedActions.Enqueue(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(QueuedAction scheduledAction)
+    {
+        _queuedActions.Enqueue(scheduledAction);
     }
 }
 
-class WhipNavGuidance : RelNavGuidance
+public class QueuedAction : ScheduledAction
 {
-    public WhipNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
-
-    override protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
-    {
-        Vector3D parallelVelocity = relativeVelocity.Dot(missileToTargetNorm) * missileToTargetNorm; //bootleg vector projection
-        Vector3D normalVelocity = (relativeVelocity - parallelVelocity);
-        return NavConstant * 0.1 * normalVelocity
-             + NavAccelConstant * lateralTargetAcceleration;
-    }
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
 }
 
-class HybridNavGuidance : RelNavGuidance
+public class ScheduledAction
 {
-    public HybridNavGuidance(double updatesPerSecond, double navConstant, double navAccelConstant = 0) : base(updatesPerSecond, navConstant, navAccelConstant) { }
-
-    override protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
-    {
-        Vector3D omega = Vector3D.Cross(missileToTarget, relativeVelocity) / Math.Max(missileToTarget.LengthSquared(), 1); //to combat instability at close range
-        Vector3D parallelVelocity = relativeVelocity.Dot(missileToTargetNorm) * missileToTargetNorm; //bootleg vector projection
-        Vector3D normalVelocity = (relativeVelocity - parallelVelocity);
-        return NavConstant * (relativeVelocity.Length() * Vector3D.Cross(omega, missileToTargetNorm) + 0.1 * normalVelocity)
-             + NavAccelConstant * lateralTargetAcceleration;
-    }
-}
-
-/// <summary>
-/// Zero Effort Miss Intercept
-/// Derived from: https://doi.org/10.2514/1.26948
-/// </summary>
-class ZeroEffortMissGuidance : RelNavGuidance
-{
-    public ZeroEffortMissGuidance(double updatesPerSecond, double navConstant) : base(updatesPerSecond, navConstant, 0) { }
-    override protected Vector3D GetLatax(Vector3D missileToTarget, Vector3D missileToTargetNorm, Vector3D relativeVelocity, Vector3D lateralTargetAcceleration)
-    {
-        double distToTarget = Vector3D.Dot(missileToTarget, missileToTargetNorm);
-        double closingSpeed = Vector3D.Dot(relativeVelocity, missileToTargetNorm);
-        // Equation (8) with sign modification to keep time positive and not NaN
-        double tau = distToTarget / Math.Max(1, Math.Abs(closingSpeed));
-        // Equation (6)
-        Vector3D z = missileToTarget + relativeVelocity * tau;
-        // Equation (7)
-        return NavConstant * z / (tau * tau)
-             + NavAccelConstant * lateralTargetAcceleration;
-    }
-}
-#endregion
-
-/// <summary>
-/// A simple, generic circular buffer class with a variable capacity.
-/// </summary>
-/// <typeparam name="T"></typeparam>
-public class DynamicCircularBuffer<T>
-{
-    public int Count
+    public bool JustRan { get; private set; } = false;
+    public bool DisposeAfterRun { get; private set; } = false;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
     {
         get
         {
-            return _list.Count;
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
         }
-    }
-    
-    List<T> _list = new List<T>();
-    int _getIndex = 0;
-
-    /// <summary>
-    /// Adds an item to the buffer.
-    /// </summary>
-    /// <param name="item"></param>
-    public void Add(T item)
-    {
-        _list.Add(item);
-    }
-    
-    /// <summary>
-    /// Clears the buffer.
-    /// </summary>
-    public void Clear()
-    {
-        _list.Clear();
-        _getIndex = 0;
-    }
-
-    /// <summary>
-    /// Retrieves the current item in the buffer and increments the buffer index.
-    /// </summary>
-    /// <returns></returns>
-    public T MoveNext()
-    {
-        if (_list.Count == 0)
-            return default(T);
-        T val = _list[_getIndex];
-        _getIndex = ++_getIndex % _list.Count;
-        return val;
-    }
-
-    /// <summary>
-    /// Retrieves the current item in the buffer without incrementing the buffer index.
-    /// </summary>
-    /// <returns></returns>
-    public T Peek()
-    {
-        if (_list.Count == 0)
-            return default(T);
-        return _list[_getIndex];
-    }
-}
-
-class BatesDistributionRandom
-{
-    Random _rnd = new Random();
-    readonly int _count;
-
-    public BatesDistributionRandom(int count)
-    {
-        if (count < 1)
-        {
-            throw new Exception($"count must be greater than 1");
-        }
-        _count = count;
-    }
-
-    public double NextDouble()
-    {
-        double num = 0;
-        for (int i = 0; i < _count; ++i)
-        {
-            num += _rnd.NextDouble();
-        }
-        return num / _count;
-    }
-}
-
-public interface IConfigValue
-{
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
-    void Reset();
-    string Name { get; set; }
-    string Comment { get; set; }
-}
-
-public interface IConfigValue<T> : IConfigValue
-{
-    T Value { get; set; }
-}
-
-public abstract class ConfigValue<T> : IConfigValue<T>
-{
-    public string Name { get; set; }
-    public string Comment { get; set; }
-    protected T _value;
-    public T Value
-    {
-        get { return _value; }
         set
         {
-            _value = value;
-            _skipRead = true;
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
         }
     }
-    readonly T _defaultValue;
-    bool _skipRead = false;
-
-    public static implicit operator T(ConfigValue<T> cfg)
+    public long RunIntervalTicks
     {
-        return cfg.Value;
-    }
-
-    public ConfigValue(string name, T defaultValue, string comment)
-    {
-        Name = name;
-        _value = defaultValue;
-        _defaultValue = defaultValue;
-        Comment = comment;
-    }
-
-    public override string ToString()
-    {
-        return Value.ToString();
-    }
-
-    public bool Update(ref MyIni ini, string section)
-    {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
-        return read;
-    }
-
-    public bool ReadFromIni(ref MyIni ini, string section)
-    {
-        if (_skipRead)
+        get
         {
-            _skipRead = false;
-            return true;
+            return _runIntervalTicks;
         }
-        MyIniValue val = ini.Get(section, Name);
-        bool read = !val.IsEmpty;
-        if (read)
+        set
         {
-            read = SetValue(ref val);
+            if (value == _runIntervalTicks)
+                return;
+
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
+    readonly Action _action;
+
+    /// <summary>
+    /// Class for scheduling an action to occur at a specified frequency (in Hz).
+    /// </summary>
+    /// <param name="action">Action to run</param>
+    /// <param name="runFrequency">How often to run in Hz</param>
+    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
+    {
+        _action = action;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
+        DisposeAfterRun = removeAfterRun;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
+    }
+
+    public void Update(long deltaTicks)
+    {
+        TicksSinceLastRun += deltaTicks;
+
+        if (TicksSinceLastRun >= RunIntervalTicks)
+        {
+            _action.Invoke();
+            TicksSinceLastRun = 0;
+
+            JustRan = true;
         }
         else
         {
-            SetDefault();
+            JustRan = false;
         }
-        return read;
-    }
-
-    public void WriteToIni(ref MyIni ini, string section)
-    {
-        ini.Set(section, Name, this.ToString());
-        if (!string.IsNullOrWhiteSpace(Comment))
-        {
-            ini.SetComment(section, Name, Comment);
-        }
-        _skipRead = false;
-    }
-
-    public void Reset()
-    {
-        SetDefault();
-        _skipRead = false;
-    }
-
-    protected abstract bool SetValue(ref MyIniValue val);
-
-    protected virtual void SetDefault()
-    {
-        _value = _defaultValue;
     }
 }
-
-class ConfigSection
-{
-    public string Section { get; set; }
-    public string Comment { get; set; }
-    List<IConfigValue> _values = new List<IConfigValue>();
-
-    public ConfigSection(string section, string comment = null)
-    {
-        Section = section;
-        Comment = comment;
-    }
-
-    public void AddValue(IConfigValue value)
-    {
-        _values.Add(value);
-    }
-
-    public void AddValues(List<IConfigValue> values)
-    {
-        _values.AddRange(values);
-    }
-
-    public void AddValues(params IConfigValue[] values)
-    {
-        _values.AddRange(values);
-    }
-
-    void SetComment(ref MyIni ini)
-    {
-        if (!string.IsNullOrWhiteSpace(Comment))
-        {
-            ini.SetSectionComment(Section, Comment);
-        }
-    }
-
-    public void ReadFromIni(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.ReadFromIni(ref ini, Section);
-        }
-    }
-
-    public void WriteToIni(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.WriteToIni(ref ini, Section);
-        }
-        SetComment(ref ini);
-    }
-
-    public void Update(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.Update(ref ini, Section);
-        }
-        SetComment(ref ini);
-    }
-}
-public class ConfigString : ConfigValue<string>
-{
-    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetString(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigDouble : ConfigValue<double>
-{
-    public ConfigDouble(string name, double value = 0, string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetDouble(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigBool : ConfigValue<bool>
-{
-    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetBoolean(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigInt : ConfigValue<int>
-{
-    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetInt32(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
-{
-    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
-    : base (name, defaultValue, comment)
-    {}
-
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        string enumerationStr;
-        if (!val.TryGetString(out enumerationStr) ||
-            !Enum.TryParse(enumerationStr, true, out _value) ||
-            !Enum.IsDefined(typeof(TEnum), _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
+#endregion
 
 public class StateMachine
 {
@@ -4142,68 +4258,141 @@ class State : IState
         OnLeave = onLeave;
     }
 }
-public class Logger
+
+enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
+
+/*
+Whip's ApplyGyroOverride - Last modified: 2023/11/19
+
+Takes pitch, yaw, and roll speeds relative to the gyro's backwards
+ass rotation axes. 
+*/
+void ApplyGyroOverride(Vector3D rotationSpeedPYR, List<IMyGyro> gyros, MatrixD worldMatrix)
 {
-    public static string GetHexColor(Color c)
-    {
-        return $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
-    }
-    
-    struct LogType
-    {
-        public static LogType Default = new LogType("", null, null);
-        
-        const string ColorFormat = "[color={1}]{0}[/color]";
-        const string NoColorFormat = "{0}";
-        
-        public readonly string Prefix;
-        public readonly string PrefixColorHex;
-        public readonly string TextColorHex;
-        
-        readonly string _prefixFormat;
-        readonly string _textFormat;
+    var worldRotationPYR = Vector3D.TransformNormal(rotationSpeedPYR, worldMatrix);
 
-        public LogType(string prefix, Color? prefixColor, Color? textColor)
+    foreach (var g in gyros)
+    {
+        var gyroRotationPYR = Vector3D.TransformNormal(worldRotationPYR, Matrix.Transpose(g.WorldMatrix));
+
+        g.Pitch = (float)gyroRotationPYR.X;
+        g.Yaw = (float)gyroRotationPYR.Y;
+        g.Roll = (float)gyroRotationPYR.Z;
+        g.GyroOverride = true;
+    }
+}
+
+void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyros, MatrixD worldMatrix)
+{
+    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
+    ApplyGyroOverride(rotationVec, gyros, worldMatrix);
+}
+
+/// Whip's GetRotationVector - Last modified: 2023/11/19
+/// <summary>
+/// <para>
+///     This method computes the axis-angle rotation required to align the
+///     reference world matrix with the desired forward and up vectors.
+/// </para>
+/// <para>
+///     The desired forward and up vectors are used to construct the desired
+///     target orientation relative to the current world matrix orientation.
+///     The current orientation of the craft with respect to itself will be the
+///     identity matrix, thus the error between our desired orientation and our
+///     target orientation is simply the target orientation itself:
+///     M_target = M_current * M_error =>
+///     M_target = I * M_error =>
+///     M_target = M_error
+/// </para>
+/// <para>
+///     This is designed for use with Keen's gyroscopes where:
+///     + pitch = -X rotation,
+///     + yaw   = -Y rotation,
+///     + roll  = -Z rotation
+/// </para>
+/// </summary>
+/// <remarks>
+///     Dependencies: <c>VectorMath.SafeNormalize</c>
+/// </remarks>
+/// <param name="desiredForwardVector">
+///     Desired forward direction in world frame.
+///     This is the primary constraint used to allign pitch and yaw.
+/// </param>
+/// <param name="desiredUpVector">
+///     Desired up direction in world frame.
+///     This is the secondary constraint used to align roll. 
+///     Set to <c>null</c> if roll control is not desired.
+/// </param>
+/// <param name="worldMatrix">
+///     World matrix describing current orientation.
+///     The translation part of the matrix is ignored; only the orientation matters.
+/// </param>
+/// <returns>
+///     Pitch-Yaw-Roll rotation vector to the desired orientation (rads). 
+/// </returns>
+public static Vector3D GetRotationVector(Vector3D desiredForwardVector, Vector3D? desiredUpVector, MatrixD worldMatrix)
+{
+    var transposedWm = MatrixD.Transpose(worldMatrix);
+    var forwardVector = Vector3D.Rotate(VectorMath.SafeNormalize(desiredForwardVector), transposedWm);
+
+    Vector3D leftVector = Vector3D.Zero;
+    if (desiredUpVector.HasValue)
+    {
+        desiredUpVector = Vector3D.Rotate(desiredUpVector.Value, transposedWm);
+        leftVector = Vector3D.Cross(desiredUpVector.Value, forwardVector);
+    }
+
+    Vector3D axis;
+    double angle;
+    if (!desiredUpVector.HasValue || Vector3D.IsZero(leftVector))
+    {
+        /*
+         * Simple case where we have no valid roll constraint:
+         * We merely cross the current forward vector (Vector3D.Forward) on the 
+         * forwardVector.
+         */
+        axis = new Vector3D(-forwardVector.Y, forwardVector.X, 0);
+        angle = Math.Acos(MathHelper.Clamp(-forwardVector.Z, -1.0, 1.0));
+    }
+    else
+    {
+        /*
+         * Here we need to construct the target orientation matrix so that we
+         * can extract the error from it in axis-angle representation.
+         */
+        leftVector = VectorMath.SafeNormalize(leftVector);
+        var upVector = Vector3D.Cross(forwardVector, leftVector);
+        var targetOrientation = new MatrixD()
         {
-            Prefix = prefix;
-            PrefixColorHex = prefixColor.HasValue ? GetHexColor(prefixColor.Value) : null;
-            _prefixFormat = prefixColor.HasValue ? ColorFormat : NoColorFormat;
-            TextColorHex = textColor.HasValue ? GetHexColor(textColor.Value) : null;
-            _textFormat = textColor.HasValue ? ColorFormat : NoColorFormat;
-        }
+            Forward = forwardVector,
+            Left = leftVector,
+            Up = upVector,
+        };
 
-        public void Write(StringBuilder buffer, string text)
-        {
-            if (!string.IsNullOrWhiteSpace(Prefix))
-            {
-                buffer.Append(string.Format(_prefixFormat, Prefix, PrefixColorHex)).Append(" ");
-            }
-            buffer.AppendLine(string.Format(_textFormat, text, TextColorHex));
-        }
+        axis = new Vector3D(targetOrientation.M32 - targetOrientation.M23,
+                            targetOrientation.M13 - targetOrientation.M31,
+                            targetOrientation.M21 - targetOrientation.M12);
+
+        double trace = targetOrientation.M11 + targetOrientation.M22 + targetOrientation.M33;
+        angle = Math.Acos(MathHelper.Clamp((trace - 1) * 0.5, -1.0, 1.0));
     }
 
-    Dictionary<Enum, LogType> _logTypes = new Dictionary<Enum, LogType>();
-    
-    StringBuilder _buffer;
-
-    public Logger(StringBuilder buffer)
+    Vector3D rotationVectorPYR;
+    if (Vector3D.IsZero(axis))
     {
-        _buffer = buffer;
+        /*
+         * Degenerate case where we get a zero axis. This means we are either
+         * exactly aligned or exactly anti-aligned. In the latter case, we just
+         * assume the yaw is PI to get us away from the singularity.
+         */
+        angle = forwardVector.Z < 0 ? 0 : Math.PI;
+        rotationVectorPYR = new Vector3D(0, angle, 0);
+    }
+    else
+    {
+        rotationVectorPYR = VectorMath.SafeNormalize(axis) * angle;
     }
 
-    public void RegisterType(Enum type, string prefix, Color? prefixColor = null, Color? textColor = null)
-    {
-        _logTypes[type] = new LogType(prefix, prefixColor, textColor);
-    }
-
-    public void Log(Enum type, string text)
-    {
-        LogType logType;
-        if (!_logTypes.TryGetValue(type, out logType))
-        {
-            logType = LogType.Default;
-        }
-        logType.Write(_buffer, text);
-    }
+    return rotationVectorPYR;
 }
 #endregion
