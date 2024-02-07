@@ -2,8 +2,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string Version = "95.12.0";
-const string Date = "2023/07/13";
+const string Version = "95.12.2";
+const string Date = "2024/01/28";
 const string CompatVersion = "170.0.0";
 #endregion
 
@@ -553,8 +553,8 @@ void GuidanceProcess()
     }
     else if (_broadcastRangeOverride)
     {
-        _scheduler.AddQueuedAction(() => ScaleAntennaRange(_activeAntennaRange), 0);
-        _scheduler.AddQueuedAction(BroadcastParameterMessage, 1.0 / 6.0);
+        _scheduler.AddQueuedAction(() => ScaleAntennaRange(_activeAntennaRange), 0, true);
+        _scheduler.AddQueuedAction(BroadcastParameterMessage, 1.0 / 6.0, true);
     }
 }
 
@@ -2353,7 +2353,7 @@ public class MissileStatusScreenHandler
     const float
         PrimaryTextSize = 1.5f,
         SecondaryTextSize = 1.2f,
-        BaseTextHeightPx = 37f, // 28.8
+        BaseTextHeightPx = 28.8f,
         PrimaryTextOffset = -0.5f * BaseTextHeightPx * PrimaryTextSize,
         ModeSelectLineLength = 20f,
         ModeSelectLineWidth = 6f;
@@ -2384,13 +2384,13 @@ public class MissileStatusScreenHandler
     {
         _p = program;
 
-        _secondaryTextPosOffset = new Vector2(0, -1.5f * PrimaryTextOffset);
+        _secondaryTextPosOffset = new Vector2(0, -2f * PrimaryTextOffset);
         _dropShadowOffset = new Vector2(2, 2);
 
         // Top bar
         _topBarSize = new Vector2(512, 64);
         _topBarPos = new Vector2(0, -DefaultScreenHalfSize + 32); //TODO: compute in ctor
-        _topBarTextPos = new Vector2(0, -DefaultScreenHalfSize + 32 + PrimaryTextOffset);
+        _topBarTextPos = _topBarPos + new Vector2(0, PrimaryTextOffset);
 
         // Modes
         _modeCameraSelectSize = new Vector2(130, 56);
@@ -2401,10 +2401,10 @@ public class MissileStatusScreenHandler
         _modeTurretSelectPos = new Vector2(-20, -140);
         _modeBeamRideSelectPos = new Vector2(140, -140);
 
-        float secondaryTextVeticalOffset = -0.5f * BaseTextHeightPx * SecondaryTextSize;
-        _modeCameraPos = _modeCameraSelectPos + new Vector2(0, secondaryTextVeticalOffset);
-        _modeTurretPos = _modeTurretSelectPos + new Vector2(0, secondaryTextVeticalOffset);
-        _modeBeamRidePos = _modeBeamRideSelectPos + new Vector2(0, secondaryTextVeticalOffset);
+        float secondaryTextVerticalOffset = -0.5f * BaseTextHeightPx * SecondaryTextSize;
+        _modeCameraPos = _modeCameraSelectPos + new Vector2(0, secondaryTextVerticalOffset);
+        _modeTurretPos = _modeTurretSelectPos + new Vector2(0, secondaryTextVerticalOffset);
+        _modeBeamRidePos = _modeBeamRideSelectPos + new Vector2(0, secondaryTextVerticalOffset);
 
         // Status bar
         _statusBarPos = new Vector2(0, -70);
