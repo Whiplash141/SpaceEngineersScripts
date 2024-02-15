@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 */
 
-const string VERSION = "1.12.2";
-const string DATE = "2024/01/17";
+const string VERSION = "1.12.7";
+const string DATE = "2024/02/15";
 
 #region Fields
 List<IMyShipController> Controllers
@@ -62,7 +62,7 @@ List<IMyShipController> Controllers
     }
 }
 
-public enum AccelMode { m_per_s2, G_force }
+public enum AccelUnits { m_per_s2, G_force }
 
 IMyShipController reference = null;
 
@@ -85,7 +85,8 @@ public ConfigDouble AltitudeTransitionThreshold = new ConfigDouble("Surface to S
 public ConfigBool ShowXYZAxis = new ConfigBool("Show XYZ axes in space", true);
 ConfigBool _drawTitleScreen = new ConfigBool("Draw title screen", true);
 public ConfigVector3 SunRotationAxis = new ConfigVector3("Sun rotation axis", new Vector3(0, -1, 0));
-public ConfigEnum<AccelMode> AccelerationMode = new ConfigEnum<AccelMode>("Acceleration display mode", AccelMode.m_per_s2, " Accepted values are:\n m_per_s2 or G_force");
+public ConfigEnum<AccelUnits> AccelerationMode = new ConfigEnum<AccelUnits>("Acceleration display mode", AccelUnits.m_per_s2, " Accepted values are:\n m_per_s2 or G_force");
+public ConfigDouble AltitudeOffset = new ConfigDouble("Altitude offset (m)", 0);
 
 // Colors
 public ConfigColor
@@ -140,7 +141,8 @@ Program()
         ShowXYZAxis,
         _drawTitleScreen,
         SunRotationAxis,
-        AccelerationMode
+        AccelerationMode,
+        AltitudeOffset
     );
 
     _configColor.AddValues(
@@ -442,7 +444,8 @@ class ArtificialHorizon
     {
         get
         {
-            return _surfaceAltitude >= _program.AltitudeTransitionThreshold ? _sealevelAltitude : _surfaceAltitude;
+            double altitude = _surfaceAltitude >= _program.AltitudeTransitionThreshold ? _sealevelAltitude : _surfaceAltitude;
+            return altitude + _program.AltitudeOffset;
         }
     }
 
@@ -574,6 +577,9 @@ class ArtificialHorizon
         if (Vector3D.Dot(controller.WorldMatrix.Forward, eastVec) < 0)
             _bearing = 360 - _bearing;
 
+        if (_bearing >= 359.5)
+            _bearing = 0;
+
         _verticalSpeed = VectorMath.ScalarProjection(_velocity, -_gravity);
     }
 
@@ -679,14 +685,27 @@ class ArtificialHorizon
             if (_inGravity)
             {
                 DrawArtificialHorizon(frame, screenCenter, scale, minSideLength);
-                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{Altitude:0}", $"{_bearing:0}°");
+                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{Altitude:0}", "m/s", "m", $"{_bearing:0}°");
                 DrawAltitudeWarning(frame, screenCenter, avgViewportSize, scale, surface);
             }
             else
             {
                 DrawSpace(frame, screenCenter, minSideLength * 0.5f, scale);
-                var acc = _program.AccelerationMode == AccelMode.G_force ? _acceleration / G : _acceleration; 
-                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{acc:n1}");
+                float acc;
+                string units, accFormat;
+                if (_program.AccelerationMode == AccelUnits.G_force)
+                {
+                    acc = _acceleration / G;
+                    units = "g";
+                    accFormat = "n2";
+                }
+                else
+                {
+                    acc = _acceleration;
+                    units = "m/s²";
+                    accFormat = "n1";
+                }
+                DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{acc.ToString(accFormat)}", "m/s", units);
             }
 
             // Draw orientation indicator
@@ -717,35 +736,44 @@ class ArtificialHorizon
         }
     }
 
-    void DrawTextBoxes(MySpriteDrawFrame frame, IMyTextSurface surface, Vector2 screenCenter, Vector2 screenSize, float scale, string leftText, string rightText, string topText = "")
+    void DrawTextBoxes(MySpriteDrawFrame frame, IMyTextSurface surface, Vector2 screenCenter, Vector2 screenSize, float scale, string leftText, string rightText, string leftUnits, string rightUnits, string topText = "")
     {
         Vector2 boxSize = TEXT_BOX_SIZE * scale;
         float textSize = STATUS_TEXT_SIZE * scale;
-        Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);//+ new Vector2(screenSize.X * -0.40f, boxSize.Y * 0.5f);
-        Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f); //+ new Vector2(screenSize.X * 0.40f, boxSize.Y * 0.5f);
+        Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);
+        Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);
 
-        string leftUnits = "m/s";
-        string leftTitle = $" SPD [{leftUnits}]";
+        // Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), screenSize.Y * 0.25f);
+        // Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), screenSize.Y * 0.25f);
 
-        string rightUnits = _inGravity ? "m" : (_program.AccelerationMode == AccelMode.G_force ? "g" : "m/s²");
+        float textHeight = textSize * 28.8f;
+
+        string leftTitle = "SPD";
         string rightTitle = _inGravity ? "ALT" : "ACC";
-        rightTitle = $"{rightTitle} [{rightUnits}] ";
 
-        DrawTextBox(frame, surface, boxSize, leftBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, leftText, leftTitle, TextAlignment.LEFT);
-        DrawTextBox(frame, surface, boxSize, rightBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, rightText, rightTitle, TextAlignment.RIGHT);
+        DrawTextBox(frame, surface, boxSize, leftBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, leftText, leftTitle);
+        DrawTextBox(frame, surface, boxSize, rightBoxPos, _program.TextColor, _program.TextBoxColor, _program.TextBoxBackground, textSize, rightText, rightTitle);
+
+        MySprite leftUnitSprite = MySprite.CreateText(leftUnits, "Debug", _program.TextColor, textSize * 1.0f, TextAlignment.CENTER);
+        leftUnitSprite.Position = leftBoxPos + 0.5f * Vector2.UnitY * textHeight;
+        frame.Add(leftUnitSprite);
+    
+        MySprite rightUnitSprite = MySprite.CreateText(rightUnits, "Debug", _program.TextColor, textSize * 1.0f, TextAlignment.CENTER);
+        rightUnitSprite.Position = rightBoxPos + 0.5f * Vector2.UnitY * textHeight;
+        frame.Add(rightUnitSprite);
 
         if (_inGravity)
         {
             MySprite altMode = MySprite.CreateText(AltitudeLabel, "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
-            altMode.Position = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.0f);
+            altMode.Position = rightUnitSprite.Position.Value + 1f * Vector2.UnitY * textHeight;
             frame.Add(altMode);
 
             MySprite verticalSpeedLabel = MySprite.CreateText(VERTICAL_SPEED, "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
-            verticalSpeedLabel.Position = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.0f);
+            verticalSpeedLabel.Position = leftUnitSprite.Position.Value + 1f * Vector2.UnitY * textHeight;
             frame.Add(verticalSpeedLabel);
 
             MySprite verticalSpeed = MySprite.CreateText($"{_verticalSpeed:n1}", "Debug", _program.TextColor, textSize * 0.75f, TextAlignment.CENTER);
-            verticalSpeed.Position = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 1.5f);
+            verticalSpeed.Position = leftUnitSprite.Position.Value + 1.75f * Vector2.UnitY * textHeight;
             frame.Add(verticalSpeed);
         }
 
@@ -1057,250 +1085,29 @@ new AnimationParams(-20),
 #endregion
 
 #region INCLUDES
-public static class MyIniHelper
-{
-    #region List<string>
-    /// <summary>
-    /// Deserializes a List<string> from MyIni
-    /// </summary>
-    public static void GetStringList(string section, string name, MyIni ini, List<string> list)
-    {
-        string raw = ini.Get(section, name).ToString(null);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            // Preserve contents
-            return;
-        }
 
-        list.Clear();
-        string[] split = raw.Split('\n');
-        foreach (var s in split)
-        {
-            list.Add(s);
-        }
-    }
-
-    /// <summary>
-    /// Serializes a List<string> to MyIni
-    /// </summary>
-    public static void SetStringList(string section, string name, MyIni ini, List<string> list)
-    {
-        string output = string.Join($"\n", list);
-        ini.Set(section, name, output);
-    }
-    #endregion
-    
-    #region List<int>
-    const char LIST_DELIMITER = ',';
-
-    /// <summary>
-    /// Deserializes a List<int> from MyIni
-    /// </summary>
-    public static void GetListInt(string section, string name, MyIni ini, List<int> list)
-    {
-        list.Clear();
-        string raw = ini.Get(section, name).ToString();
-        string[] split = raw.Split(LIST_DELIMITER);
-        foreach (var s in split)
-        {
-            int i;
-            if (int.TryParse(s, out i))
-            {
-                list.Add(i);
-            }
-        }
-    }
-    
-    /// <summary>
-    /// Serializes a List<int> to MyIni
-    /// </summary>
-    public static void SetListInt(string section, string name, MyIni ini, List<int> list)
-    {
-        string output = string.Join($"{LIST_DELIMITER}", list);
-        ini.Set(section, name, output);
-    }
-    #endregion
-
-    #region Vector2
-        /// <summary>
-    /// Adds a Vector3D to a MyIni object
-    /// </summary>
-    public static void SetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
-    {
-        string vectorString = string.Format("{0}, {1}", vector.X, vector.Y);
-        ini.Set(sectionName, vectorName, vectorString);
-    }
-
-    /// <summary>
-    /// Parses a MyIni object for a Vector3D
-    /// </summary>
-    public static Vector2 GetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
-    {
-        string vectorString = ini.Get(sectionName, vectorName).ToString("null");
-        string[] stringSplit = vectorString.Split(',');
-
-        float x, y;
-        if (stringSplit.Length != 2)
-        {
-            if (defaultVector.HasValue)
-                return defaultVector.Value;
-            else
-                return default(Vector2);
-        }
-
-        float.TryParse(stringSplit[0].Trim(), out x);
-        float.TryParse(stringSplit[1].Trim(), out y);
-
-        return new Vector2(x, y);
-    }
-    #endregion
-
-    #region Vector3D
-    /// <summary>
-    /// Adds a Vector3D to a MyIni object
-    /// </summary>
-    public static void SetVector3D(string sectionName, string vectorName, ref Vector3D vector, MyIni ini)
-    {
-        ini.Set(sectionName, vectorName, vector.ToString());
-    }
-
-    /// <summary>
-    /// Parses a MyIni object for a Vector3D
-    /// </summary>
-    public static Vector3D GetVector3D(string sectionName, string vectorName, MyIni ini, Vector3D? defaultVector = null)
-    {
-        var vector = Vector3D.Zero;
-        if (Vector3D.TryParse(ini.Get(sectionName, vectorName).ToString(), out vector))
-            return vector;
-        else if (defaultVector.HasValue)
-            return defaultVector.Value;
-        return default(Vector3D);
-    }
-    #endregion
-
-    #region ColorChar
-    /// <summary>
-    /// Adds a color character to a MyIni object
-    /// </summary>
-    public static void SetColorChar(string sectionName, string charName, char colorChar, MyIni ini)
-    {
-        int rgb = (int)colorChar - 0xe100;
-        int b = rgb & 7;
-        int g = rgb >> 3 & 7;
-        int r = rgb >> 6 & 7;
-        string colorString = $"{r}, {g}, {b}";
-
-        ini.Set(sectionName, charName, colorString);
-    }
-
-    /// <summary>
-    /// Parses a MyIni for a color character 
-    /// </summary>
-    public static char GetColorChar(string sectionName, string charName, MyIni ini, char defaultChar = (char)(0xe100))
-    {
-        string rgbString = ini.Get(sectionName, charName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0;
-        if (rgbSplit.Length != 3)
-            return defaultChar;
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-
-        r = MathHelper.Clamp(r, 0, 7);
-        g = MathHelper.Clamp(g, 0, 7);
-        b = MathHelper.Clamp(b, 0, 7);
-
-        return (char)(0xe100 + (r << 6) + (g << 3) + b);
-    }
-    #endregion
-
-    #region Color
-    /// <summary>
-    /// Adds a Color to a MyIni object
-    /// </summary>
-    public static void SetColor(string sectionName, string itemName, Color color, MyIni ini, bool writeAlpha = true)
-    {
-        if (writeAlpha)
-        {
-            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}, {3}", color.R, color.G, color.B, color.A));
-        }
-        else
-        {
-            ini.Set(sectionName, itemName, string.Format("{0}, {1}, {2}", color.R, color.G, color.B));
-        }
-    }
-
-    /// <summary>
-    /// Parses a MyIni for a Color
-    /// </summary>
-    public static Color GetColor(string sectionName, string itemName, MyIni ini, Color? defaultChar = null)
-    {
-        string rgbString = ini.Get(sectionName, itemName).ToString("null");
-        string[] rgbSplit = rgbString.Split(',');
-
-        int r = 0, g = 0, b = 0, a = 0;
-        if (rgbSplit.Length < 3)
-        {
-            if (defaultChar.HasValue)
-                return defaultChar.Value;
-            else
-                return Color.Transparent;
-        }
-
-        int.TryParse(rgbSplit[0].Trim(), out r);
-        int.TryParse(rgbSplit[1].Trim(), out g);
-        int.TryParse(rgbSplit[2].Trim(), out b);
-        bool hasAlpha = rgbSplit.Length >= 4 && int.TryParse(rgbSplit[3].Trim(), out a);
-        if (!hasAlpha)
-            a = 255;
-
-        r = MathHelper.Clamp(r, 0, 255);
-        g = MathHelper.Clamp(g, 0, 255);
-        b = MathHelper.Clamp(b, 0, 255);
-        a = MathHelper.Clamp(a, 0, 255);
-
-        return new Color(r, g, b, a);
-    }
-    #endregion
-}
 public static class VectorMath
 {
     /// <summary>
-    /// Normalizes a vector only if it is non-zero and non-unit
+    /// Computes cosine of the angle between 2 vectors.
     /// </summary>
-    public static Vector3D SafeNormalize(Vector3D a)
-    {
-        if (Vector3D.IsZero(a))
-            return Vector3D.Zero;
-
-        if (Vector3D.IsUnit(ref a))
-            return a;
-
-        return Vector3D.Normalize(a);
-    }
-
-    /// <summary>
-    /// Reflects vector a over vector b with an optional rejection factor
-    /// </summary>
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1)
-    {
-        Vector3D proj = Projection(a, b);
-        Vector3D rej = a - proj;
-        return proj - rej * rejectionFactor;
-    }
-
-    /// <summary>
-    /// Rejects vector a on vector b
-    /// </summary>
-    public static Vector3D Rejection(Vector3D a, Vector3D b)
+    public static double CosBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
 
-        return a - a.Dot(b) / b.LengthSquared() * b;
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(CosBetween(a, b));
     }
 
     /// <summary>
@@ -1318,6 +1125,17 @@ public static class VectorMath
     }
 
     /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
     /// Scalar projection of a onto b
     /// </summary>
     public static double ScalarProjection(Vector3D a, Vector3D b)
@@ -1329,39 +1147,6 @@ public static class VectorMath
             return a.Dot(b);
 
         return a.Dot(b) / b.Length();
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-    }
-
-    /// <summary>
-    /// Computes cosine of the angle between 2 vectors.
-    /// </summary>
-    public static double CosBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
-    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
-    /// </summary>
-    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
-    {
-        double dot = Vector3D.Dot(a, b);
-        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
-        return Math.Abs(dot) * dot > num;
     }
 }
 
@@ -1940,7 +1725,7 @@ public static Vector2 DrawTitleBar(ref MySpriteDrawFrame frame, IMyTextSurface s
 /// <param name="controllers">List of ship controlers</param>
 /// <param name="lastController">Last actively controlled controller</param>
 /// <returns>Actively controlled ship controller or null if none is controlled</returns>
-IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
 {
     IMyShipController currentlyControlled = null;
     foreach (IMyShipController ctrl in controllers)
