@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.9.0";
-const string DATE = "2023/08/25";
+const string VERSION = "1.10.1";
+const string DATE = "2024/02/22";
 
 
 const NormalAxis DEFAULT_NORMAL_AXIS = NormalAxis.X;
@@ -59,11 +59,21 @@ const string INI_KEY_COLOR_GYRO = "Gyro";
 const string INI_KEY_COLOR_THRUST = "Thrust";
 const string INI_KEY_COLOR_BG = "Background";
 
-const string INI_SECTION_TEXT_CONFIG = "SIMPL - Display Config";
+const string INI_SCREEN_ID_TEMPLATE = " - Screen {0}";
+
+const string INI_SECTION_LEGEND = "SIMPL - Legend Config{0}";
+const string INI_SECTION_TEXT_CONFIG_TEMPLATE = "SIMPL - Display Config{0} - View {1}";
+
+const string INI_SECTION_TEXT_CONFIG_COMPAT = "SIMPL - Display Config{0}";
+
+const string INI_KEY_LEGEND_SCALE = "Legend Scale";
+const string INI_KEY_LEGEND_POS = "Position";
+
 const string INI_KEY_NORMAL = "View axis";
 const string INI_KEY_ROTATION = "Rotation (deg)";
 const string INI_KEY_SCALE = "Scale";
-const string INI_KEY_LEGEND_SCALE = "Legend Scale";
+const string INI_KEY_VIEW_POS = "Position";
+
 const string INI_KEY_NORMAL_COMPAT = "Normal axis";
 const string INI_KEY_AUTOSCALE_COMPAT = "Autoscale layout";
 const string INI_KEY_SCALE_COMPAT = "Manual layout scale";
@@ -71,6 +81,8 @@ const string INI_KEY_INVERT_COMPAT = "Flip horizontally";
 
 const string INI_SECTION_TEXT_SURF = "SIMPL - Text Surface Config";
 const string INI_KEY_TEXT_SURF_TEMPLATE = "Show on screen {0}";
+const string INI_KEY_NUM_VIEWS = "Number of views";
+const string INI_KEY_NUM_VIEWS_TEMPLATE = "Number of views for screen {0}";
 
 const string INI_COMMENT_NORMAL = " View axis values: X, Y, Z, NegativeX, NegativeY, NegativeZ";
 
@@ -84,11 +96,13 @@ ConfigBool _autoscan = new ConfigBool(INI_KEY_AUTO_SCAN, true);
 
 ConfigColor _bgColor = new ConfigColor(INI_KEY_COLOR_BG, new Color(0, 0, 0));
 
+ConfigFloat _legendScale = new ConfigFloat(INI_KEY_LEGEND_SCALE, DEFAULT_LEGEND_SCALE);
+ConfigVector2 _legendPosition = new ConfigVector2(INI_KEY_LEGEND_POS, new Vector2(-1f, -1f), " Elements should range from -1 to 1 where 0 indicates centered");
+
 ConfigEnum<NormalAxis> _normal = new ConfigEnum<NormalAxis>(INI_KEY_NORMAL, DEFAULT_NORMAL_AXIS, INI_COMMENT_NORMAL);
 ConfigFloat _rotation = new ConfigFloat(INI_KEY_ROTATION, DEFAULT_ROTATION);
-ConfigFloat _legendScale = new ConfigFloat(INI_KEY_LEGEND_SCALE, DEFAULT_LEGEND_SCALE);
-
 ConfigNullable<float, ConfigFloat> _screenScale = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE), "auto");
+ConfigVector2 _viewPosition = new ConfigVector2(INI_KEY_VIEW_POS, new Vector2(0, 0), " Elements should range from -1 to 1 where 0 indicates centered");
 
 ConfigDeprecated<bool, ConfigBool> _autoscaleCompat = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(INI_KEY_AUTOSCALE_COMPAT, true));
 ConfigDeprecated<float, ConfigFloat> _screenScaleCompat = new ConfigDeprecated<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE_COMPAT, 1f));
@@ -100,7 +114,10 @@ ConfigInt _cols = new ConfigInt(INI_KEY_MULTISCREEN_COLS, 1);
 
 ConfigSection _sectionGeneral = new ConfigSection(INI_SECTION_NAME);
 ConfigSection _sectionColors = new ConfigSection(INI_SECTION_COLOR, INI_COMMENT_COLOR);
-ConfigSection _sectionTextConfig = new ConfigSection(INI_SECTION_TEXT_CONFIG);
+ConfigSection 
+    _sectionLegend = new ConfigSection(""),
+    _sectionDisplay = new ConfigSection(""),
+    _sectionDisplayCompat = new ConfigSection("");
 ConfigSection _sectionMultiscreen = new ConfigSection(INI_SECTION_MULTISCREEN);
 
 void ConfigureIni()
@@ -111,12 +128,12 @@ void ConfigureIni()
             _screenScale.Value = scale;
         }
     };
-    
+
     _normalCompat.Callback = (normal) =>
     {
         _normal.Value = normal;
     };
-    
+
     _invertCompat.Callback = (invert) =>
     {
         if (invert)
@@ -135,9 +152,32 @@ void ConfigureIni()
         _planarMap.ColorWeapon,
         _planarMap.ColorPower,
         _planarMap.ColorGyro,
-        _planarMap.ColorThrust);
+        _planarMap.ColorThrust
+    );
 
-    _sectionTextConfig.AddValues(_autoscaleCompat, _screenScaleCompat, _normalCompat, _invertCompat, _normal, _rotation, _screenScale, _legendScale);
+    _sectionLegend.AddValues(
+        _legendScale,
+        _legendPosition
+    );
+
+    _sectionDisplay.AddValues(
+        _normal, 
+        _rotation, 
+        _screenScale, 
+        _viewPosition
+    );
+
+    _sectionDisplayCompat.AddValues(
+        _autoscaleCompat, 
+        _screenScaleCompat, 
+        _normalCompat, 
+        _invertCompat, 
+        _normal, 
+        _rotation,
+        _screenScale,
+        _viewPosition
+    );
+
     _sectionMultiscreen.AddValues(_rows, _cols);
 }
 
@@ -278,49 +318,94 @@ void Main(string arg, UpdateType updateSource)
 }
 
 #region Block Fetching
-struct TextSurfaceConfig
+class TextSurfaceConfig
 {
-    public readonly ISpriteSurface Surface;
-    public readonly NormalAxis Normal;
-    public readonly float RotationRad;
-    public readonly float? Scale;
-    public readonly float LegendScale;
+    public struct ViewConfig
+    {
+        public NormalAxis Normal;
+        public float RotationRad;
+        public float? Scale;
+        public Vector2 RelativePosition;
+    }
 
-    public TextSurfaceConfig(ISpriteSurface surface, NormalAxis normal, float rotationDeg, float? scale, float legendScale)
+    public readonly ISpriteSurface Surface;
+    public readonly List<ViewConfig> Views = new List<ViewConfig>();
+    public float LegendScale;
+    public Vector2 LegendRelativePos;
+
+    public TextSurfaceConfig(ISpriteSurface surface)
     {
         Surface = surface;
-        Normal = normal;
-        RotationRad = MathHelper.ToRadians(rotationDeg);
-        Scale = scale;
-        LegendScale = legendScale;
+    }
+
+    public void AddView(NormalAxis normal, float rotationDeg, float? scale, Vector2 relativePosition)
+    {
+        var view = new ViewConfig
+        {
+            Normal = normal,
+            RotationRad = MathHelper.ToRadians(rotationDeg),
+            Scale = scale,
+            RelativePosition = relativePosition
+        };
+
+        Views.Add(view);
     }
 }
 
-void GetSurfaceConfigValues(IMyTerminalBlock b, bool hasMulltipleScreens, int surfaceIdx, out bool multiscreen)
+void GetSurfaceConfigValues(IMyTerminalBlock b, int? surfaceIdx, int numViews, TextSurfaceConfig config)
 {
-    multiscreen = false;
-
-    string sectionName = INI_SECTION_TEXT_CONFIG;
-    if (hasMulltipleScreens)
+    string surfName;
+    if (surfaceIdx.HasValue)
     {
-        sectionName = string.Format("{0} - Screen {1}", INI_SECTION_TEXT_CONFIG, surfaceIdx);
+        surfName = string.Format(INI_SCREEN_ID_TEMPLATE, surfaceIdx.Value);
     }
-    else if (_ini.ContainsSection(INI_SECTION_MULTISCREEN))
+    else
     {
-        multiscreen = true;
-        _sectionMultiscreen.Update(ref _ini); // TODO: clamp
+        surfName = "";
+    }
+    
+    string legendSection = string.Format(INI_SECTION_LEGEND, surfName);
+
+
+    for (int ii = 1; ii <= numViews; ++ii)
+    {
+        string displaySection = string.Format(INI_SECTION_TEXT_CONFIG_TEMPLATE, surfName, ii);
+        _sectionDisplay.Section = displaySection;
+
+        if (ii == 1)
+        {
+            string compatName = string.Format(INI_SECTION_TEXT_CONFIG_COMPAT, surfName);
+
+            if (_ini.ContainsSection(compatName))
+            {
+                _legendScale.ReadFromIni(ref _ini, compatName);
+                _sectionDisplayCompat.Section = compatName;
+                _sectionDisplayCompat.ReadFromIni(ref _ini);
+
+                _ini.DeleteSection(compatName);
+
+                _legendScale.WriteToIni(ref _ini, legendSection);
+                _sectionDisplayCompat.Section = displaySection;
+                _sectionDisplayCompat.WriteToIni(ref _ini);
+            }
+        }
+
+        _sectionLegend.Section = legendSection;
+        _sectionDisplay.Update(ref _ini);
+
+        config.AddView(_normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _viewPosition);
     }
 
-    _sectionTextConfig.Section = sectionName;
-    _sectionTextConfig.Update(ref _ini);
+    _sectionLegend.Update(ref _ini);
+
+    config.LegendScale = _legendScale;
+    config.LegendRelativePos = _legendPosition;
 }
 
 bool CollectScreens(IMyTerminalBlock b)
 {
     if (!b.IsSameConstructAs(Me))
         return false;
-
-    bool multiscreen;
 
     var tp = b as IMyTextPanel;
     var tsp = b as IMyTextSurfaceProvider;
@@ -338,47 +423,70 @@ bool CollectScreens(IMyTerminalBlock b)
 
     if (tp != null)
     {
-        GetSurfaceConfigValues(b, false, 0, out multiscreen);
-        ISpriteSurface surf;
-        if (multiscreen && (_rows > 1 || _cols > 1))
+        string viewsKey = INI_KEY_NUM_VIEWS;
+        int numViews = _ini.Get(INI_SECTION_TEXT_SURF, INI_KEY_NUM_VIEWS).ToInt32(1);
+        _ini.Set(INI_SECTION_TEXT_SURF, viewsKey, numViews);
+
+        if (numViews > 0)
         {
-            surf = new MultiScreenSpriteSurface(tp, _rows, _cols, this);
+            bool multiscreen = _ini.ContainsSection(INI_SECTION_MULTISCREEN);
+            if (multiscreen)
+            {
+                _sectionMultiscreen.Update(ref _ini); // TODO: clamp
+            }
+
+            ISpriteSurface surf;
+            if (multiscreen && (_rows > 1 || _cols > 1))
+            {
+                surf = new MultiScreenSpriteSurface(tp, _rows, _cols, this);
+            }
+            else
+            {
+                surf = new SingleScreenSpriteSurface(tp);
+            }
+
+            var config = new TextSurfaceConfig(surf);
+            GetSurfaceConfigValues(b, null, numViews, config);
+
+            _textSurfaces.Add(config);
         }
-        else
-        {
-            surf = new SingleScreenSpriteSurface(tp);
-        }
 
-        _textSurfaces.Add(new TextSurfaceConfig(surf, _normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _legendScale));
-
-        string output = _ini.ToString();
-        if (!string.Equals(output, b.CustomData))
-            b.CustomData = output;
-
-        return false;
     }
     else if (tsp != null)
     {
         int surfaceCount = tsp.SurfaceCount;
         for (int i = 0; i < surfaceCount; ++i)
         {
-            string iniKey = string.Format(INI_KEY_TEXT_SURF_TEMPLATE, i);
-            bool display = _ini.Get(INI_SECTION_TEXT_SURF, iniKey).ToBoolean(i == 0);
-            _ini.Set(INI_SECTION_TEXT_SURF, iniKey, display);
+            int numViews = i == 0 ? 1 : 0;
 
-            if (display)
+            // Compatability code
+            string displayKey = string.Format(INI_KEY_TEXT_SURF_TEMPLATE, i);
+            bool legacyDisplay = _ini.Get(INI_SECTION_TEXT_SURF, displayKey).ToBoolean(i == 0);
+            _ini.Delete(INI_SECTION_TEXT_SURF, displayKey);
+            if (legacyDisplay && numViews < 1)
             {
-                GetSurfaceConfigValues(b, true, i, out multiscreen);
+                numViews = 1;
+            }
+
+            string viewsKey = string.Format(INI_KEY_NUM_VIEWS_TEMPLATE, i);
+            numViews = _ini.Get(INI_SECTION_TEXT_SURF, viewsKey).ToInt32(numViews);
+            _ini.Set(INI_SECTION_TEXT_SURF, viewsKey, numViews);
+
+            if (numViews > 0)
+            {
                 var surf = new SingleScreenSpriteSurface(tsp.GetSurface(i));
-                _textSurfaces.Add(new TextSurfaceConfig(surf, _normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _legendScale));
+                var config = new TextSurfaceConfig(surf);
+                GetSurfaceConfigValues(b, i, numViews, config);
+                _textSurfaces.Add(config);
             }
         }
 
-        string output = _ini.ToString();
-        if (!string.Equals(output, b.CustomData))
-            b.CustomData = output;
+    }
 
-        return false;
+    string output = _ini.ToString();
+    if (!string.Equals(output, b.CustomData))
+    {
+        b.CustomData = output;
     }
 
     return false;
@@ -664,16 +772,11 @@ public IEnumerator<float> SpriteDrawStateMachine()
     {
         TextSurfaceConfig config = _textSurfaces[jj];
         ISpriteSurface surf = config.Surface;
-        NormalAxis normal = config.Normal & NormalAxis.Axes;
-        float rotation = config.RotationRad;
-        bool autoscale = !config.Scale.HasValue;
-        float scale = config.Scale.HasValue ? config.Scale.Value : 1;
-        float legendScale = config.LegendScale;
-        bool invert = (config.Normal & NormalAxis.Negative) != 0;
+
         surf.ScriptBackgroundColor = _bgColor;
 
         Vector2 screenCenter = surf.TextureSize * 0.5f;
-        Matrix rotationMatrix = CreateRotMatrix(rotation);
+        Vector2 halfSurface = surf.SurfaceSize * 0.5f;
 
         if (!_blockInfoStored)
         {
@@ -688,77 +791,91 @@ public IEnumerator<float> SpriteDrawStateMachine()
             surf.Add(new MySprite());
         }
 
-        List<BlockStatusSpriteCreator> statusSpriteCreators = null;
-        QuadTree quadTree = null;
-        switch (normal)
+        foreach (var view in config.Views)
         {
-            case NormalAxis.X:
-                statusSpriteCreators = _planarMap.StatusSpriteCreatorsX;
-                quadTree = _planarMap.QuadTreeXNormal;
-                break;
-            case NormalAxis.Y:
-                statusSpriteCreators = _planarMap.StatusSpriteCreatorsY;
-                quadTree = _planarMap.QuadTreeYNormal;
-                break;
-            case NormalAxis.Z:
-                statusSpriteCreators = _planarMap.StatusSpriteCreatorsZ;
-                quadTree = _planarMap.QuadTreeZNormal;
-                break;
-        }
+            // TODO: Fix the percentages
 
-        if (autoscale)
-        {
-            float x = (float)quadTree.MaxRows;
-            float y = (float)quadTree.MaxColumns;
-            float cos = Math.Abs(rotationMatrix.M11);
-            float sin = Math.Abs(rotationMatrix.M12);
+            NormalAxis normal = view.Normal & NormalAxis.Axes;
+            float rotation = view.RotationRad;
+            bool autoscale = !view.Scale.HasValue;
+            float scale = view.Scale.HasValue ? view.Scale.Value : 1;
+            bool invert = (view.Normal & NormalAxis.Negative) != 0;
+            Vector2 position = screenCenter + view.RelativePosition * halfSurface;
 
-            float width = x * cos + y * sin;
-            float height = x * sin + y * cos;
-            Vector2 baseSize = new Vector2(width, height);
-            Vector2 scaleVec = surf.SurfaceSize / baseSize;
-            scale = (float)Math.Floor(Math.Min(scaleVec.X, scaleVec.Y));
-        }
+            Matrix rotationMatrix = CreateRotMatrix(rotation);
 
-        for (int ii = 0; ii < quadTree.FinishedNodes.Count; ++ii)
-        {
-            var leaf = quadTree.FinishedNodes[ii];
-            quadTree.AddSpriteFromQuadTreeLeaf(surf, normal, invert, scale, rotation, _planarMap, leaf, ref screenCenter, ref rotationMatrix);
-
-            if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
+            List<BlockStatusSpriteCreator> statusSpriteCreators = null;
+            QuadTree quadTree = null;
+            switch (normal)
             {
-                yield return 100f * (jj + (float)(ii + 1) / (quadTree.FinishedNodes.Count + statusSpriteCreators.Count)) / _textSurfaces.Count;
+                case NormalAxis.X:
+                    statusSpriteCreators = _planarMap.StatusSpriteCreatorsX;
+                    quadTree = _planarMap.QuadTreeXNormal;
+                    break;
+                case NormalAxis.Y:
+                    statusSpriteCreators = _planarMap.StatusSpriteCreatorsY;
+                    quadTree = _planarMap.QuadTreeYNormal;
+                    break;
+                case NormalAxis.Z:
+                    statusSpriteCreators = _planarMap.StatusSpriteCreatorsZ;
+                    quadTree = _planarMap.QuadTreeZNormal;
+                    break;
             }
-        }
 
-        for (int ii = 0; ii < statusSpriteCreators.Count; ++ii)
-        {
-            statusSpriteCreators[ii].CreateSprite(surf, normal, scale, rotation, invert, ref screenCenter, ref rotationMatrix);
-
-            if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
+            if (autoscale)
             {
-                yield return 100f * (jj + (float)(ii + 1 + quadTree.FinishedNodes.Count) / (quadTree.FinishedNodes.Count + statusSpriteCreators.Count)) / _textSurfaces.Count;
+                float x = (float)quadTree.MaxRows;
+                float y = (float)quadTree.MaxColumns;
+                float cos = Math.Abs(rotationMatrix.M11);
+                float sin = Math.Abs(rotationMatrix.M12);
+
+                float width = x * cos + y * sin;
+                float height = x * sin + y * cos;
+                Vector2 baseSize = new Vector2(width, height);
+                Vector2 scaleVec = surf.SurfaceSize / baseSize;
+                scale = (float)Math.Floor(Math.Min(scaleVec.X, scaleVec.Y));
             }
+
+            for (int ii = 0; ii < quadTree.FinishedNodes.Count; ++ii)
+            {
+                var leaf = quadTree.FinishedNodes[ii];
+                quadTree.AddSpriteFromQuadTreeLeaf(surf, normal, invert, scale, rotation, _planarMap, leaf, ref position, ref rotationMatrix);
+
+                if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
+                {
+                    yield return 100f * (jj + (float)(ii + 1) / (quadTree.FinishedNodes.Count + statusSpriteCreators.Count)) / _textSurfaces.Count;
+                }
+            }
+
+            for (int ii = 0; ii < statusSpriteCreators.Count; ++ii)
+            {
+                statusSpriteCreators[ii].CreateSprite(surf, normal, scale, rotation, invert, ref position, ref rotationMatrix);
+
+                if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
+                {
+                    yield return 100f * (jj + (float)(ii + 1 + quadTree.FinishedNodes.Count) / (quadTree.FinishedNodes.Count + statusSpriteCreators.Count)) / _textSurfaces.Count;
+                }
+            }
+
+            switch (normal)
+            {
+                case NormalAxis.X:
+                    _spritesX += (1 + surf.SpriteCount);
+                    break;
+                case NormalAxis.Y:
+                    _spritesY += (1 + surf.SpriteCount);
+                    break;
+                case NormalAxis.Z:
+                    _spritesZ += (1 + surf.SpriteCount);
+                    break;
+            }
+
         }
 
-        _legend.GenerateSprites(surf, legendScale);
+        _legend.GenerateSprites(surf, screenCenter + config.LegendRelativePos * halfSurface, config.LegendScale);
 
-        switch (normal)
-        {
-            case NormalAxis.X:
-                _spritesX += (1 + surf.SpriteCount);
-                break;
-            case NormalAxis.Y:
-                _spritesY += (1 + surf.SpriteCount);
-                break;
-            case NormalAxis.Z:
-                _spritesZ += (1 + surf.SpriteCount);
-                break;
-        }
-
+        // Draw max of one surface per tick
         surf.Draw();
-
-        // Only one screen per tick
         yield return 100f * (jj + 1) / _textSurfaces.Count;
     }
 
@@ -1039,7 +1156,6 @@ public struct LegendItem
 public class Legend
 {
     Dictionary<string, LegendItem> _legendItems = new Dictionary<string, LegendItem>();
-    StringBuilder _sb = new StringBuilder();
 
     Color _textColor = new Color(100, 100, 100);
     float _legendSquareSize;
@@ -1056,11 +1172,10 @@ public class Legend
         _legendSquareSize = fontSize * BASE_TEXT_HEIGHT_PX;
     }
 
-    public void GenerateSprites(ISpriteSurface surf, float scale)
+    public void GenerateSprites(ISpriteSurface surf, Vector2 topLeftPos, float scale)
     {
         Vector2 textVerticalOffset = TEXT_OFFSET_BASE * _legendFontSize * scale;
-        Vector2 legendPosition = Vector2.One * (_legendSquareSize * scale * 0.5f + 4f);
-        legendPosition += (surf.TextureSize - surf.SurfaceSize) * 0.5f;
+        Vector2 legendPosition = topLeftPos + Vector2.One * (_legendSquareSize * scale * 0.5f + 4f);
         foreach (var kvp in _legendItems)
         {
             var item = kvp.Value;
@@ -2629,6 +2744,40 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
     public override string ToString()
     {
         return HasValue ? Value.ToString() : NullString;
+    }
+}
+
+public class ConfigVector2 : ConfigValue<Vector2>
+{
+    public ConfigVector2(string name, Vector2 value = default(Vector2), string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        // Source formatting example: {X:2.75 Y:-14.4}
+        string source = val.ToString("");
+        int xIndex = source.IndexOf("X:");
+        int yIndex = source.IndexOf("Y:");
+        int closingBraceIndex = source.IndexOf("}");
+        if (xIndex == -1 || yIndex == -1 || closingBraceIndex == -1)
+        {
+            SetDefault();
+            return false;
+        }
+
+        Vector2 vec = default(Vector2);
+        string xStr = source.Substring(xIndex + 2, yIndex - (xIndex + 2));
+        if (!float.TryParse(xStr, out vec.X))
+        {
+            SetDefault();
+            return false;
+        }
+        string yStr = source.Substring(yIndex + 2, closingBraceIndex - (yIndex + 2));
+        if (!float.TryParse(yStr, out vec.Y))
+        {
+            SetDefault();
+            return false;
+        }
+        _value = vec;
+        return true;
     }
 }
 #endregion
