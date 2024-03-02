@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.6.1";
-const string Date = "2023/07/13";
+const string Version = "35.6.3";
+const string Date = "2024/03/01";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -1050,15 +1050,17 @@ class RadarSurface
         MySprite sprite;
         Vector2 halfScreenSize = viewportSize * 0.5f;
         float titleBarHeight = TitleBarHeight * scale;
+        float titleTextSize = TitleTextSize * scale;
 
+        Vector2 titleBarPos = screenCenter + new Vector2(0f, -halfScreenSize.Y + titleBarHeight * 0.5f);
         sprite = MySprite.CreateSprite("SquareSimple",
-            screenCenter + new Vector2(0f, -halfScreenSize.Y + titleBarHeight * 0.5f),
+            titleBarPos,
             new Vector2(viewportSize.X, titleBarHeight));
         sprite.Color = TitleBarColor;
         surf.Add(sprite);
 
-        sprite = MySprite.CreateText($"WMI Radar System", Font, TextColor, scale * TitleTextSize, TextAlignment.CENTER);
-        sprite.Position = screenCenter + new Vector2(0, -halfScreenSize.Y + 4.25f * scale);
+        sprite = MySprite.CreateText($"WMI Radar System", Font, TextColor, titleTextSize, TextAlignment.CENTER);
+        sprite.Position = titleBarPos + new Vector2(0, -titleTextSize * SizeToPx * 0.5f);
         surf.Add(sprite);
 
         // Ship location
@@ -1637,11 +1639,7 @@ class RadarRunningScreenManager
     readonly Color _darkGrey = new Color(100, 100, 100);
     readonly Color _black = Color.Black;
 
-    const TextAlignment Center = TextAlignment.CENTER;
-    const SpriteType Texture = SpriteType.TEXTURE;
-    const float TitleBarHeightPx = 64f;
     const float TextSize = 1.3f;
-    const float BaseTextHeightPx = 37f;
     const float SpriteScale = 1.5f;
     const string Font = "Debug";
     const string TitleFormat = "Whip's Turret Radar - v{0}";
@@ -1669,31 +1667,31 @@ class RadarRunningScreenManager
     }
 
     AnimationParams[] _animSequence = new AnimationParams[] {
-new AnimationParams(  0f,   0,   0, 140),
-new AnimationParams( 15f,   0,   0, 120),
-new AnimationParams( 30f,   0,   0, 100),
-new AnimationParams( 45f, 255,   0,  80), // contact 1
-new AnimationParams( 60f, 245,   0,  60),
-new AnimationParams( 75f, 220,   0,  40),
-new AnimationParams( 90f, 200,   0,  20),
-new AnimationParams(105f, 180,   0,   0),
-new AnimationParams(120f, 160,   0,   0),
-new AnimationParams(135f, 140, 255,   0), // contact 2
-new AnimationParams(150f, 120, 245,   0),
-new AnimationParams(165f, 100, 220,   0),
-new AnimationParams(180f,  80, 200,   0),
-new AnimationParams(195f,  60, 180,   0),
-new AnimationParams(210f,  40, 160,   0),
-new AnimationParams(225f,  20, 140,   0),
-new AnimationParams(240f,   0, 120,   0),
-new AnimationParams(255f,   0, 100,   0),
-new AnimationParams(270f,   0,  80, 255), // contact 3
-new AnimationParams(285f,   0,  60, 245),
-new AnimationParams(300f,   0,  40, 220),
-new AnimationParams(315f,   0,  20, 200),
-new AnimationParams(330f,   0,   0, 180),
-new AnimationParams(345f,   0,   0, 160),
-};
+        new AnimationParams(  0f,   0,   0, 140),
+        new AnimationParams( 15f,   0,   0, 120),
+        new AnimationParams( 30f,   0,   0, 100),
+        new AnimationParams( 45f, 255,   0,  80), // contact 1
+        new AnimationParams( 60f, 245,   0,  60),
+        new AnimationParams( 75f, 220,   0,  40),
+        new AnimationParams( 90f, 200,   0,  20),
+        new AnimationParams(105f, 180,   0,   0),
+        new AnimationParams(120f, 160,   0,   0),
+        new AnimationParams(135f, 140, 255,   0), // contact 2
+        new AnimationParams(150f, 120, 245,   0),
+        new AnimationParams(165f, 100, 220,   0),
+        new AnimationParams(180f,  80, 200,   0),
+        new AnimationParams(195f,  60, 180,   0),
+        new AnimationParams(210f,  40, 160,   0),
+        new AnimationParams(225f,  20, 140,   0),
+        new AnimationParams(240f,   0, 120,   0),
+        new AnimationParams(255f,   0, 100,   0),
+        new AnimationParams(270f,   0,  80, 255), // contact 3
+        new AnimationParams(285f,   0,  60, 245),
+        new AnimationParams(300f,   0,  40, 220),
+        new AnimationParams(315f,   0,  20, 200),
+        new AnimationParams(330f,   0,   0, 180),
+        new AnimationParams(345f,   0,   0, 160),
+    };
 
     bool _clearSpriteCache = false;
     IMyTextSurface _surface = null;
@@ -1732,7 +1730,7 @@ new AnimationParams(345f,   0,   0, 160),
             DrawContacts(frame, pos, minScale * SpriteScale, anim.Alpha1, anim.Alpha2, anim.Alpha3);
             DrawRadarSweep(frame, pos, minScale * SpriteScale, angle);
 
-            DrawTitleBar(_surface, frame, minScale);
+            DrawTitleBar(ref frame, _surface, _topBarColor, _white, _titleText, minScale, textSize: TextSize);
         }
     }
 
@@ -1742,36 +1740,6 @@ new AnimationParams(345f,   0,   0, 160),
     }
 
     #region Draw Helper Functions
-    void DrawTitleBar(IMyTextSurface surface, MySpriteDrawFrame frame, float scale)
-    {
-        float titleBarHeight = scale * TitleBarHeightPx;
-        Vector2 topLeft = 0.5f * (surface.TextureSize - surface.SurfaceSize);
-        var titleBarSize = new Vector2(surface.TextureSize.X, titleBarHeight);
-        Vector2 titleBarPos = topLeft + new Vector2(surface.TextureSize.X * 0.5f, titleBarHeight * 0.5f);
-        Vector2 titleBarTextPos = topLeft + new Vector2(surface.TextureSize.X * 0.5f, 0.5f * (titleBarHeight - scale * BaseTextHeightPx));
-
-        // Title bar
-        frame.Add(new MySprite(
-            Texture,
-            "SquareSimple",
-            titleBarPos,
-            titleBarSize,
-            _topBarColor,
-            null,
-            Center));
-
-        // Title bar text
-        frame.Add(new MySprite(
-            SpriteType.TEXT,
-            _titleText,
-            titleBarTextPos,
-            null,
-            _white,
-            Font,
-            Center,
-            TextSize * scale));
-    }
-
     void SetupDrawSurface(IMyTextSurface surface)
     {
         surface.ScriptBackgroundColor = _black;
@@ -2417,10 +2385,11 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         var slim = grid.GetCubeBlock(position);
         if (slim != null && slim.FatBlock != null)
         {
-            CubeBlock = slim.FatBlock;
-            var surf = CubeBlock as IMyTextSurface;
+            var cube = slim.FatBlock;
+            var surf = cube as IMyTextSurface;
             if (surf != null)
             {
+                CubeBlock = cube;
                 Surface = surf;
             }
         }
@@ -3145,6 +3114,37 @@ public static class StringExtensions
     }
 }
 
+public static Vector2 DrawTitleBar(ref MySpriteDrawFrame frame, IMyTextSurface surf, Color barColor, Color textColor, string text, float scale, float textSize = 1.5f, float barHeightPx = 64f, float baseTextHeightPx = 28.8f, string font = "Debug")
+{
+    float titleBarHeight = scale * barHeightPx;
+    float scaledTextSize = textSize * scale;
+    Vector2 topLeft = 0.5f * (surf.TextureSize - surf.SurfaceSize);
+    Vector2 titleBarSize = new Vector2(surf.SurfaceSize.X, titleBarHeight);
+    Vector2 titleBarPos = topLeft + titleBarSize * 0.5f;
+    Vector2 titleBarTextPos = titleBarPos - Vector2.UnitY * (0.5f * scaledTextSize * baseTextHeightPx);
+
+    frame.Add(new MySprite(
+        SpriteType.TEXTURE,
+        "SquareSimple",
+        titleBarPos,
+        titleBarSize,
+        barColor,
+        null,
+        TextAlignment.CENTER));
+
+    frame.Add(new MySprite(
+        SpriteType.TEXT,
+        text,
+        titleBarTextPos,
+        null,
+        textColor,
+        font,
+        TextAlignment.CENTER,
+        scaledTextSize));
+
+    return titleBarPos;
+}
+
 /// <summary>
 /// Selects the active controller from a list using the following priority:
 /// Main controller > Oldest controlled ship controller > Any controlled ship controller.
@@ -3152,7 +3152,7 @@ public static class StringExtensions
 /// <param name="controllers">List of ship controlers</param>
 /// <param name="lastController">Last actively controlled controller</param>
 /// <returns>Actively controlled ship controller or null if none is controlled</returns>
-IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
 {
     IMyShipController currentlyControlled = null;
     foreach (IMyShipController ctrl in controllers)
