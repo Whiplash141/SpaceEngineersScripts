@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.10.1";
-const string DATE = "2024/02/22";
+const string VERSION = "1.10.2";
+const string DATE = "2024/03/01";
 
 
 const NormalAxis DEFAULT_NORMAL_AXIS = NormalAxis.X;
@@ -2007,10 +2007,11 @@ public class SingleScreenSpriteSurface : ISpriteSurface
         var slim = grid.GetCubeBlock(position);
         if (slim != null && slim.FatBlock != null)
         {
-            CubeBlock = slim.FatBlock;
-            var surf = CubeBlock as IMyTextSurface;
+            var cube = slim.FatBlock;
+            var surf = cube as IMyTextSurface;
             if (surf != null)
             {
+                CubeBlock = cube;
                 Surface = surf;
             }
         }
