@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.21.1";
-const string Date = "2024/02/03";
+const string Version = "170.21.4";
+const string Date = "2024/03/08";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -720,7 +720,7 @@ void LoadIniConfig()
 
     foreach (var c in _config)
     {
-        c.ReadFromIni(ref _ini);
+        c.ReadFromIni(_ini);
     }
 
     _fuelConservationCos = Math.Cos(MathHelper.ToRadians(_fuelConservationAngle));
@@ -746,13 +746,12 @@ void SaveIniConfig()
 
     _missileGroupNameTag = string.Format(MissileGroupPattern, _missileTag, _missileNumber);
     _missileNameTag = string.Format(MissileNamePattern, _missileTag, _missileNumber);
+    _maxRandomAccelRatio.Value = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
 
     foreach (var c in _config)
     {
-        c.WriteToIni(ref _ini);
+        c.WriteToIni(_ini);
     }
-
-    _maxRandomAccelRatio.Value = MathHelper.Clamp(_maxRandomAccelRatio, 0, 1);
 
     _guidanceActivateAction.RunInterval = _guidanceDelay;
     _randomHeadingVectorAction.RunInterval = _randomVectorInterval;
@@ -1453,13 +1452,13 @@ bool CollectBlocks(IMyTerminalBlock block)
             _ini.EndContent = cd;
         }
 
-        _stageTriggerConfig.Update(ref _ini);
+        _stageTriggerConfig.Update(_ini);
         if (_triggerOnStage != LaunchStage.None)
         {
             _stageTimers.Add(new StageTimer(timer, _triggerOnStage));
         }
 
-        _rangeTriggerConfig.Update(ref _ini);
+        _rangeTriggerConfig.Update(_ini);
         if (_triggerAtRange.HasValue)
         {
             _rangeTimers.Add(new RangeTimer(timer, _triggerAtRange.Value));
@@ -2489,12 +2488,11 @@ class BatesDistributionRandom
         return num / _count;
     }
 }
-
 public interface IConfigValue
 {
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
     void Reset();
     string Name { get; set; }
     string Comment { get; set; }
@@ -2540,14 +2538,14 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return Value.ToString();
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
@@ -2567,7 +2565,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
         ini.Set(section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(Comment))
@@ -2697,14 +2695,14 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         _skipRead = true;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        bool read = Implementation.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -2716,19 +2714,19 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ref ini, section);
+        Implementation.WriteToIni(ini, section);
         if (!HasValue)
         {
             ini.Set(section, Implementation.Name, NullString);
         }
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
@@ -2765,7 +2763,7 @@ class ConfigSection
         _values.AddRange(values);
     }
 
-    void SetComment(ref MyIni ini)
+    void SetComment(MyIni ini)
     {
         if (!string.IsNullOrWhiteSpace(Comment))
         {
@@ -2773,30 +2771,30 @@ class ConfigSection
         }
     }
 
-    public void ReadFromIni(ref MyIni ini)
+    public void ReadFromIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.ReadFromIni(ref ini, Section);
+            c.ReadFromIni(ini, Section);
         }
     }
 
-    public void WriteToIni(ref MyIni ini)
+    public void WriteToIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.WriteToIni(ref ini, Section);
+            c.WriteToIni(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 
-    public void Update(ref MyIni ini)
+    public void Update(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.Update(ref ini, Section);
+            c.Update(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 }
 public class ConfigString : ConfigValue<string>
@@ -2870,105 +2868,6 @@ public class DynamicCircularBuffer<T>
         if (_list.Count == 0)
             return default(T);
         return _list[_getIndex];
-    }
-}
-
-public static class VectorMath
-{
-    /// <summary>
-    /// Normalizes a vector only if it is non-zero and non-unit
-    /// </summary>
-    public static Vector3D SafeNormalize(Vector3D a)
-    {
-        if (Vector3D.IsZero(a))
-            return Vector3D.Zero;
-
-        if (Vector3D.IsUnit(ref a))
-            return a;
-
-        return Vector3D.Normalize(a);
-    }
-
-    /// <summary>
-    /// Reflects vector a over vector b with an optional rejection factor
-    /// </summary>
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1)
-    {
-        Vector3D proj = Projection(a, b);
-        Vector3D rej = a - proj;
-        return proj - rej * rejectionFactor;
-    }
-
-    /// <summary>
-    /// Rejects vector a on vector b
-    /// </summary>
-    public static Vector3D Rejection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
-
-    /// <summary>
-    /// Projects vector a onto vector b
-    /// </summary>
-    public static Vector3D Projection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-        
-        if (Vector3D.IsUnit(ref b))
-            return a.Dot(b) * b;
-
-        return a.Dot(b) / b.LengthSquared() * b;
-    }
-
-    /// <summary>
-    /// Scalar projection of a onto b
-    /// </summary>
-    public static double ScalarProjection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-
-        if (Vector3D.IsUnit(ref b))
-            return a.Dot(b);
-
-        return a.Dot(b) / b.Length();
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-    }
-
-    /// <summary>
-    /// Computes cosine of the angle between 2 vectors.
-    /// </summary>
-    public static double CosBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
-    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
-    /// </summary>
-    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
-    {
-        double dot = Vector3D.Dot(a, b);
-        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
-        return Math.Abs(dot) * dot > num;
     }
 }
 
@@ -3326,7 +3225,49 @@ public class PID
     }
 }
 
-#region Raycast Homing
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
+}
+
 class RaycastHoming
 {
     public TargetingStatus Status { get; private set; } = TargetingStatus.NotLocked;
@@ -3681,7 +3622,7 @@ class RaycastHoming
                 // Compute aim offset
                 if (!_manualLockOverride)
                 {
-                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorRejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
+                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorMath.Rejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
                     PreciseModeOffset = Vector3D.TransformNormal(info.HitPosition.Value + hitPosOffset - TargetCenter, MatrixD.Transpose(_targetOrientation));
                 }
             }
@@ -3794,49 +3735,7 @@ class RaycastHoming
         }
         return null;
     }
-
-    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
-    {
-        if (controllers.Count == 0)
-            return null;
-
-        IMyShipController mainController = null;
-        IMyShipController controlled = null;
-
-        foreach (var sc in controllers)
-        {
-            if (sc.IsUnderControl && sc.CanControlShip)
-            {
-                if (controlled == null)
-                {
-                    controlled = sc;
-                }
-
-                if (sc.IsMainCockpit)
-                {
-                    mainController = sc; // Only one per grid so no null check needed
-                }
-            }
-        }
-
-        if (mainController != null)
-            return mainController;
-
-        if (controlled != null)
-            return controlled;
-
-        return controllers[0];
-    }
-
-    public static Vector3D VectorRejection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
 }
-#endregion
 
 /// <summary>
 /// Class that tracks runtime history.
@@ -4256,6 +4155,70 @@ class State : IState
         OnUpdate = onUpdate;
         OnEnter = onEnter;
         OnLeave = onLeave;
+    }
+}
+
+public static class VectorMath
+{
+    /// <summary>
+    /// Normalizes a vector only if it is non-zero and non-unit
+    /// </summary>
+    public static Vector3D SafeNormalize(Vector3D a)
+    {
+        if (Vector3D.IsZero(a))
+            return Vector3D.Zero;
+
+        if (Vector3D.IsUnit(ref a))
+            return a;
+
+        return Vector3D.Normalize(a);
+    }
+
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Computes cosine of the angle between 2 vectors.
+    /// </summary>
+    public static double CosBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(CosBetween(a, b));
     }
 }
 
