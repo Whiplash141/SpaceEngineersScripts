@@ -50,18 +50,21 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 
 */
 
-public const string Version = "1.10.1",
-                    Date = "2023/08/25",
-                    IniSectionGeneral = "TCES - General",
-                    IniKeyGroupNameTag = "Group name tag",
-                    IniKeyAzimuthName = "Azimuth rotor name tag",
-                    IniKeyElevationName = "Elevation rotor name tag",
-                    IniKeyAutoRestAngle = "Should auto return to rest angle",
-                    IniKeyAutoRestDelay = "Auto return to rest angle delay (s)",
-                    IniKeyDrawTitleScreen = "Draw title screen",
-                    IniSectionRotor = "TCES - Rotor",
-                    IniKeyRestAngle = "Rest angle (deg)",
-                    IniKeyEnableStabilization = "Enable stabilization";
+public const string
+    Version = "1.11.7",
+    Date = "2024/03/13",
+    IniSectionGeneral = "TCES - General",
+    IniKeyGroupNameTag = "Group name tag",
+    IniKeyAzimuthName = "Azimuth rotor name tag",
+    IniKeyElevationName = "Elevation rotor name tag",
+    IniKeyAutoRestAngle = "Should auto return to rest angle",
+    IniKeyAutoRestDelay = "Auto return to rest angle delay (s)",
+    IniKeyAutoDeviation = "Auto compute deviation angle",
+    IniKeyDrawTitleScreen = "Draw title screen",
+    IniSectionRotor = "TCES - Rotor",
+    IniKeyRestAngle = "Rest angle (deg)",
+    IniKeyRestSpeed = "Rest speed multiplier",
+    IniKeyEnableStabilization = "Enable stabilization";
 
 RuntimeTracker _runtimeTracker;
 long _runCount = 0;
@@ -72,6 +75,7 @@ public ConfigString AzimuthName = new ConfigString(IniKeyAzimuthName, "Azimuth")
 public ConfigString ElevationName = new ConfigString(IniKeyElevationName, "Elevation");
 public ConfigBool AutomaticRest = new ConfigBool(IniKeyAutoRestAngle, true);
 public ConfigFloat AutomaticRestDelay = new ConfigFloat(IniKeyAutoRestDelay, 2f);
+public ConfigBool AutomaticDeviationAngle = new ConfigBool(IniKeyAutoDeviation, true);
 ConfigBool _drawTitleScreen = new ConfigBool(IniKeyDrawTitleScreen, true);
 
 TCESTitleScreen _titleScreen;
@@ -82,10 +86,35 @@ MyIni _ini = new MyIni();
 
 class CustomTurretController
 {
-    ConfigSection _rotorConfig = new ConfigSection(IniSectionRotor);
+    class RotorConfig
+    {
+        public ConfigSection Section = new ConfigSection(IniSectionRotor);
 
-    ConfigBool _enableStabilization = new ConfigBool(IniKeyEnableStabilization, true);
-    ConfigNullable<float, ConfigFloat> _restAngle = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(IniKeyRestAngle), "none");
+        public ConfigNullable<float, ConfigFloat> RestAngleDeg = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(IniKeyRestAngle), "none");
+        public ConfigFloat RestSpeedRatio = new ConfigFloat(IniKeyRestSpeed, 1f);
+        public ConfigBool EnableStabilization = new ConfigBool(IniKeyEnableStabilization, true);
+
+        public float? RestAngleRad
+        {
+            get
+            {
+                if (RestAngleDeg.HasValue)
+                {
+                    return MathHelper.ToRadians(RestAngleDeg.Value);
+                }
+                return null;
+            }
+        }
+
+        public RotorConfig()
+        {
+            Section.AddValues(
+                RestAngleDeg,
+                RestSpeedRatio,
+                EnableStabilization
+            );
+        }
+    }
 
     const float RotorStopThresholdRad = 1f * (MathHelper.Pi / 180f);
     List<IMyFunctionalBlock> _tools = new List<IMyFunctionalBlock>();
@@ -94,12 +123,13 @@ class CustomTurretController
     List<IMyFunctionalBlock> _otherTools = new List<IMyFunctionalBlock>();
 
     List<IMyMotorStator> _extraRotors = new List<IMyMotorStator>();
+    List<IMyMotorStator> _controlledExtraRotors = new List<IMyMotorStator>();
+    List<IMyMotorStator> _unusedRotors = new List<IMyMotorStator>();
     StabilizedRotor _azimuthStabilizer = new StabilizedRotor();
     StabilizedRotor _elevationStabilizer = new StabilizedRotor();
-    float? _azimuthRestAngle = null;
-    float? _elevationRestAngle = null;
-    bool _stabilizeAzimuth = true;
-    bool _stabilizeElevation = true;
+
+    RotorConfig _azimuthConfig = new RotorConfig();
+    RotorConfig _elevationConfig = new RotorConfig();
     IMyTurretControlBlock _controller;
 
     Program _p;
@@ -116,7 +146,7 @@ class CustomTurretController
     float _cachedElevationBrakingTorque = 0;
 
     const float RestSpeed = 10f;
-    const float PlayerInputMultiplier = 1f/50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
+    const float PlayerInputMultiplier = 1f / 50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
 
     enum ControlState
     {
@@ -184,11 +214,6 @@ class CustomTurretController
         _aiControlSM.AddState(new State(AiTargetingState.AzimuthOnly, onEnter: OnAiControlAzimuthOnly));
         _aiControlSM.Initialize(AiTargetingState.Idle);
 
-        _rotorConfig.AddValues(
-            _restAngle,
-            _enableStabilization
-        );
-
         _p = p;
         _group = group;
         _groupName = group.Name;
@@ -210,11 +235,11 @@ class CustomTurretController
     }
 
     /*
-     * Since we are nulling out the rotors in order to apply stabilization,
-     * the GetAzimuth/ElevationSpeedMax methods will return 30 rpm always. However,
-     * when a rotor is actually assigned, small grid rotors will return 60 rpm. The
-     * multipliers below account for this.
-     */
+        * Since we are nulling out the rotors in order to apply stabilization,
+        * the GetAzimuth/ElevationSpeedMax methods will return 30 rpm always. However,
+        * when a rotor is actually assigned, small grid rotors will return 60 rpm. The
+        * multipliers below account for this.
+        */
     static float GetRotorMultiplier(IMyMotorStator rotor)
     {
         return (rotor.CubeGrid.GridSizeEnum == MyCubeSize.Small) ? 2f : 1f;
@@ -240,7 +265,7 @@ class CustomTurretController
             _elevationStabilizer.Rotor.TargetVelocityRad = 0;
         }
 
-        foreach (var r in _extraRotors)
+        foreach (var r in _controlledExtraRotors)
         {
             r.TargetVelocityRad = 0f;
         }
@@ -251,25 +276,25 @@ class CustomTurretController
         _controller.AzimuthRotor = null;
         if (BlockValid(_azimuthStabilizer.Rotor))
         {
-            if (_stabilizeAzimuth)
+            if (_azimuthConfig.EnableStabilization)
             {
                 _azimuthStabilizer.Update(1f / 60f);
             }
             _azimuthStabilizer.Rotor.TargetVelocityRPM =
                 MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
-                (_stabilizeAzimuth && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
+                (_azimuthConfig.EnableStabilization && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
         }
 
         _controller.ElevationRotor = null;
         if (BlockValid(_elevationStabilizer.Rotor))
         {
-            if (_stabilizeElevation)
+            if (_elevationConfig.EnableStabilization)
             {
                 _elevationStabilizer.Update(1f / 60f);
             }
             _elevationStabilizer.Rotor.TargetVelocityRPM =
                 MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
-                (_stabilizeElevation && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
+                (_elevationConfig.EnableStabilization && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
         }
 
         _wasManuallyControlled = true;
@@ -306,8 +331,18 @@ class CustomTurretController
         {
             _aiControlSM.SetState(AiTargetingState.AzimuthOnly);
         }
+
+        if (_p.AutomaticDeviationAngle)
+        {
+            double targetRadSq = info.BoundingBox.HalfExtents.LengthSquared() * 0.25;
+            double distSq = targetDirection.LengthSquared();
+
+            double angleRad = Math.Atan(Math.Sqrt(targetRadSq / distSq));
+
+            _controller.AngleDeviation = (float)MathHelper.ToDegrees(angleRad);
+        }
     }
-    
+
     void OnAiControlBothRotors()
     {
         if (BlockValid(_elevationStabilizer.Rotor))
@@ -398,7 +433,7 @@ class CustomTurretController
 
         Update1();
 
-        if (_extraRotors.Count > 0)
+        if (_controlledExtraRotors.Count > 0)
         {
             HandleExtraRotors();
             SyncWeaponFiring();
@@ -440,10 +475,23 @@ class CustomTurretController
         _tools.Clear();
         _cameras.Clear();
         _gridToToolDict.Clear();
-        _azimuthRestAngle = null;
-        _elevationRestAngle = null;
 
         _group.GetBlocks(null, CollectBlocks);
+
+        _controlledExtraRotors.Clear();
+        _unusedRotors.Clear();
+
+        foreach (var r in _extraRotors)
+        {
+            if (!_gridToToolDict.ContainsKey(r.TopGrid))
+            {
+                _unusedRotors.Add(r);
+            }
+            else
+            {
+                _controlledExtraRotors.Add(r);
+            }
+        }
 
         if (_controller == null)
         {
@@ -457,7 +505,7 @@ class CustomTurretController
         {
             _setupReturnCode |= ReturnCode.MissingElevation;
         }
-        if (_extraRotors.Count == 0)
+        if (_controlledExtraRotors.Count == 0)
         {
             _setupReturnCode |= ReturnCode.NoExtraRotors;
         }
@@ -471,7 +519,7 @@ class CustomTurretController
         }
     }
 
-    void ParseRotorIni(IMyMotorStator r, out float? restAngle, out bool stabilize)
+    void ParseRotorIni(IMyMotorStator r, RotorConfig config)
     {
         _ini.Clear();
         if (!_ini.TryParse(r.CustomData) && !string.IsNullOrWhiteSpace(r.CustomData))
@@ -479,16 +527,13 @@ class CustomTurretController
             _ini.EndContent = r.CustomData;
         }
 
-        _rotorConfig.Update(ref _ini);
-        
+        config.Section.Update(_ini);
+
         string output = _ini.ToString();
         if (output != r.CustomData)
         {
             r.CustomData = output;
         }
-
-        restAngle = _restAngle.HasValue ? MathHelper.ToRadians(_restAngle.Value) : (float?)null;
-        stabilize = _enableStabilization;
     }
 
     bool CollectBlocks(IMyTerminalBlock b)
@@ -509,7 +554,7 @@ class CustomTurretController
                 else
                 {
                     _azimuthStabilizer.Rotor = rotor;
-                    ParseRotorIni(_azimuthStabilizer.Rotor, out _azimuthRestAngle, out _stabilizeAzimuth);
+                    ParseRotorIni(_azimuthStabilizer.Rotor, _azimuthConfig);
                 }
             }
             else if (StringExtensions.Contains(b.CustomName, _p.ElevationName))
@@ -521,7 +566,7 @@ class CustomTurretController
                 else
                 {
                     _elevationStabilizer.Rotor = rotor;
-                    ParseRotorIni(_elevationStabilizer.Rotor, out _elevationRestAngle, out _stabilizeElevation);
+                    ParseRotorIni(_elevationStabilizer.Rotor, _elevationConfig);
                 }
             }
             else
@@ -571,7 +616,7 @@ class CustomTurretController
     {
         IMyMotorStator r = b as IMyMotorStator;
         if (r != null && r.TopGrid == null) return false;
-        return (b != null) &&  _p.Me.IsSameConstructAs(b);
+        return (b != null) && _p.Me.IsSameConstructAs(b);
     }
 
     void SetBlocks()
@@ -610,7 +655,7 @@ class CustomTurretController
         {
             if (BlockValid(t))
             {
-                if (_extraRotors.Count > 0) // Special behavior
+                if (_controlledExtraRotors.Count > 0) // Special behavior
                 {
 
                     if ((_azimuthStabilizer.Rotor != null && _azimuthStabilizer.Rotor.IsAttached && t.CubeGrid == _azimuthStabilizer.Rotor.TopGrid) ||
@@ -683,7 +728,16 @@ class CustomTurretController
         }
         else
         {
-            Echo($"> INFO: {_extraRotors.Count} extra rotors.");
+            Echo($"> INFO: {_controlledExtraRotors.Count} extra rotor(s).");
+        }
+
+        if (_unusedRotors.Count > 0)
+        {
+            Echo($"> WARN: {_unusedRotors.Count} unused rotor(s).");
+            for (int ii = 0; ii < _unusedRotors.Count; ++ii)
+            {
+                Echo($"    {ii + 1}: \"{_unusedRotors[ii].CustomName}\"");
+            }
         }
 
         if (!missingTools)
@@ -694,7 +748,7 @@ class CustomTurretController
             }
             else
             {
-                Echo($"> INFO: {_cameras.Count} cameras.");
+                Echo($"> INFO: {_cameras.Count} camera(s).");
             }
             if ((_setupReturnCode & ReturnCode.MissingTools) != 0)
             {
@@ -702,7 +756,7 @@ class CustomTurretController
             }
             else
             {
-                Echo($"> INFO: {_tools.Count} weapons/tools.");
+                Echo($"> INFO: {_tools.Count} weapon(s)/tool(s).");
             }
         }
         Echo("");
@@ -721,14 +775,14 @@ class CustomTurretController
         */
     bool HandleAzimuthAndElevationRestAngles()
     {
-        bool done = TryMoveRotorToRestAngle(_azimuthStabilizer.Rotor, _azimuthRestAngle);
+        bool done = TryMoveRotorToRestAngle(_azimuthStabilizer.Rotor, _azimuthConfig.RestAngleRad, _azimuthConfig.RestSpeedRatio);
         if (done)
         {
             if (BlockValid(_azimuthStabilizer.Rotor))
             {
                 _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
             }
-            done = TryMoveRotorToRestAngle(_elevationStabilizer.Rotor, _elevationRestAngle);
+            done = TryMoveRotorToRestAngle(_elevationStabilizer.Rotor, _elevationConfig.RestAngleRad, _elevationConfig.RestSpeedRatio);
             if (done)
             {
                 if (BlockValid(_elevationStabilizer.Rotor))
@@ -752,13 +806,13 @@ class CustomTurretController
         return done;
     }
 
-    bool TryMoveRotorToRestAngle(IMyMotorStator r, float? restAngle)
+    bool TryMoveRotorToRestAngle(IMyMotorStator r, float? restAngleRad, float restSpeed)
     {
-        if (!BlockValid(r) || !restAngle.HasValue)
+        if (!BlockValid(r) || !restAngleRad.HasValue)
         {
             return true;
         }
-        return MoveRotorToEquilibrium(r, restAngle.Value);
+        return MoveRotorToEquilibrium(r, restAngleRad.Value, restSpeed);
     }
 
     bool IsShooting()
@@ -785,7 +839,7 @@ class CustomTurretController
 
     void HandleExtraRotors()
     {
-        if (_extraRotors.Count == 0)
+        if (_controlledExtraRotors.Count == 0)
         {
             return;
         }
@@ -806,18 +860,17 @@ class CustomTurretController
             totalVelocityCommand += _elevationStabilizer.Rotor.WorldMatrix.Up * _elevationStabilizer.Rotor.TargetVelocityRad;
         }
 
-        foreach (var r in _extraRotors)
+        foreach (var r in _controlledExtraRotors)
         {
             if (!r.IsAttached)
             {
                 continue;
             }
 
-
             IMyFunctionalBlock reference;
             if (!_gridToToolDict.TryGetValue(r.TopGrid, out reference))
             {
-                // TODO: Warning
+                // Not theoretically possible, but just to be safe
                 continue;
             }
 
@@ -827,7 +880,7 @@ class CustomTurretController
         }
     }
 
-    bool MoveRotorToEquilibrium(IMyMotorStator rotor, float restAngle)
+    bool MoveRotorToEquilibrium(IMyMotorStator rotor, float restAngleRad, float restSpeed)
     {
         if (rotor == null)
         {
@@ -843,22 +896,29 @@ class CustomTurretController
 
         if (lowerLimitRad >= -MathHelper.TwoPi && upperLimitRad <= MathHelper.TwoPi)
         {
-            if (restAngle > upperLimitRad)
-                restAngle -= MathHelper.TwoPi;
-            else if (restAngle < lowerLimitRad)
-                restAngle += MathHelper.TwoPi;
+            if (restAngleRad > upperLimitRad)
+            {
+                restAngleRad -= MathHelper.TwoPi;
+            }
+            else if (restAngleRad < lowerLimitRad)
+            {
+                restAngleRad += MathHelper.TwoPi;
+            }
         }
         else
         {
-            if (restAngle > currentAngle + MathHelper.Pi)
-                restAngle -= MathHelper.TwoPi;
-            else if (restAngle < currentAngle - MathHelper.Pi)
-                restAngle += MathHelper.TwoPi;
+            if (restAngleRad > currentAngle + MathHelper.Pi)
+            {
+                restAngleRad -= MathHelper.TwoPi;
+            }
+            else if (restAngleRad < currentAngle - MathHelper.Pi)
+            {
+                restAngleRad += MathHelper.TwoPi;
+            }
         }
 
-
-        float angularDeviation = (restAngle - currentAngle);
-        float targetVelocity = (float)Math.Round(angularDeviation * RestSpeed, 2);
+        float angularDeviation = (restAngleRad - currentAngle);
+        float targetVelocity = (float)Math.Round(angularDeviation * RestSpeed, 2) * restSpeed;
 
         bool belowTolerance = Math.Abs(angularDeviation) < RotorStopThresholdRad;
         if (belowTolerance)
@@ -883,6 +943,7 @@ Program()
         ElevationName,
         AutomaticRest,
         AutomaticRestDelay,
+        AutomaticDeviationAngle,
         _drawTitleScreen
     );
 
@@ -910,7 +971,7 @@ void ProcessIni()
         _ini.EndContent = Me.CustomData;
     }
 
-    _config.Update(ref _ini);
+    _config.Update(_ini);
 
     string output = _ini.ToString();
     if (output != Me.CustomData)
@@ -949,8 +1010,6 @@ void Main(string arg, UpdateType updateSource)
             default:
                 break;
         }
-
-
 
         if ((updateSource & UpdateType.Update10) != 0)
         {
@@ -1033,12 +1092,13 @@ void OnUpdate60()
     Echo($"Custom Turret Groups: {_turretControllers.Count}");
     Echo($"Run frequency: {Runtime.UpdateFrequency}\n");
 
+    Echo(_runtimeTracker.Write());
+    Echo("");
+
     foreach (var controller in _turretControllers)
     {
         controller.WriteStatus();
     }
-
-    Echo(_runtimeTracker.Write());
 
     WriteEcho();
 
@@ -1053,14 +1113,9 @@ class TCESTitleScreen
 
     const TextAlignment Center = TextAlignment.CENTER;
     const SpriteType Texture = SpriteType.TEXTURE;
-    const float TitleBarHeightPx = 64f;
     const float TextSize = 1.5f;
-    const float BaseTextHeightPx = 37f;
-
     const float CTCSpriteScale = 0.4f;
     const float TurretSpriteScale = 0.8f;
-
-    const string Font = "Debug";
     const string TitleFormat = "TCES - v{0}";
     readonly string _titleText;
 
@@ -1082,7 +1137,8 @@ class TCESTitleScreen
         }
     }
 
-    readonly AnimationParams[] _animSequence = new AnimationParams[] {
+    readonly AnimationParams[] _animSequence = new AnimationParams[]
+    {
 new AnimationParams(0),
 new AnimationParams(10),
 new AnimationParams(20),
@@ -1099,7 +1155,7 @@ new AnimationParams(0),
 new AnimationParams(0),
 new AnimationParams(0),
 new AnimationParams(0),
-};
+    };
 
     bool _clearSpriteCache = false;
     IMyTextSurface _surface = null;
@@ -1125,18 +1181,18 @@ new AnimationParams(0),
         Vector2 scale = _surface.SurfaceSize / 512f;
         float minScale = Math.Min(scale.X, scale.Y);
 
-        using (var frame = _surface.DrawFrame())
+        var frame = _surface.DrawFrame();
+        
+        if (_clearSpriteCache)
         {
-            if (_clearSpriteCache)
-            {
-                frame.Add(new MySprite());
-            }
-
-            DrawCTC(frame, screenCenter + _ctcPos * minScale, CTCSpriteScale * minScale);
-            DrawTurret(frame, screenCenter + _turretPos * minScale, TurretSpriteScale * minScale, anim.ElevationAngle, anim.DrawMuzzleFlash);
-
-            DrawTitleBar(_surface, frame, minScale);
+            frame.Add(new MySprite());
         }
+
+        DrawCTC(frame, screenCenter + _ctcPos * minScale, CTCSpriteScale * minScale);
+        DrawTurret(frame, screenCenter + _turretPos * minScale, TurretSpriteScale * minScale, anim.ElevationAngle, anim.DrawMuzzleFlash);
+        DrawTitleBar(ref frame, _surface, _topBarColor, _white, _titleText, minScale, TextSize);
+        
+        frame.Dispose();
     }
 
     public void RestartDraw()
@@ -1145,36 +1201,6 @@ new AnimationParams(0),
     }
 
     #region Draw Helper Functions
-    void DrawTitleBar(IMyTextSurface _surface, MySpriteDrawFrame frame, float scale)
-    {
-        float titleBarHeight = scale * TitleBarHeightPx;
-        Vector2 topLeft = 0.5f * (_surface.TextureSize - _surface.SurfaceSize);
-        Vector2 titleBarSize = new Vector2(_surface.TextureSize.X, titleBarHeight);
-        Vector2 titleBarPos = topLeft + new Vector2(_surface.TextureSize.X * 0.5f, titleBarHeight * 0.5f);
-        Vector2 titleBarTextPos = topLeft + new Vector2(_surface.TextureSize.X * 0.5f, 0.5f * (titleBarHeight - scale * BaseTextHeightPx));
-
-        // Title bar
-        frame.Add(new MySprite(
-            Texture,
-            "SquareSimple",
-            titleBarPos,
-            titleBarSize,
-            _topBarColor,
-            null,
-            Center));
-
-        // Title bar text
-        frame.Add(new MySprite(
-            SpriteType.TEXT,
-            _titleText,
-            titleBarTextPos,
-            null,
-            _white,
-            Font,
-            Center,
-            TextSize * scale));
-    }
-
     void SetupDrawSurface(IMyTextSurface _surface)
     {
         _surface.ScriptBackgroundColor = _black;
@@ -1248,11 +1274,359 @@ new AnimationParams(0),
 
 #region INCLUDES
 
-public static class StringExtensions
+static class BlueScreenOfDeath 
 {
-    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
+    const int MAX_BSOD_WIDTH = 50;
+    const string BSOD_TEMPLATE =
+    "{0} - v{1}\n\n"+ 
+    "A fatal exception has occured at\n"+
+    "{2}. The current\n"+
+    "program will be terminated.\n"+
+    "\n"+ 
+    "EXCEPTION:\n"+
+    "{3}\n"+
+    "\n"+
+    "* Please REPORT this crash message to\n"+ 
+    "  the Bug Reports discussion of this script\n"+ 
+    "\n"+
+    "* Press RECOMPILE to restart the program";
+
+    static StringBuilder bsodBuilder = new StringBuilder(256);
+    
+    public static void Show(IMyTextSurface surface, string scriptName, string version, Exception e)
     {
-        return source?.IndexOf(toCheck, comp) >= 0;
+        if (surface == null) 
+        { 
+            return;
+        }
+        surface.ContentType = ContentType.TEXT_AND_IMAGE;
+        surface.Alignment = TextAlignment.LEFT;
+        float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
+        surface.FontColor = Color.White;
+        surface.BackgroundColor = Color.Blue;
+        surface.Font = "Monospace";
+        string exceptionStr = e.ToString();
+        string[] exceptionLines = exceptionStr.Split('\n');
+        bsodBuilder.Clear();
+        foreach (string line in exceptionLines)
+        {
+            if (line.Length <= MAX_BSOD_WIDTH)
+            {
+                bsodBuilder.Append(line).Append("\n");
+            }
+            else
+            {
+                string[] words = line.Split(' ');
+                int lineLength = 0;
+                foreach (string word in words)
+                {
+                    lineLength += word.Length;
+                    if (lineLength >= MAX_BSOD_WIDTH)
+                    {
+                        bsodBuilder.Append("\n");
+                        lineLength = word.Length;
+                    }
+                    bsodBuilder.Append(word).Append(" ");
+                    lineLength += 1;
+                }
+                bsodBuilder.Append("\n");
+            }
+        }
+
+        surface.WriteText(string.Format(BSOD_TEMPLATE, 
+                                        scriptName.ToUpperInvariant(),
+                                        version,
+                                        DateTime.Now, 
+                                        bsodBuilder));
+    }
+}
+public interface IConfigValue
+{
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
+    void Reset();
+    string Name { get; set; }
+    string Comment { get; set; }
+}
+
+public interface IConfigValue<T> : IConfigValue
+{
+    T Value { get; set; }
+}
+
+public abstract class ConfigValue<T> : IConfigValue<T>
+{
+    public string Name { get; set; }
+    public string Comment { get; set; }
+    protected T _value;
+    public T Value
+    {
+        get { return _value; }
+        set
+        {
+            _value = value;
+            _skipRead = true;
+        }
+    }
+    readonly T _defaultValue;
+    bool _skipRead = false;
+
+    public static implicit operator T(ConfigValue<T> cfg)
+    {
+        return cfg.Value;
+    }
+
+    public ConfigValue(string name, T defaultValue, string comment)
+    {
+        Name = name;
+        _value = defaultValue;
+        _defaultValue = defaultValue;
+        Comment = comment;
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+
+    public bool Update(MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
+        return read;
+    }
+
+    public bool ReadFromIni(MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        MyIniValue val = ini.Get(section, Name);
+        bool read = !val.IsEmpty;
+        if (read)
+        {
+            read = SetValue(ref val);
+        }
+        else
+        {
+            SetDefault();
+        }
+        return read;
+    }
+
+    public void WriteToIni(MyIni ini, string section)
+    {
+        ini.Set(section, Name, this.ToString());
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetComment(section, Name, Comment);
+        }
+        _skipRead = false;
+    }
+
+    public void Reset()
+    {
+        SetDefault();
+        _skipRead = false;
+    }
+
+    protected abstract bool SetValue(ref MyIniValue val);
+
+    protected virtual void SetDefault()
+    {
+        _value = _defaultValue;
+    }
+}
+
+public class ConfigBool : ConfigValue<bool>
+{
+    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigFloat : ConfigValue<float>
+{
+    public ConfigFloat(string name, float value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetSingle(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
+    where ConfigImplementation : IConfigValue<T>, IConfigValue
+    where T : struct
+{
+    public string Name 
+    { 
+        get { return Implementation.Name; }
+        set { Implementation.Name = value; }
+    }
+
+    public string Comment 
+    { 
+        get { return Implementation.Comment; } 
+        set { Implementation.Comment = value; } 
+    }
+    
+    public string NullString;
+    public T Value
+    {
+        get { return Implementation.Value; }
+        set 
+        { 
+            Implementation.Value = value;
+            HasValue = true;
+            _skipRead = true;
+        }
+    }
+    public readonly ConfigImplementation Implementation;
+    public bool HasValue { get; private set; }
+    bool _skipRead = false;
+
+    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    {
+        Implementation = impl;
+        NullString = nullString;
+        HasValue = false;
+    }
+
+    public void Reset()
+    {
+        HasValue = false;
+        _skipRead = true;
+    }
+
+    public bool ReadFromIni(MyIni ini, string section)
+    {
+        if (_skipRead)
+        {
+            _skipRead = false;
+            return true;
+        }
+        bool read = Implementation.ReadFromIni(ini, section);
+        if (read)
+        {
+            HasValue = true;
+        }
+        else
+        {
+            HasValue = false;
+        }
+        return read;
+    }
+
+    public void WriteToIni(MyIni ini, string section)
+    {
+        Implementation.WriteToIni(ini, section);
+        if (!HasValue)
+        {
+            ini.Set(section, Implementation.Name, NullString);
+        }
+    }
+
+    public bool Update(MyIni ini, string section)
+    {
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
+        return read;
+    }
+
+    public override string ToString()
+    {
+        return HasValue ? Value.ToString() : NullString;
+    }
+}
+
+class ConfigSection
+{
+    public string Section { get; set; }
+    public string Comment { get; set; }
+    List<IConfigValue> _values = new List<IConfigValue>();
+
+    public ConfigSection(string section, string comment = null)
+    {
+        Section = section;
+        Comment = comment;
+    }
+
+    public void AddValue(IConfigValue value)
+    {
+        _values.Add(value);
+    }
+
+    public void AddValues(List<IConfigValue> values)
+    {
+        _values.AddRange(values);
+    }
+
+    public void AddValues(params IConfigValue[] values)
+    {
+        _values.AddRange(values);
+    }
+
+    void SetComment(MyIni ini)
+    {
+        if (!string.IsNullOrWhiteSpace(Comment))
+        {
+            ini.SetSectionComment(Section, Comment);
+        }
+    }
+
+    public void ReadFromIni(MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.ReadFromIni(ini, Section);
+        }
+    }
+
+    public void WriteToIni(MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.WriteToIni(ini, Section);
+        }
+        SetComment(ini);
+    }
+
+    public void Update(MyIni ini)
+    {    
+        foreach (IConfigValue c in _values)
+        {
+            c.Update(ini, Section);
+        }
+        SetComment(ini);
+    }
+}
+public class ConfigString : ConfigValue<string>
+{
+    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetString(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
     }
 }
 
@@ -1343,363 +1717,6 @@ public class RuntimeTracker
             LastInstructions,
             MaxInstructions,
             AverageInstructions / _instructionLimit);
-    }
-}
-
-static class BlueScreenOfDeath 
-{
-    const int MAX_BSOD_WIDTH = 50;
-    const string BSOD_TEMPLATE =
-    "{0} - v{1}\n\n"+ 
-    "A fatal exception has occured at\n"+
-    "{2}. The current\n"+
-    "program will be terminated.\n"+
-    "\n"+ 
-    "EXCEPTION:\n"+
-    "{3}\n"+
-    "\n"+
-    "* Please REPORT this crash message to\n"+ 
-    "  the Bug Reports discussion of this script\n"+ 
-    "\n"+
-    "* Press RECOMPILE to restart the program";
-
-    static StringBuilder bsodBuilder = new StringBuilder(256);
-    
-    public static void Show(IMyTextSurface surface, string scriptName, string version, Exception e)
-    {
-        if (surface == null) 
-        { 
-            return;
-        }
-        surface.ContentType = ContentType.TEXT_AND_IMAGE;
-        surface.Alignment = TextAlignment.LEFT;
-        float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
-        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
-        surface.FontColor = Color.White;
-        surface.BackgroundColor = Color.Blue;
-        surface.Font = "Monospace";
-        string exceptionStr = e.ToString();
-        string[] exceptionLines = exceptionStr.Split('\n');
-        bsodBuilder.Clear();
-        foreach (string line in exceptionLines)
-        {
-            if (line.Length <= MAX_BSOD_WIDTH)
-            {
-                bsodBuilder.Append(line).Append("\n");
-            }
-            else
-            {
-                string[] words = line.Split(' ');
-                int lineLength = 0;
-                foreach (string word in words)
-                {
-                    lineLength += word.Length;
-                    if (lineLength >= MAX_BSOD_WIDTH)
-                    {
-                        bsodBuilder.Append("\n");
-                        lineLength = word.Length;
-                    }
-                    bsodBuilder.Append(word).Append(" ");
-                    lineLength += 1;
-                }
-                bsodBuilder.Append("\n");
-            }
-        }
-
-        surface.WriteText(string.Format(BSOD_TEMPLATE, 
-                                        scriptName.ToUpperInvariant(),
-                                        version,
-                                        DateTime.Now, 
-                                        bsodBuilder));
-    }
-}
-
-public interface IConfigValue
-{
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
-    void Reset();
-    string Name { get; set; }
-    string Comment { get; set; }
-}
-
-public interface IConfigValue<T> : IConfigValue
-{
-    T Value { get; set; }
-}
-
-public abstract class ConfigValue<T> : IConfigValue<T>
-{
-    public string Name { get; set; }
-    public string Comment { get; set; }
-    protected T _value;
-    public T Value
-    {
-        get { return _value; }
-        set
-        {
-            _value = value;
-            _skipRead = true;
-        }
-    }
-    readonly T _defaultValue;
-    bool _skipRead = false;
-
-    public static implicit operator T(ConfigValue<T> cfg)
-    {
-        return cfg.Value;
-    }
-
-    public ConfigValue(string name, T defaultValue, string comment)
-    {
-        Name = name;
-        _value = defaultValue;
-        _defaultValue = defaultValue;
-        Comment = comment;
-    }
-
-    public override string ToString()
-    {
-        return Value.ToString();
-    }
-
-    public bool Update(ref MyIni ini, string section)
-    {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
-        return read;
-    }
-
-    public bool ReadFromIni(ref MyIni ini, string section)
-    {
-        if (_skipRead)
-        {
-            _skipRead = false;
-            return true;
-        }
-        MyIniValue val = ini.Get(section, Name);
-        bool read = !val.IsEmpty;
-        if (read)
-        {
-            read = SetValue(ref val);
-        }
-        else
-        {
-            SetDefault();
-        }
-        return read;
-    }
-
-    public void WriteToIni(ref MyIni ini, string section)
-    {
-        ini.Set(section, Name, this.ToString());
-        if (!string.IsNullOrWhiteSpace(Comment))
-        {
-            ini.SetComment(section, Name, Comment);
-        }
-        _skipRead = false;
-    }
-
-    public void Reset()
-    {
-        SetDefault();
-        _skipRead = false;
-    }
-
-    protected abstract bool SetValue(ref MyIniValue val);
-
-    protected virtual void SetDefault()
-    {
-        _value = _defaultValue;
-    }
-}
-
-class ConfigSection
-{
-    public string Section { get; set; }
-    public string Comment { get; set; }
-    List<IConfigValue> _values = new List<IConfigValue>();
-
-    public ConfigSection(string section, string comment = null)
-    {
-        Section = section;
-        Comment = comment;
-    }
-
-    public void AddValue(IConfigValue value)
-    {
-        _values.Add(value);
-    }
-
-    public void AddValues(List<IConfigValue> values)
-    {
-        _values.AddRange(values);
-    }
-
-    public void AddValues(params IConfigValue[] values)
-    {
-        _values.AddRange(values);
-    }
-
-    void SetComment(ref MyIni ini)
-    {
-        if (!string.IsNullOrWhiteSpace(Comment))
-        {
-            ini.SetSectionComment(Section, Comment);
-        }
-    }
-
-    public void ReadFromIni(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.ReadFromIni(ref ini, Section);
-        }
-    }
-
-    public void WriteToIni(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.WriteToIni(ref ini, Section);
-        }
-        SetComment(ref ini);
-    }
-
-    public void Update(ref MyIni ini)
-    {    
-        foreach (IConfigValue c in _values)
-        {
-            c.Update(ref ini, Section);
-        }
-        SetComment(ref ini);
-    }
-}
-public class ConfigString : ConfigValue<string>
-{
-    public ConfigString(string name, string value = "", string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetString(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigBool : ConfigValue<bool>
-{
-    public ConfigBool(string name, bool value = false, string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetBoolean(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigFloat : ConfigValue<float>
-{
-    public ConfigFloat(string name, float value = 0, string comment = null) : base(name, value, comment) { }
-    protected override bool SetValue(ref MyIniValue val)
-    {
-        if (!val.TryGetSingle(out _value))
-        {
-            SetDefault();
-            return false;
-        }
-        return true;
-    }
-}
-
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
-{
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
-    }
-
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
-    }
-    
-    public string NullString;
-    public T Value
-    {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
-            HasValue = true;
-            _skipRead = true;
-        }
-    }
-    public readonly ConfigImplementation Implementation;
-    public bool HasValue { get; private set; }
-    bool _skipRead = false;
-
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
-    {
-        Implementation = impl;
-        NullString = nullString;
-        HasValue = false;
-    }
-
-    public void Reset()
-    {
-        HasValue = false;
-        _skipRead = true;
-    }
-
-    public bool ReadFromIni(ref MyIni ini, string section)
-    {
-        if (_skipRead)
-        {
-            _skipRead = false;
-            return true;
-        }
-        bool read = Implementation.ReadFromIni(ref ini, section);
-        if (read)
-        {
-            HasValue = true;
-        }
-        else
-        {
-            HasValue = false;
-        }
-        return read;
-    }
-
-    public void WriteToIni(ref MyIni ini, string section)
-    {
-        Implementation.WriteToIni(ref ini, section);
-        if (!HasValue)
-        {
-            ini.Set(section, Implementation.Name, NullString);
-        }
-    }
-
-    public bool Update(ref MyIni ini, string section)
-    {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
-        return read;
-    }
-
-    public override string ToString()
-    {
-        return HasValue ? Value.ToString() : NullString;
     }
 }
 
@@ -1853,42 +1870,36 @@ class State : IState
     }
 }
 
+public static class StringExtensions
+{
+    public static bool Contains(string source, string toCheck, StringComparison comp = StringComparison.OrdinalIgnoreCase)
+    {
+        return source?.IndexOf(toCheck, comp) >= 0;
+    }
+}
 
 public static class VectorMath
 {
     /// <summary>
-    /// Normalizes a vector only if it is non-zero and non-unit
+    /// Computes cosine of the angle between 2 vectors.
     /// </summary>
-    public static Vector3D SafeNormalize(Vector3D a)
-    {
-        if (Vector3D.IsZero(a))
-            return Vector3D.Zero;
-
-        if (Vector3D.IsUnit(ref a))
-            return a;
-
-        return Vector3D.Normalize(a);
-    }
-
-    /// <summary>
-    /// Reflects vector a over vector b with an optional rejection factor
-    /// </summary>
-    public static Vector3D Reflection(Vector3D a, Vector3D b, double rejectionFactor = 1)
-    {
-        Vector3D proj = Projection(a, b);
-        Vector3D rej = a - proj;
-        return proj - rej * rejectionFactor;
-    }
-
-    /// <summary>
-    /// Rejects vector a on vector b
-    /// </summary>
-    public static Vector3D Rejection(Vector3D a, Vector3D b)
+    public static double CosBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
+            return 0;
+        else
+            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
+    }
 
-        return a - a.Dot(b) / b.LengthSquared() * b;
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return 0;
+        else
+            return Math.Acos(CosBetween(a, b));
     }
 
     /// <summary>
@@ -1906,50 +1917,14 @@ public static class VectorMath
     }
 
     /// <summary>
-    /// Scalar projection of a onto b
+    /// Rejects vector a on vector b
     /// </summary>
-    public static double ScalarProjection(Vector3D a, Vector3D b)
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
+            return Vector3D.Zero;
 
-        if (Vector3D.IsUnit(ref b))
-            return a.Dot(b);
-
-        return a.Dot(b) / b.Length();
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1));
-    }
-
-    /// <summary>
-    /// Computes cosine of the angle between 2 vectors.
-    /// </summary>
-    public static double CosBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
-    /// This is helpful for determining if two vectors are "more parallel" than the tolerance.
-    /// </summary>
-    public static bool IsDotProductWithinTolerance(Vector3D a, Vector3D b, double tolerance)
-    {
-        double dot = Vector3D.Dot(a, b);
-        double num = a.LengthSquared() * b.LengthSquared() * tolerance * Math.Abs(tolerance);
-        return Math.Abs(dot) * dot > num;
+        return a - a.Dot(b) / b.LengthSquared() * b;
     }
 }
 
@@ -1973,5 +1948,36 @@ public static void AimRotorAtPosition(IMyMotorStator rotor, Vector3D desiredDire
     angle *= Math.Sign(Vector3D.Dot(axis, rotor.WorldMatrix.Up));
     angle = GetAllowedRotationAngle(angle, rotor);
     rotor.TargetVelocityRad = rotationScale * (float)angle / timeStep;
+}
+
+public static Vector2 DrawTitleBar(ref MySpriteDrawFrame frame, IMyTextSurface surf, Color barColor, Color textColor, string text, float scale, float textSize = 1.5f, float barHeightPx = 64f, float baseTextHeightPx = 28.8f, string font = "Debug")
+{
+    float titleBarHeight = scale * barHeightPx;
+    float scaledTextSize = textSize * scale;
+    Vector2 topLeft = 0.5f * (surf.TextureSize - surf.SurfaceSize);
+    Vector2 titleBarSize = new Vector2(surf.SurfaceSize.X, titleBarHeight);
+    Vector2 titleBarPos = topLeft + titleBarSize * 0.5f;
+    Vector2 titleBarTextPos = titleBarPos - Vector2.UnitY * (0.5f * scaledTextSize * baseTextHeightPx);
+
+    frame.Add(new MySprite(
+        SpriteType.TEXTURE,
+        "SquareSimple",
+        titleBarPos,
+        titleBarSize,
+        barColor,
+        null,
+        TextAlignment.CENTER));
+
+    frame.Add(new MySprite(
+        SpriteType.TEXT,
+        text,
+        titleBarTextPos,
+        null,
+        textColor,
+        font,
+        TextAlignment.CENTER,
+        scaledTextSize));
+
+    return titleBarPos;
 }
 #endregion
