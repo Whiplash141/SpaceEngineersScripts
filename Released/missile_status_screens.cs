@@ -40,8 +40,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 =================================================
 */
 
-const string VERSION = "1.7.0";
-const string DATE = "2023/01/01";
+const string VERSION = "1.8.2";
+const string DATE = "2024/04/08";
 
 public enum MissileStatus { Ready, Inactive, Fired };
 
@@ -65,6 +65,8 @@ const string IniTitleTextColor = "Title text color";
 const string IniBackgroundColor = "Background color";
 const string IniShowTitleBar = "Show title bar";
 const string IniTitleScale = "Title scale";
+const string IniGlobalSpriteScale = "Global sprite scale";
+const string IniSpriteList = "Sprite list";
 
 // Missile sprite config
 const string IniSpriteScale = "Sprite scale";
@@ -72,8 +74,27 @@ const string IniSpriteLocation = "Sprite location";
 const string IniSpriteRotation = "Sprite rotation (deg)";
 const string IniSpriteScreen = "Screen index to display on";
 
+// Texture sprite config
+const string IniSectionTextureTemplate = "Texture:";
+const string IniKeyTextureName = "Type";
+const string IniKeyTexturePos = "Position";
+const string IniKeyTextureSize = "Size";
+const string InkKeyTextureColor = "Color";
+const string IniKeyTextureRotation = "Rotation";
+
+// Text sprite config
+const string IniSectionTextTemplate = "Text:";
+const string IniKeyTextContent = "Text";
+const string IniKeyTextPos = "Position";
+const string IniKeyTextColor = "Color";
+const string IniKeyTextFont = "Font";
+const string IniKeyTextScale = "Scale";
+
+const string IniCommentSpriteList = " You can create your own sprites using the SE Sprite Builder\n https://gitlab.com/whiplash141/spritebuilder/-/wikis/home";
+
 MyIni _ini = new MyIni();
 List<string> _sectionNames = new List<string>();
+List<MySprite> _spriteListing = new List<MySprite>();
 List<IMyProgrammableBlock> _programs = new List<IMyProgrammableBlock>();
 
 Color _backgroundColor = new Color(0, 0, 0);
@@ -87,6 +108,7 @@ Scheduler _scheduler;
 bool _showTitleBar = false;
 bool _clearSpriteCache = false;
 float _titleScale = 1f;
+float _spriteScale = 0.25f;
 
 IMyBlockGroup _screenGroup;
 
@@ -152,7 +174,7 @@ bool CollectBlocks(IMyTerminalBlock b)
         _missileStatuses[name] = MissileStatus.Fired;
 
         // Read ini
-        Vector2 locationRatio = MyIniHelper.GetVector2(name, IniSpriteLocation, _ini);
+        Vector2 locationRatio = MyIniHelper.DeprecatedGetVector2(name, IniSpriteLocation, _ini);
         float scale = _ini.Get(name, IniSpriteScale).ToSingle(1f);
         float rotation = MathHelper.ToRadians(_ini.Get(name, IniSpriteRotation).ToSingle(0f));
         int index = 0;
@@ -176,7 +198,7 @@ bool CollectBlocks(IMyTerminalBlock b)
         statusScreen.AddData(name, data);
 
         // Write ini
-        MyIniHelper.SetVector2(name, IniSpriteLocation, ref locationRatio, _ini);
+        MyIniHelper.DeprecatedSetVector2(name, IniSpriteLocation, ref locationRatio, _ini);
         _ini.Set(name, IniSpriteScale, scale);
         _ini.Set(name, IniSpriteRotation, MathHelper.ToDegrees(rotation));
         if (!singleScreen)
@@ -220,6 +242,9 @@ void ParseIni()
 {
     _ini.Clear();
 
+    string spriteList = "";
+    _spriteListing.Clear();
+
     if (_ini.TryParse(Me.CustomData))
     {
         // General section parsing
@@ -233,6 +258,14 @@ void ParseIni()
         _titleBarColor = MyIniHelper.GetColor(IniSectionGeneral, IniTitleBarColor, _ini, _titleBarColor);
         _titleTextColor = MyIniHelper.GetColor(IniSectionGeneral, IniTitleTextColor, _ini, _titleTextColor);
         _backgroundColor = MyIniHelper.GetColor(IniSectionGeneral, IniBackgroundColor, _ini, _backgroundColor);
+        _spriteScale = _ini.Get(IniSectionGeneral, IniGlobalSpriteScale).ToSingle(_spriteScale);
+        spriteList = _ini.Get(IniSectionGeneral, IniSpriteList).ToString(spriteList);
+
+        if (!string.IsNullOrWhiteSpace(spriteList))
+        {
+            string[] spriteLines = spriteList.Split('\n');
+            ParseSpriteList(ref _ini, spriteLines, _spriteListing, _spriteScale);
+        }
     }
     else if (!string.IsNullOrWhiteSpace(Me.CustomData))
     {
@@ -249,12 +282,70 @@ void ParseIni()
     MyIniHelper.SetColor(IniSectionGeneral, IniTitleBarColor, _titleBarColor, _ini);
     MyIniHelper.SetColor(IniSectionGeneral, IniTitleTextColor, _titleTextColor, _ini);
     MyIniHelper.SetColor(IniSectionGeneral, IniBackgroundColor, _backgroundColor, _ini);
+    _ini.Set(IniSectionGeneral, IniGlobalSpriteScale, _spriteScale);
+    _ini.Set(IniSectionGeneral, IniSpriteList, spriteList);
+
+    _ini.SetComment(IniSectionGeneral, IniSpriteList, IniCommentSpriteList);
 
     string iniOutput = _ini.ToString();
     if (iniOutput.Equals(Me.CustomData))
         return;
 
     Me.CustomData = iniOutput;
+}
+
+void ParseSpriteList(ref MyIni ini, string[] spriteSections, List<MySprite> spriteList, float spriteScale)
+{
+    spriteList.Clear();
+    foreach (var spriteSectionName in spriteSections)
+    {
+        if (!ini.ContainsSection(spriteSectionName))
+        {
+            Echo($"WARNING: Could not find sprite section '{spriteSectionName}'");
+            continue;
+        }
+
+        if (spriteSectionName.StartsWith(IniSectionTextureTemplate))
+        {
+            string name = ini.Get(spriteSectionName, IniKeyTextureName).ToString();
+            Vector2 position = MyIniHelper.GetVector2(spriteSectionName, IniKeyTexturePos, ini);
+            Vector2 size = MyIniHelper.GetVector2(spriteSectionName, IniKeyTextureSize, ini);
+            Color color = MyIniHelper.GetColor(spriteSectionName, InkKeyTextureColor, ini, Color.White);
+            float rotation = ini.Get(spriteSectionName, IniKeyTextureRotation).ToSingle();
+            spriteList.Add(new MySprite()
+            {
+                Type = SpriteType.TEXTURE,
+                Alignment = TextAlignment.CENTER,
+                Data = name,
+                Position = position * spriteScale,
+                Size = size * spriteScale,
+                Color = color,
+                RotationOrScale = rotation,
+            });
+        }
+        else if (spriteSectionName.StartsWith(IniSectionTextTemplate))
+        {
+            string content = ini.Get(spriteSectionName, IniKeyTextContent).ToString();
+            Vector2 position = MyIniHelper.GetVector2(spriteSectionName, IniKeyTextPos, ini);
+            Color color = MyIniHelper.GetColor(spriteSectionName, IniKeyTextColor, ini, Color.White);
+            string font = ini.Get(spriteSectionName, IniKeyTextFont).ToString("Debug");
+            float scale = ini.Get(spriteSectionName, IniKeyTextScale).ToSingle();
+            spriteList.Add(new MySprite()
+            {
+                Type = SpriteType.TEXT,
+                Alignment = TextAlignment.LEFT,
+                Data = content,
+                Position = position * spriteScale,
+                FontId = font,
+                Color = color,
+                RotationOrScale = scale * spriteScale,
+            });
+        }
+        else
+        {
+            Echo($"WARNING: Unknown prefix for section '{spriteSectionName}'");
+        }    
+    }
 }
 
 void GetStatuses()
@@ -279,7 +370,7 @@ void GetStatuses()
 
 // Default sizes
 const float TitleTextSize = 1.5f;
-const float BaseTextHeightPx = 37f;
+const float BaseTextHeightPx = 28.8f;
 const float TitleBarHeight = 64;
 readonly Vector2 TitleBarSize = new Vector2(512, 64);
 const string TitleBarText = "WMI Missile Status";
@@ -319,10 +410,10 @@ void DrawScreens()
                 var titleBarSize = new Vector2(viewportSize.X, _titleScale * scale.Y * TitleBarHeight);
                 var titleBarPosition = 0.5f * titleBarSize + offset;
                 var titleBarTextSize = _titleScale * scale.Y * TitleTextSize;
-                var titleBarTextPosition = titleBarPosition + new Vector2(0, -titleBarTextSize * BaseTextHeightPx * 0.5f);
+                var titleBarTextPosition = titleBarPosition - new Vector2(0, titleBarTextSize * BaseTextHeightPx * 0.5f);
 
                 var titleBar = new MySprite(SpriteType.TEXTURE, "SquareSimple", titleBarPosition, titleBarSize, _titleBarColor, rotation: 0);
-                var titleText = new MySprite(SpriteType.TEXT, TitleBarText, titleBarTextPosition, null, _titleTextColor, "DEBUG", rotation: titleBarTextSize, alignment: TextAlignment.CENTER);
+                var titleText = new MySprite(SpriteType.TEXT, TitleBarText, titleBarTextPosition, null, _titleTextColor, "Debug", rotation: titleBarTextSize, alignment: TextAlignment.CENTER);
                 frame.Add(titleBar);
                 frame.Add(titleText);
             }
@@ -346,7 +437,23 @@ void DrawScreens()
                 Vector2 spriteOffset = missileSpriteData.Value.GetLocationPx(viewportSize);
                 float spriteScale = minScale * missileSpriteData.Value.Scale;
                 float rotation = missileSpriteData.Value.Rotation;
-                DrawMissileSprites(frame, screenCenter + spriteOffset, colorOverride, _backgroundColor, spriteScale, rotation);
+
+                if (_spriteListing.Count > 0)
+                {
+                    Vector4 colorScale = colorOverride.ToVector4();
+
+                    foreach (var sprite in _spriteListing)
+                    {
+                        var copy = sprite;
+                        copy.Position = sprite.Position + screenCenter + spriteOffset;
+                        copy.Color = new Color(sprite.Color.Value.ToVector4() * colorScale);
+                        frame.Add(copy);
+                    }
+                }
+                else
+                {
+                    DrawMissileSprites(frame, screenCenter + spriteOffset, colorOverride, _backgroundColor, spriteScale, rotation);
+                }
             }
         }
     }
@@ -357,7 +464,7 @@ public void DrawMissileSprites(MySpriteDrawFrame frame, Vector2 centerPos, Color
 {
     float sin = (float)Math.Sin(rotation);
     float cos = (float)Math.Cos(rotation);
-    scale *= 0.25f;
+    scale *= _spriteScale;
     frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*-72f,cos*-72f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // topFin
     frame.Add(new MySprite(SpriteType.TEXTURE, "Triangle", new Vector2(-sin*48f,cos*48f)*scale+centerPos, new Vector2(96f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // bottomFin
     frame.Add(new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(-sin*-96f,cos*-96f)*scale+centerPos, new Vector2(48f,96f)*scale, missileColor, null, TextAlignment.CENTER, rotation)); // noseCone
@@ -491,10 +598,51 @@ public static class MyIniHelper
     #endregion
 
     #region Vector2
-        /// <summary>
+    /// <summary>
     /// Adds a Vector3D to a MyIni object
     /// </summary>
     public static void SetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
+    {
+        ini.Set(sectionName, vectorName, vector.ToString());
+    }
+
+    /// <summary>
+    /// Parses a MyIni object for a Vector3D
+    /// </summary>
+    public static Vector2 GetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
+    {
+        var vector = Vector2.Zero;
+        if (TryParseVector2(ini.Get(sectionName, vectorName).ToString(), out vector))
+            return vector;
+        else if (defaultVector.HasValue)
+            return defaultVector.Value;
+        return default(Vector2);
+    }
+
+    static bool TryParseVector2(string source, out Vector2 vec)
+    {
+        // Source formatting {X:{0} Y:{1}}
+        vec = default(Vector2);
+        var fragments = source.Split(':', ' ', '{', '}');
+        if (fragments.Length < 5)
+            return false;
+        if (!float.TryParse(fragments[2], out vec.X))
+        {
+            return false;
+        }
+        if (!float.TryParse(fragments[4], out vec.Y))
+        {
+            return false;
+        }
+        return true;
+    }
+    #endregion
+
+    #region Vector2 Compat
+    /// <summary>
+    /// Adds a Vector3D to a MyIni object
+    /// </summary>
+    public static void DeprecatedSetVector2(string sectionName, string vectorName, ref Vector2 vector, MyIni ini)
     {
         string vectorString = string.Format("{0}, {1}", vector.X, vector.Y);
         ini.Set(sectionName, vectorName, vectorString);
@@ -503,7 +651,7 @@ public static class MyIniHelper
     /// <summary>
     /// Parses a MyIni object for a Vector3D
     /// </summary>
-    public static Vector2 GetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
+    public static Vector2 DeprecatedGetVector2(string sectionName, string vectorName, MyIni ini, Vector2? defaultVector = null)
     {
         string vectorString = ini.Get(sectionName, vectorName).ToString("null");
         string[] stringSplit = vectorString.Split(',');
