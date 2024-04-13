@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.6.3";
-const string Date = "2024/03/01";
+const string Version = "35.6.6";
+const string Date = "2024/04/13";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -79,11 +79,11 @@ ConfigBool
     _drawRunningScreen;
 ConfigFloat
     _fadeOutInterval;
-ConfigDeprecated<bool, ConfigBool>
+ConfigDeprecated<bool>
     _deprecatedUseRangeOverride;
-ConfigDeprecated<float, ConfigFloat>
+ConfigDeprecated<float>
     _deprecatedRangeOverride;
-ConfigNullable<float, ConfigFloat>
+ConfigNullable<float>
     _rangeOverride;
 ConfigColor
     _enemyIconColor,
@@ -158,11 +158,11 @@ Program()
     };
 
     _generalSection.AddValues(
-        _deprecatedUseRangeOverride = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool("Use radar range override")),
+        _deprecatedUseRangeOverride = new ConfigDeprecated<bool>(new ConfigBool("Use radar range override")),
         _textPanelName = new ConfigString("Text surface name tag", "Radar"),
         _broadcastIFF = new ConfigBool("Share own position", true),
         _networkTargets = new ConfigBool("Share targets", true),
-        _rangeOverride = new ConfigNullable<float, ConfigFloat>(new ConfigFloat("Radar range (m)"), "auto"),
+        _rangeOverride = new ConfigNullable<float>(new ConfigFloat("Radar range (m)"), "auto"),
         _radarSurface.ProjectionAngleDeg = new ConfigFloat("Radar projection angle in degrees (0 is flat)", 55f),
         _radarSurface.DrawQuadrants = new ConfigBool("Draw quadrants", true),
         _referenceName = new ConfigString("Optional reference block name", "Reference"),
@@ -188,13 +188,13 @@ Program()
         _radarSurface.RadarLockWarningColor = new ConfigColor("Lock on warning", new Color(150, 0, 0, 255))
     );
 
-    _deprecatedRangeOverride = new ConfigDeprecated<float, ConfigFloat>(new ConfigFloat("Radar range override (m)"));
+    _deprecatedRangeOverride = new ConfigDeprecated<float>(new ConfigFloat("Radar range override (m)"));
 
     // If range override is true, check if the deprecated range override float is also set. If it is, set the current range override
     _deprecatedUseRangeOverride.Callback = (v) => {
         if (v)
         {
-            _deprecatedRangeOverride.Update(ref _ini, IniSectionGeneral);
+            _deprecatedRangeOverride.Update(_ini, IniSectionGeneral);
         }
     };
 
@@ -1341,12 +1341,12 @@ void AddTextSurfaces(IMyTerminalBlock block, List<ISpriteSurface> surfaces)
         if (parsed && _textSurfaceIni.ContainsSection(IniSectionMultiscreen))
         {
             multiscreen = true;
-            _rows.ReadFromIni(ref _textSurfaceIni, IniSectionMultiscreen);
-            _cols.ReadFromIni(ref _textSurfaceIni, IniSectionMultiscreen);
+            _rows.ReadFromIni(_textSurfaceIni, IniSectionMultiscreen);
+            _cols.ReadFromIni(_textSurfaceIni, IniSectionMultiscreen);
             _rows.Value = Math.Max(_rows, 1);
             _cols.Value = Math.Max(_cols, 1);
-            _rows.WriteToIni(ref _textSurfaceIni, IniSectionMultiscreen);
-            _cols.WriteToIni(ref _textSurfaceIni, IniSectionMultiscreen);
+            _rows.WriteToIni(_textSurfaceIni, IniSectionMultiscreen);
+            _cols.WriteToIni(_textSurfaceIni, IniSectionMultiscreen);
         }
 
         if (!parsed && !string.IsNullOrWhiteSpace(block.CustomData))
@@ -1411,7 +1411,7 @@ void ParseCustomDataIni()
 
     foreach (var c in _generalConfig)
     {
-        c.Update(ref _ini);
+        c.Update(_ini);
     }
 
     _radarSurface.FadeOutInterval = _fadeOutInterval;
@@ -2399,8 +2399,6 @@ public class SingleScreenSpriteSurface : ISpriteSurface
 // Assumes that all text panels are the same size
 public class MultiScreenSpriteSurface : ISpriteSurface
 {
-    public bool Initialized { get; private set; } = false;
-
     float Rotation
     {
         get
@@ -2502,6 +2500,20 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     readonly SingleScreenSpriteSurface[,] _surfaces;
     readonly Vector2[,] _screenOrigins;
 
+    static List<MyDefinitionId> _insetScreenDefs = new List<MyDefinitionId>()
+    {
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeFullBlockLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallFullBlockLCDPanel"),
+    };
+
+    static List<MyDefinitionId> _diagonalScreenDefs = new List<MyDefinitionId>()
+    {
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeCurvedLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallCurvedLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeDiagonalLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallDiagonalLCDPanel"),
+    };
+
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
@@ -2513,12 +2525,12 @@ public class MultiScreenSpriteSurface : ISpriteSurface
 
         _rotationProp = _anchor.GetProperty("Rotate").Cast<float>();
 
+        Vector3 anchorRight, anchorDown;
+        GetAnchorDirections(anchor, out anchorRight, out anchorDown);
+        Vector3 anchorBlockSize = new Vector3(_anchor.Max - _anchor.Min) + Vector3.One;
+        Vector3I stepRight = Vector3I.Round(Math.Abs(Vector3.Dot(anchorBlockSize, anchorRight)) * anchorRight);
+        Vector3I stepDown = Vector3I.Round(Math.Abs(Vector3.Dot(anchorBlockSize, anchorDown)) * anchorDown);
         Vector3I anchorPos = _anchor.Position;
-        Vector3I anchorRight = -Base6Directions.GetIntVector(_anchor.Orientation.Left);
-        Vector3I anchorDown = -Base6Directions.GetIntVector(_anchor.Orientation.Up);
-        Vector3I anchorBlockSize = _anchor.Max - _anchor.Min + Vector3I.One;
-        Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
-        Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
         IMyCubeGrid grid = _anchor.CubeGrid;
         for (int r = 0; r < Rows; ++r)
         {
@@ -2531,6 +2543,26 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
 
         UpdateRotation();
+    }
+
+    static void GetAnchorDirections(IMyTextPanel anchor, out Vector3 anchorRight, out Vector3 anchorDown)
+    {
+        var def = anchor.BlockDefinition;
+        if (_insetScreenDefs.Contains(def))
+        {
+            anchorRight = Base6Directions.GetVector(anchor.Orientation.Forward);
+        }
+        else if (_diagonalScreenDefs.Contains(def))
+        {
+            anchorRight = Base6Directions.GetVector(anchor.Orientation.Forward) + Base6Directions.GetVector(anchor.Orientation.Left);
+            anchorRight.Normalize();
+        }
+        else
+        {
+            anchorRight = -Base6Directions.GetVector(anchor.Orientation.Left);
+        }
+
+        anchorDown = -Base6Directions.GetVector(anchor.Orientation.Up);
     }
 
     public void UpdateRotation()
@@ -2719,12 +2751,11 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     }
 }
 #endregion
-
 public interface IConfigValue
 {
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
     void Reset();
     string Name { get; set; }
     string Comment { get; set; }
@@ -2749,7 +2780,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -2757,12 +2790,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -2770,14 +2809,14 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return Value.ToString();
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
@@ -2797,7 +2836,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
         ini.Set(section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(Comment))
@@ -2821,7 +2860,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -2848,7 +2887,7 @@ class ConfigSection
         _values.AddRange(values);
     }
 
-    void SetComment(ref MyIni ini)
+    void SetComment(MyIni ini)
     {
         if (!string.IsNullOrWhiteSpace(Comment))
         {
@@ -2856,30 +2895,30 @@ class ConfigSection
         }
     }
 
-    public void ReadFromIni(ref MyIni ini)
+    public void ReadFromIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.ReadFromIni(ref ini, Section);
+            c.ReadFromIni(ini, Section);
         }
     }
 
-    public void WriteToIni(ref MyIni ini)
+    public void WriteToIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.WriteToIni(ref ini, Section);
+            c.WriteToIni(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 
-    public void Update(ref MyIni ini)
+    public void Update(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.Update(ref ini, Section);
+            c.Update(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 }
 public class ConfigString : ConfigValue<string>
@@ -2975,40 +3014,40 @@ public class ConfigInt : ConfigValue<int>
     }
 }
 
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
+public class ConfigNullable<T> : IConfigValue<T> where T : struct
 {
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
+    public string Name
+    {
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
+    public string Comment
+    {
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
     }
-    
+
     public string NullString;
+
     public T Value
     {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
+        get { return _impl.Value; }
+        set
+        {
+            _impl.Value = value;
             HasValue = true;
             _skipRead = true;
         }
     }
-    public readonly ConfigImplementation Implementation;
+    
     public bool HasValue { get; private set; }
+    readonly IConfigValue<T> _impl;
     bool _skipRead = false;
 
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    public ConfigNullable(IConfigValue<T> impl, string nullString = "none")
     {
-        Implementation = impl;
+        _impl = impl;
         NullString = nullString;
         HasValue = false;
     }
@@ -3019,14 +3058,14 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         _skipRead = true;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -3038,19 +3077,19 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ref ini, section);
+        _impl.WriteToIni(ini, section);
         if (!HasValue)
         {
-            ini.Set(section, Implementation.Name, NullString);
+            ini.Set(section, _impl.Name, NullString);
         }
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
@@ -3059,51 +3098,57 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         return HasValue ? Value.ToString() : NullString;
     }
 }
-public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : IConfigValue<T>, IConfigValue
+public class ConfigDeprecated<T> : IConfigValue<T>
 {
-    public readonly ConfigImplementation Implementation;
     public Action<T> Callback;
+    readonly IConfigValue<T> _impl;
 
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
-    }
-
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
-    }
-
-    public ConfigDeprecated(ConfigImplementation impl)
+    public string Name
     {
-        Implementation = impl;
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public string Comment
     {
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
+    }
+
+    public T Value
+    {
+        get { return _impl.Value; }
+        set { _impl.Value = value; }
+    }
+
+    public ConfigDeprecated(IConfigValue<T> impl)
+    {
+        _impl = impl;
+    }
+
+    public bool ReadFromIni(MyIni ini, string section)
+    {
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
-            Callback?.Invoke(Implementation.Value);
+            Callback?.Invoke(_impl.Value);
         }
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        ini.Delete(section, Implementation.Name);
+        ini.Delete(section, _impl.Name);
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public void Reset() {}
+    public void Reset() { }
 }
 
 public static class StringExtensions
