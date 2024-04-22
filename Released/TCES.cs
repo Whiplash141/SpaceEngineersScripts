@@ -51,8 +51,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.11.7",
-    Date = "2024/03/13",
+    Version = "1.12.3",
+    Date = "2024/04/22",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
     IniKeyAzimuthName = "Azimuth rotor name tag",
@@ -86,11 +86,151 @@ MyIni _ini = new MyIni();
 
 class CustomTurretController
 {
-    class RotorConfig
+    class ConfigMinMax : ConfigValue<Vector2>
     {
-        public ConfigSection Section = new ConfigSection(IniSectionRotor);
+        public float Min
+        {
+            get
+            {
+                return (float)Math.Min(Value.X, Value.Y);
+            }
+        }
 
-        public ConfigNullable<float, ConfigFloat> RestAngleDeg = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(IniKeyRestAngle), "none");
+        public float Max
+        {
+            get
+            {
+                return (float)Math.Max(Value.X, Value.Y);
+            }
+        }
+
+        public ConfigMinMax(string name, Vector2 value = default(Vector2), string comment = null) : base(name, value, comment) { }
+
+        protected override bool SetValue(ref MyIniValue val)
+        {
+            // Source formatting example: {min:-60 max:30}
+            string source = val.ToString("");
+            int xIndex = source.IndexOf("min:");
+            int yIndex = source.IndexOf("max:");
+            int closingBraceIndex = source.IndexOf("}");
+            if (xIndex == -1 || yIndex == -1 || closingBraceIndex == -1)
+            {
+                SetDefault();
+                return false;
+            }
+
+            Vector2 vec = default(Vector2);
+            string xStr = source.Substring(xIndex + 4, yIndex - (xIndex + 4));
+            if (!float.TryParse(xStr, out vec.X))
+            {
+                SetDefault();
+                return false;
+            }
+            string yStr = source.Substring(yIndex + 4, closingBraceIndex - (yIndex + 4));
+            if (!float.TryParse(yStr, out vec.Y))
+            {
+                SetDefault();
+                return false;
+            }
+            _value = vec;
+            return true;
+        }
+
+        public override string ToString()
+        {
+            return $"{{min:{Min} max:{Max}}}";
+        }
+    }
+
+    class WeaponDeadzone
+    {
+        public ConfigMinMax _azimuthDeadzoneRange = new ConfigMinMax("Azimuth angle range (deg)");
+        public ConfigMinMax _elevationDeadzoneRange = new ConfigMinMax("Elevation angle range (deg)");
+
+        readonly string _sectionName;
+
+        public WeaponDeadzone(int index)
+        {
+            _sectionName = $"TCES - Weapon Deadzone {index + 1}";
+        }
+
+        public void Update(MyIni ini, IMyMotorStator azimuth, IMyMotorStator elevation)
+        {    
+            if (azimuth != null)
+            {
+                _azimuthDeadzoneRange.Update(ini, _sectionName);
+            }
+            else
+            {
+                ini.Delete(_sectionName, _azimuthDeadzoneRange.Name);
+            }
+
+            if (elevation != null)
+            {
+                _elevationDeadzoneRange.Update(ini, _sectionName);
+            }
+            else
+            {
+                ini.Delete(_sectionName, _elevationDeadzoneRange.Name);
+            }
+        }
+
+        bool WithinDeadzone(IMyMotorStator rotor, float min, float max)
+        {
+            if (max <= min)
+            {
+                return false;
+            }
+
+            float angleDeg = MathHelper.ToDegrees(rotor.Angle);
+            
+            float delta = 0;
+            if (angleDeg < min)
+            {
+                delta = min - angleDeg;
+            }
+            else if (angleDeg > max)
+            {
+                delta = max - angleDeg;
+            }
+
+            float wraps = (float)Math.Round(delta / 360f);
+            float wrappedAngle = angleDeg + wraps * 360f;
+
+            return wrappedAngle > min && wrappedAngle < max;
+        }
+
+        public bool ShouldSafe(IMyMotorStator azimuth, IMyMotorStator elevation)
+        {
+            bool shouldSafe = true;
+
+            if (azimuth != null)
+            {
+                shouldSafe &= WithinDeadzone(azimuth, _azimuthDeadzoneRange.Min, _azimuthDeadzoneRange.Max);
+            }
+
+            if (elevation != null)
+            {
+                shouldSafe &= WithinDeadzone(elevation, _elevationDeadzoneRange.Min, _elevationDeadzoneRange.Max);
+            }
+
+            return shouldSafe;
+        }
+    }
+
+    class DeadzoneConfig : ConfigSection
+    {
+        public ConfigInt DeadzoneCount = new ConfigInt("Weapon deadzone count", 0);
+        public List<WeaponDeadzone> Deadzones = new List<WeaponDeadzone>();
+        public DeadzoneConfig() : base("TCES - Weapon Deadzone Config") 
+        {
+            AddValues(DeadzoneCount);
+        }
+    }
+
+    class RotorConfig : ConfigSection
+    {
+        private ConfigNullable<float> _restAngleDeg = new ConfigNullable<float>(new ConfigFloat(IniKeyRestAngle), "none");
         public ConfigFloat RestSpeedRatio = new ConfigFloat(IniKeyRestSpeed, 1f);
         public ConfigBool EnableStabilization = new ConfigBool(IniKeyEnableStabilization, true);
 
@@ -98,18 +238,18 @@ class CustomTurretController
         {
             get
             {
-                if (RestAngleDeg.HasValue)
+                if (_restAngleDeg.HasValue)
                 {
-                    return MathHelper.ToRadians(RestAngleDeg.Value);
+                    return MathHelper.ToRadians(_restAngleDeg.Value);
                 }
                 return null;
             }
         }
 
-        public RotorConfig()
+        public RotorConfig() : base(IniSectionRotor)
         {
-            Section.AddValues(
-                RestAngleDeg,
+            AddValues(
+                _restAngleDeg,
                 RestSpeedRatio,
                 EnableStabilization
             );
@@ -128,6 +268,7 @@ class CustomTurretController
     StabilizedRotor _azimuthStabilizer = new StabilizedRotor();
     StabilizedRotor _elevationStabilizer = new StabilizedRotor();
 
+    DeadzoneConfig _deadzoneConfig = new DeadzoneConfig();
     RotorConfig _azimuthConfig = new RotorConfig();
     RotorConfig _elevationConfig = new RotorConfig();
     IMyTurretControlBlock _controller;
@@ -144,6 +285,8 @@ class CustomTurretController
     MyIni _ini = new MyIni();
     float _idleTime = 0f;
     float _cachedElevationBrakingTorque = 0;
+    bool _wasSafed = false;
+
 
     const float RestSpeed = 10f;
     const float PlayerInputMultiplier = 1f / 50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
@@ -320,16 +463,25 @@ class CustomTurretController
             return;
         }
 
-        Vector3D aimDirection = aimRef.WorldMatrix.Forward;
         Vector3D targetDirection = info.HitPosition.Value - aimRef.WorldMatrix.Translation;
-        double cosBtwn = VectorMath.CosBetween(aimDirection, targetDirection);
-        if (cosBtwn > 0.7071)
+
+        if (_azimuthStabilizer.Rotor == null)
         {
             _aiControlSM.SetState(AiTargetingState.BothRotors);
         }
         else
         {
-            _aiControlSM.SetState(AiTargetingState.AzimuthOnly);
+            Vector3D flattenedAimDirection = VectorMath.Rejection(aimRef.WorldMatrix.Forward, _azimuthStabilizer.Rotor.WorldMatrix.Up);
+            Vector3D flattenedTargetDirection = VectorMath.Rejection(targetDirection, _azimuthStabilizer.Rotor.WorldMatrix.Up);
+            double cosBtwn = VectorMath.CosBetween(flattenedAimDirection, flattenedTargetDirection);
+            if (cosBtwn > 0.7071)
+            {
+                _aiControlSM.SetState(AiTargetingState.BothRotors);
+            }
+            else
+            {
+                _aiControlSM.SetState(AiTargetingState.AzimuthOnly);
+            }
         }
 
         if (_p.AutomaticDeviationAngle)
@@ -432,11 +584,43 @@ class CustomTurretController
         }
 
         Update1();
+        EvaluateDeadzones();
 
         if (_controlledExtraRotors.Count > 0)
         {
             HandleExtraRotors();
             SyncWeaponFiring();
+        }
+    }
+
+    void EvaluateDeadzones()
+    {
+        bool safed = false;
+        
+        foreach (var deadzone in _deadzoneConfig.Deadzones)
+        {
+            safed = deadzone.ShouldSafe(_azimuthStabilizer.Rotor, _elevationStabilizer.Rotor);
+
+            if (safed)
+            {
+                break;
+            }
+        }
+
+        if (safed == _wasSafed)
+        {
+            return;
+        }
+
+        _wasSafed = safed;
+
+        foreach (var b in _tools)
+        {
+            var gun = b as IMyUserControllableGun;
+            if (gun != null)
+            {
+                gun.Enabled = !safed;
+            }
         }
     }
 
@@ -497,6 +681,10 @@ class CustomTurretController
         {
             _setupReturnCode |= ReturnCode.MissingController;
         }
+        else
+        {
+            ParseCTCIni(_controller);
+        }
         if (_azimuthStabilizer.Rotor == null)
         {
             _setupReturnCode |= ReturnCode.MissingAzimuth;
@@ -519,21 +707,48 @@ class CustomTurretController
         }
     }
 
-    void ParseRotorIni(IMyMotorStator r, RotorConfig config)
+    void PreparseIni(IMyTerminalBlock b)
     {
         _ini.Clear();
-        if (!_ini.TryParse(r.CustomData) && !string.IsNullOrWhiteSpace(r.CustomData))
+        if (!_ini.TryParse(b.CustomData) && !string.IsNullOrWhiteSpace(b.CustomData))
         {
-            _ini.EndContent = r.CustomData;
+            _ini.EndContent = b.CustomData;
         }
+    }
 
-        config.Section.Update(_ini);
-
+    void PostparseIni(IMyTerminalBlock b)
+    {
         string output = _ini.ToString();
-        if (output != r.CustomData)
+        if (output != b.CustomData)
         {
-            r.CustomData = output;
+            b.CustomData = output;
         }
+    }
+
+    void ParseRotorIni(IMyMotorStator r, RotorConfig config)
+    {
+        PreparseIni(r);
+
+        config.Update(_ini);
+
+        PostparseIni(r);
+    }
+
+    void ParseCTCIni(IMyTurretControlBlock tcb)
+    {
+        PreparseIni(tcb);
+
+        _deadzoneConfig.Update(_ini);
+
+        _deadzoneConfig.Deadzones.Clear();
+        for (int ii = 0; ii < _deadzoneConfig.DeadzoneCount; ++ii)
+        {
+            var deadzone = new WeaponDeadzone(ii);
+            deadzone.Update(_ini, _azimuthStabilizer.Rotor, _elevationStabilizer.Rotor);
+            _deadzoneConfig.Deadzones.Add(deadzone);
+        }
+
+        PostparseIni(tcb);
     }
 
     bool CollectBlocks(IMyTerminalBlock b)
@@ -1182,7 +1397,7 @@ new AnimationParams(0),
         float minScale = Math.Min(scale.X, scale.Y);
 
         var frame = _surface.DrawFrame();
-        
+
         if (_clearSpriteCache)
         {
             frame.Add(new MySprite());
@@ -1191,7 +1406,7 @@ new AnimationParams(0),
         DrawCTC(frame, screenCenter + _ctcPos * minScale, CTCSpriteScale * minScale);
         DrawTurret(frame, screenCenter + _turretPos * minScale, TurretSpriteScale * minScale, anim.ElevationAngle, anim.DrawMuzzleFlash);
         DrawTitleBar(ref frame, _surface, _topBarColor, _white, _titleText, minScale, TextSize);
-        
+
         frame.Dispose();
     }
 
@@ -1370,7 +1585,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -1378,12 +1595,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -1470,40 +1693,54 @@ public class ConfigFloat : ConfigValue<float>
     }
 }
 
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
+public class ConfigInt : ConfigValue<int>
 {
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
+    public ConfigInt(string name, int value = 0, string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        if (!val.TryGetInt32(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigNullable<T> : IConfigValue<T> where T : struct
+{
+    public string Name
+    {
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
+    public string Comment
+    {
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
     }
-    
+
     public string NullString;
+
     public T Value
     {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
+        get { return _impl.Value; }
+        set
+        {
+            _impl.Value = value;
             HasValue = true;
             _skipRead = true;
         }
     }
-    public readonly ConfigImplementation Implementation;
+    
     public bool HasValue { get; private set; }
+    readonly IConfigValue<T> _impl;
     bool _skipRead = false;
 
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    public ConfigNullable(IConfigValue<T> impl, string nullString = "none")
     {
-        Implementation = impl;
+        _impl = impl;
         NullString = nullString;
         HasValue = false;
     }
@@ -1521,7 +1758,7 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ini, section);
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -1535,10 +1772,10 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
 
     public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ini, section);
+        _impl.WriteToIni(ini, section);
         if (!HasValue)
         {
-            ini.Set(section, Implementation.Name, NullString);
+            ini.Set(section, _impl.Name, NullString);
         }
     }
 
@@ -1555,7 +1792,7 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -1626,6 +1863,40 @@ public class ConfigString : ConfigValue<string>
             SetDefault();
             return false;
         }
+        return true;
+    }
+}
+
+public class ConfigVector2 : ConfigValue<Vector2>
+{
+    public ConfigVector2(string name, Vector2 value = default(Vector2), string comment = null) : base(name, value, comment) { }
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        // Source formatting example: {X:2.75 Y:-14.4}
+        string source = val.ToString("");
+        int xIndex = source.IndexOf("X:");
+        int yIndex = source.IndexOf("Y:");
+        int closingBraceIndex = source.IndexOf("}");
+        if (xIndex == -1 || yIndex == -1 || closingBraceIndex == -1)
+        {
+            SetDefault();
+            return false;
+        }
+
+        Vector2 vec = default(Vector2);
+        string xStr = source.Substring(xIndex + 2, yIndex - (xIndex + 2));
+        if (!float.TryParse(xStr, out vec.X))
+        {
+            SetDefault();
+            return false;
+        }
+        string yStr = source.Substring(yIndex + 2, closingBraceIndex - (yIndex + 2));
+        if (!float.TryParse(yStr, out vec.Y))
+        {
+            SetDefault();
+            return false;
+        }
+        _value = vec;
         return true;
     }
 }
@@ -1886,20 +2157,10 @@ public static class VectorMath
     public static double CosBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        {
             return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(CosBetween(a, b));
+        }
+        return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
     }
 
     /// <summary>
@@ -1925,6 +2186,22 @@ public static class VectorMath
             return Vector3D.Zero;
 
         return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    /// <remarks>
+    /// This uses atan2 to avoid numerical precision issues associated
+    /// with acos based dot-product backsolving.
+    /// </remarks>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        {
+            return 0;
+        }
+        return Math.Atan2(Vector3D.Cross(a, b).Length(), Vector3D.Dot(a, b));
     }
 }
 
