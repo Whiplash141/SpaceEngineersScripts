@@ -10,7 +10,7 @@ void Main()
     catch (Exception e)
     {
         BlueScreenOfDeath.Show(Me.GetSurface(0), "Test script", "1.2.4", e);
-        throw e;
+        throw;
     }
 }
 
