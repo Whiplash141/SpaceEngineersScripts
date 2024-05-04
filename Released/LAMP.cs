@@ -2,8 +2,8 @@
 #region Script
 
 #region DONT YOU DARE TOUCH THESE
-const string Version = "95.12.2";
-const string Date = "2024/01/28";
+const string Version = "95.13.1";
+const string Date = "2024/04/28";
 const string CompatVersion = "170.0.0";
 #endregion
 
@@ -151,10 +151,10 @@ ConfigDouble
     _minRaycastRange = new ConfigDouble("Minimum allowed lock on range (m)", 50),
     _searchScanRandomSpread = new ConfigDouble("Randomized raycast scan spread (m)", 0);
 
-ConfigNullable<int, ConfigInt>
-    _autofireLimitPerTarget = new ConfigNullable<int, ConfigInt>(new ConfigInt("Auto-fire missile limit per target")),
-    _siloDoorNumber = new ConfigNullable<int, ConfigInt>(new ConfigInt(MissileNumberText, comment: " This door will be opened when this specified missile is fired")),
-    _timerMissileNumber = new ConfigNullable<int, ConfigInt>(new ConfigInt(MissileNumberText, comment: " This timer will be triggered when this specified missile is fired"));
+ConfigNullable<int>
+    _autofireLimitPerTarget = new ConfigNullable<int>(new ConfigInt("Auto-fire missile limit per target")),
+    _siloDoorNumber = new ConfigNullable<int>(new ConfigInt(MissileNumberText, comment: " This door will be opened when this specified missile is fired")),
+    _timerMissileNumber = new ConfigNullable<int>(new ConfigInt(MissileNumberText, comment: " This timer will be triggered when this specified missile is fired"));
 
 ConfigEnum<GuidanceMode> _preferredGuidanceMode = new ConfigEnum<GuidanceMode>("Preferred guidance mode", GuidanceMode.Camera, " Accepted guidance modes are:\n   Camera, Turret, or BeamRiding");
 ConfigEnum<FireOrder> _fireOrder = new ConfigEnum<FireOrder>("Fire order", FireOrder.LowestMissileNumber, " Accepted values are:\n   LowestMissileNumber, SmallestAngleToTarget,\n   or SmallestDistanceToTarget\n Missiles will be fired smallest to largest value");
@@ -166,15 +166,10 @@ ConfigEnum<TriggerState>
         " The \"Targeting\" state is triggered when a homing lock is established\n" +
         " OR when beam ride mode is activated. To trigger on multiple states\n" +
         " simply separate each state with commas (Ex: Idle,Targeting).");
+ConfigEnum<TimerTriggerMode> _timerTriggerMode = new ConfigEnum<TimerTriggerMode>("Timer trigger mode", TimerTriggerMode.TriggerNow, " Accepted values are:\n   TriggerNow, Start");
 
-ConfigDeprecated<bool, ConfigBool>
-    _compatTimerTriggerAnyMissile = new ConfigDeprecated<bool, ConfigBool>(
-        new ConfigBool("Trigger on any fire", false));
-
-ConfigDeprecated<TriggerState, ConfigEnum<TriggerState>>
-    _compatTimerTriggerState = new ConfigDeprecated<TriggerState, ConfigEnum<TriggerState>>(
-        new ConfigEnum<TriggerState>("Trigger on targeting state", TriggerState.None));
-
+ConfigDeprecated<bool> _compatTimerTriggerAnyMissile = new ConfigDeprecated<bool>(new ConfigBool("Trigger on any fire", false));
+ConfigDeprecated<TriggerState> _compatTimerTriggerState = new ConfigDeprecated<TriggerState>(new ConfigEnum<TriggerState>("Trigger on targeting state", TriggerState.None));
 
 public ConfigColor
     TopBarColor = new ConfigColor("Title bar background color", new Color(25, 25, 25)),
@@ -210,10 +205,11 @@ float _lockStrength = 0f;
 
 ArgumentParser _args = new ArgumentParser();
 
-public enum GuidanceMode : int { None = 0, BeamRiding = 1, Camera = 1 << 1, Turret = 1 << 2 };
-enum TargetingStatus { Idle, Searching, Targeting };
-enum FireOrder { LowestMissileNumber, SmallestDistanceToTarget, SmallestAngleToTarget };
-[Flags] enum TriggerState { None = 0, Idle = 1, Searching = 1 << 1, Targeting = 1 << 2, AnyFire = 1 << 3 };
+public enum TimerTriggerMode { TriggerNow = 0, Start = 1 }
+public enum GuidanceMode : int { None = 0, BeamRiding = 1, Camera = 1 << 1, Turret = 1 << 2 }
+enum TargetingStatus { Idle, Searching, Targeting }
+enum FireOrder { LowestMissileNumber, SmallestDistanceToTarget, SmallestAngleToTarget }
+[Flags] enum TriggerState { None = 0, Idle = 1, Searching = 1 << 1, Targeting = 1 << 2, AnyFire = 1 << 3 }
 
 TriggerState[] _triggerStateValues;
 
@@ -264,13 +260,14 @@ List<IMyShipController> _shipControllers = new List<IMyShipController>();
 List<IMyMechanicalConnectionBlock> _mech = new List<IMyMechanicalConnectionBlock>();
 List<IMyLargeTurretBase> _turrets = new List<IMyLargeTurretBase>();
 List<IMyTurretControlBlock> _turretControlBlocks = new List<IMyTurretControlBlock>();
-List<IMyTimerBlock> _statusTimersAnyFire = new List<IMyTimerBlock>(),
-                    _statusTimersIdle = new List<IMyTimerBlock>(),
-                    _statusTimersSearch = new List<IMyTimerBlock>(),
-                    _statusTimersTargeting = new List<IMyTimerBlock>();
-Dictionary<TriggerState, List<IMyTimerBlock>> _statusTimerMap;
+List<TimerContainer> 
+    _statusTimersAnyFire = new List<TimerContainer>(),
+    _statusTimersIdle = new List<TimerContainer>(),
+    _statusTimersSearch = new List<TimerContainer>(),
+    _statusTimersTargeting = new List<TimerContainer>();
+Dictionary<TriggerState, List<TimerContainer>> _statusTimerMap;
 Dictionary<int, List<IMyDoor>> _siloDoorDict = new Dictionary<int, List<IMyDoor>>();
-Dictionary<int, List<IMyTimerBlock>> _fireTimerDict = new Dictionary<int, List<IMyTimerBlock>>();
+Dictionary<int, List<TimerContainer>> _fireTimerDict = new Dictionary<int, List<TimerContainer>>();
 StringBuilder _setupStringbuilder = new StringBuilder();
 RuntimeTracker _runtimeTracker;
 RaycastHoming _raycastHoming;
@@ -295,6 +292,30 @@ SoundConfig
     _lockBadSound = new SoundConfig(IniSectionSoundBase + "Bad", "ArcSoundBlockAlert1", 0.15f, 1f, true),
     _lockLostSound = new SoundConfig(IniSectionSoundBase + "Lost/Abort", "ArcSoundBlockAlert1", 0.5f, 0f, false);
 
+public class TimerContainer
+{
+    public readonly IMyTimerBlock Timer;
+    public readonly TimerTriggerMode TriggerMode;
+
+    public TimerContainer(IMyTimerBlock timer, TimerTriggerMode triggerMode)
+    {
+        Timer = timer;
+        TriggerMode = triggerMode;
+    }
+
+    public void Trigger()
+    {
+        if (TriggerMode == TimerTriggerMode.Start)
+        {
+            Timer.StartCountdown();
+        }
+        else
+        {
+            Timer.Trigger();
+        }
+    }
+}
+
 public class SoundConfig
 {
     public ConfigString Name;
@@ -318,7 +339,7 @@ public class SoundConfig
 
     public void UpdateFrom(MyIni ini)
     {
-        _soundConfig.Update(ref ini);
+        _soundConfig.Update(ini);
     }
 };
 
@@ -378,9 +399,10 @@ Program()
         _compatTimerTriggerAnyMissile,
         _compatTimerTriggerState,
         _timerMissileNumber,
-        _timerTriggerState);
+        _timerTriggerState,
+        _timerTriggerMode);
 
-    _statusTimerMap = new Dictionary<TriggerState, List<IMyTimerBlock>>()
+    _statusTimerMap = new Dictionary<TriggerState, List<TimerContainer>>()
     {
         {TriggerState.Idle, _statusTimersIdle},
         {TriggerState.Searching, _statusTimersSearch},
@@ -468,7 +490,7 @@ void Main(string arg, UpdateType updateType)
         {
             BlueScreenOfDeath.Show(surface, scriptName, Version, e);
         }
-        throw e;
+        throw;
     }
 }
 
@@ -496,7 +518,7 @@ void HandleDisplays()
 
 void OnNewTargetingStatus()
 {
-    List<IMyTimerBlock> timers;
+    List<TimerContainer> timers;
     switch (CurrentTargetingStatus)
     {
         case TargetingStatus.Idle:
@@ -511,6 +533,7 @@ void OnNewTargetingStatus()
         default:
             return;
     }
+
     foreach (var t in timers)
     {
         t.Trigger();
@@ -1506,7 +1529,7 @@ void HandleIni()
 
     foreach (var c in _config)
     {
-        c.Update(ref _ini);
+        c.Update(_ini);
     }
 
     _lockSearchSound.UpdateFrom(_ini);
@@ -1550,7 +1573,7 @@ bool CollectionFunction(IMyTerminalBlock block)
             _ini.EndContent = door.CustomData;
         }
 
-        _siloDoorSection.Update(ref _ini);
+        _siloDoorSection.Update(_ini);
 
         if (_siloDoorNumber.HasValue)
         {
@@ -1585,17 +1608,17 @@ bool CollectionFunction(IMyTerminalBlock block)
 
         _timerTriggerState.Reset();
         
-        _timerConfig.Update(ref _ini);
+        _timerConfig.Update(_ini);
 
         if (_timerMissileNumber.HasValue)
         {
-            List<IMyTimerBlock> timers;
+            List<TimerContainer> timers;
             if (!_fireTimerDict.TryGetValue(_timerMissileNumber.Value, out timers))
             {
-                timers = new List<IMyTimerBlock>();
+                timers = new List<TimerContainer>();
                 _fireTimerDict[_timerMissileNumber.Value] = timers;
             }
-            timers.Add(timer);
+            timers.Add(new TimerContainer(timer, _timerTriggerMode));
         }
 
         foreach (TriggerState val in _triggerStateValues)
@@ -1607,10 +1630,10 @@ bool CollectionFunction(IMyTerminalBlock block)
 
             if ((val & _timerTriggerState.Value) != 0)
             {
-                List<IMyTimerBlock> timers;
+                List<TimerContainer> timers;
                 if (_statusTimerMap.TryGetValue(val, out timers))
                 {
-                    timers.Add(timer);
+                    timers.Add(new TimerContainer(timer, _timerTriggerMode));
                 }
             }
         }
@@ -1971,12 +1994,12 @@ void OpenSiloDoor(int missileNumber)
 
 void TriggerFireTimer(int missileNumber)
 {
-    List<IMyTimerBlock> timers;
+    List<TimerContainer> timers;
     if (_fireTimerDict.TryGetValue(missileNumber, out timers))
     {
-        foreach (IMyTimerBlock t in timers)
+        foreach (var t in timers)
         {
-            t.Trigger();
+           t.Trigger();
         }
     }
 
@@ -2791,7 +2814,77 @@ void ScaleAntennaRange(double dist)
 
 enum TargetRelation : byte { Neutral = 0, Other = 0, Enemy = 1, Friendly = 2, Locked = 4, LargeGrid = 8, SmallGrid = 16, Missile = 32, Asteroid = 64, RelationMask = Neutral | Enemy | Friendly, TypeMask = LargeGrid | SmallGrid | Other | Missile | Asteroid }
 
-#region Raycast Homing
+public static class VectorMath
+{
+    /// <summary>
+    /// Projects vector a onto vector b
+    /// </summary>
+    public static Vector3D Projection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+        
+        if (Vector3D.IsUnit(ref b))
+            return a.Dot(b) * b;
+
+        return a.Dot(b) / b.LengthSquared() * b;
+    }
+
+    /// <summary>
+    /// Rejects vector a on vector b
+    /// </summary>
+    public static Vector3D Rejection(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+            return Vector3D.Zero;
+
+        return a - a.Dot(b) / b.LengthSquared() * b;
+    }
+}
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
+}
+
 class RaycastHoming
 {
     public TargetingStatus Status { get; private set; } = TargetingStatus.NotLocked;
@@ -3146,7 +3239,7 @@ class RaycastHoming
                 // Compute aim offset
                 if (!_manualLockOverride)
                 {
-                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorRejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
+                    Vector3D hitPosOffset = reference == null ? Vector3D.Zero : VectorMath.Rejection(reference.GetPosition() - scanOrigin, HitPosition - scanOrigin);
                     PreciseModeOffset = Vector3D.TransformNormal(info.HitPosition.Value + hitPosOffset - TargetCenter, MatrixD.Transpose(_targetOrientation));
                 }
             }
@@ -3237,6 +3330,9 @@ class RaycastHoming
         IMyCameraBlock maxRangeCamera = null;
         foreach (var c in cameras)
         {
+            if (c.Closed)
+                continue;
+
             if (c.AvailableScanRange > maxRange)
             {
                 maxRangeCamera = c;
@@ -3259,49 +3355,7 @@ class RaycastHoming
         }
         return null;
     }
-
-    IMyShipController GetControlledShipController(List<IMyShipController> controllers)
-    {
-        if (controllers.Count == 0)
-            return null;
-
-        IMyShipController mainController = null;
-        IMyShipController controlled = null;
-
-        foreach (var sc in controllers)
-        {
-            if (sc.IsUnderControl && sc.CanControlShip)
-            {
-                if (controlled == null)
-                {
-                    controlled = sc;
-                }
-
-                if (sc.IsMainCockpit)
-                {
-                    mainController = sc; // Only one per grid so no null check needed
-                }
-            }
-        }
-
-        if (mainController != null)
-            return mainController;
-
-        if (controlled != null)
-            return controlled;
-
-        return controllers[0];
-    }
-
-    public static Vector3D VectorRejection(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return Vector3D.Zero;
-
-        return a - a.Dot(b) / b.LengthSquared() * b;
-    }
 }
-#endregion
 
 /// <summary>
 /// Class that tracks runtime history.
@@ -4045,12 +4099,11 @@ public struct MySpriteContainer
             return new MySprite(SpriteType.TEXT, _text, center + _positionFromCenter * scale, null, _color, _font, rotation: _rotationOrScale * scale, alignment: _textAlign);
     }
 }
-
 public interface IConfigValue
 {
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
     void Reset();
     string Name { get; set; }
     string Comment { get; set; }
@@ -4075,7 +4128,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -4083,12 +4138,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -4096,14 +4157,14 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return Value.ToString();
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
@@ -4123,7 +4184,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
         ini.Set(section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(Comment))
@@ -4147,7 +4208,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -4174,7 +4235,7 @@ class ConfigSection
         _values.AddRange(values);
     }
 
-    void SetComment(ref MyIni ini)
+    void SetComment(MyIni ini)
     {
         if (!string.IsNullOrWhiteSpace(Comment))
         {
@@ -4182,30 +4243,30 @@ class ConfigSection
         }
     }
 
-    public void ReadFromIni(ref MyIni ini)
+    public void ReadFromIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.ReadFromIni(ref ini, Section);
+            c.ReadFromIni(ini, Section);
         }
     }
 
-    public void WriteToIni(ref MyIni ini)
+    public void WriteToIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.WriteToIni(ref ini, Section);
+            c.WriteToIni(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 
-    public void Update(ref MyIni ini)
+    public void Update(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.Update(ref ini, Section);
+            c.Update(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 }
 public class ConfigInt : ConfigValue<int>
@@ -4334,87 +4395,93 @@ public class ConfigColor : ConfigValue<Color>
         return true;
     }
 }
-public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : IConfigValue<T>, IConfigValue
+public class ConfigDeprecated<T> : IConfigValue<T>
 {
-    public readonly ConfigImplementation Implementation;
     public Action<T> Callback;
+    readonly IConfigValue<T> _impl;
 
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
-    }
-
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
-    }
-
-    public ConfigDeprecated(ConfigImplementation impl)
+    public string Name
     {
-        Implementation = impl;
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public string Comment
     {
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
+    }
+
+    public T Value
+    {
+        get { return _impl.Value; }
+        set { _impl.Value = value; }
+    }
+
+    public ConfigDeprecated(IConfigValue<T> impl)
+    {
+        _impl = impl;
+    }
+
+    public bool ReadFromIni(MyIni ini, string section)
+    {
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
-            Callback?.Invoke(Implementation.Value);
+            Callback?.Invoke(_impl.Value);
         }
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        ini.Delete(section, Implementation.Name);
+        ini.Delete(section, _impl.Name);
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public void Reset() {}
+    public void Reset() { }
 }
 
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
+public class ConfigNullable<T> : IConfigValue<T> where T : struct
 {
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
+    public string Name
+    {
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
+    public string Comment
+    {
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
     }
-    
+
     public string NullString;
+
     public T Value
     {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
+        get { return _impl.Value; }
+        set
+        {
+            _impl.Value = value;
             HasValue = true;
             _skipRead = true;
         }
     }
-    public readonly ConfigImplementation Implementation;
+    
     public bool HasValue { get; private set; }
+    readonly IConfigValue<T> _impl;
     bool _skipRead = false;
 
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    public ConfigNullable(IConfigValue<T> impl, string nullString = "none")
     {
-        Implementation = impl;
+        _impl = impl;
         NullString = nullString;
         HasValue = false;
     }
@@ -4425,14 +4492,14 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         _skipRead = true;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -4444,19 +4511,19 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ref ini, section);
+        _impl.WriteToIni(ini, section);
         if (!HasValue)
         {
-            ini.Set(section, Implementation.Name, NullString);
+            ini.Set(section, _impl.Name, NullString);
         }
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
@@ -4464,48 +4531,5 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
     {
         return HasValue ? Value.ToString() : NullString;
     }
-}
-
-/// <summary>
-/// Selects the active controller from a list using the following priority:
-/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
-/// </summary>
-/// <param name="controllers">List of ship controlers</param>
-/// <param name="lastController">Last actively controlled controller</param>
-/// <returns>Actively controlled ship controller or null if none is controlled</returns>
-IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
-{
-    IMyShipController currentlyControlled = null;
-    foreach (IMyShipController ctrl in controllers)
-    {
-        if (ctrl.IsMainCockpit)
-        {
-            return ctrl;
-        }
-
-        // Grab the first seat that has a player sitting in it
-        // and save it away in-case we don't have a main contoller
-        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
-        {
-            currentlyControlled = ctrl;
-        }
-    }
-
-    // We did not find a main controller, so if the first controlled controller
-    // from last cycle if it is still controlled
-    if (lastController != null && lastController.IsUnderControl)
-    {
-        return lastController;
-    }
-
-    // Otherwise we return the first ship controller that we
-    // found that was controlled.
-    if (currentlyControlled != null)
-    {
-        return currentlyControlled;
-    }
-
-    // Nothing is under control, return the controller from last cycle.
-    return lastController;
 }
 #endregion
