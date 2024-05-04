@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.21.4";
-const string Date = "2024/03/08";
+const string Version = "170.22.2";
+const string Date = "2024/05/03";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -221,15 +221,6 @@ List<IMyCameraBlock> _homingCameras = new List<IMyCameraBlock>();
 List<IMyGasTank> _gasTanks = new List<IMyGasTank>();
 List<MyDetectedEntityInfo> _sensorEntities = new List<MyDetectedEntityInfo>();
 
-List<DynamicCircularBuffer<IMyCameraBlock>> _cameraBufferList = new List<DynamicCircularBuffer<IMyCameraBlock>>();
-DynamicCircularBuffer<IMyCameraBlock>
-    _camerasFront = new DynamicCircularBuffer<IMyCameraBlock>(),
-    _camerasBack = new DynamicCircularBuffer<IMyCameraBlock>(),
-    _camerasLeft = new DynamicCircularBuffer<IMyCameraBlock>(),
-    _camerasRight = new DynamicCircularBuffer<IMyCameraBlock>(),
-    _camerasUp = new DynamicCircularBuffer<IMyCameraBlock>(),
-    _camerasDown = new DynamicCircularBuffer<IMyCameraBlock>();
-
 ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
 List<MyTuple<Vector3D, long>> _remoteFireRequests = new List<MyTuple<Vector3D, long>>();
 
@@ -379,7 +370,7 @@ ConfigSection _stageTriggerConfig = new ConfigSection("WHAM - Stage Trigger");
 ConfigEnum<LaunchStage> _triggerOnStage = new ConfigEnum<LaunchStage>("Trigger on launch stage", LaunchStage.None, " Valid launch stages are:\n Intiate, Detach, Drift, Flight");
 
 ConfigSection _rangeTriggerConfig = new ConfigSection("WHAM - Range Trigger");
-ConfigNullable<double, ConfigDouble> _triggerAtRange = new ConfigNullable<double, ConfigDouble>(new ConfigDouble("Trigger at range (m)", 200, " Range from target to trigger this timer"));
+ConfigNullable<double> _triggerAtRange = new ConfigNullable<double>(new ConfigDouble("Trigger at range (m)", 200, " Range from target to trigger this timer"));
 
 class RangeTimer
 {
@@ -588,14 +579,6 @@ Program()
             camera.EnableRaycast = true;
         return false;
     });
-
-    // Save camera buffer references to our list
-    _cameraBufferList.Add(_camerasFront);
-    _cameraBufferList.Add(_camerasRight);
-    _cameraBufferList.Add(_camerasLeft);
-    _cameraBufferList.Add(_camerasUp);
-    _cameraBufferList.Add(_camerasDown);
-    _cameraBufferList.Add(_camerasBack);
 
     //load targeting data from last save
     ParseStorage();
@@ -1061,12 +1044,6 @@ void ClearLists()
     _sensors.Clear();
     _warheads.Clear();
     _cameras.Clear();
-    _camerasFront.Clear();
-    _camerasBack.Clear();
-    _camerasLeft.Clear();
-    _camerasRight.Clear();
-    _camerasUp.Clear();
-    _camerasDown.Clear();
     _homingCameras.Clear();
     _gasTanks.Clear();
 }
@@ -1499,7 +1476,6 @@ bool CollectBlocks(IMyTerminalBlock block)
         camera.EnableRaycast = true;
         if (_useCamerasForHoming)
             _homingCameras.Add(camera);
-        GetCameraOrientation(camera);
     }
     else if (AddToListIfType(block, _artMasses)
             || AddToListIfType(block, _batteries)
@@ -1578,31 +1554,6 @@ void GetThrusterOrientation(IMyTerminalBlock reference)
         {
             _sideThrusters.Add(t);
         }
-    }
-}
-
-void GetCameraOrientation(IMyCameraBlock c)
-{
-    switch (c.Orientation.Forward)
-    {
-        case Base6Directions.Direction.Forward:
-            _camerasFront.Add(c);
-            return;
-        case Base6Directions.Direction.Backward:
-            _camerasBack.Add(c);
-            return;
-        case Base6Directions.Direction.Left:
-            _camerasLeft.Add(c);
-            return;
-        case Base6Directions.Direction.Right:
-            _camerasRight.Add(c);
-            return;
-        case Base6Directions.Direction.Up:
-            _camerasUp.Add(c);
-            return;
-        case Base6Directions.Direction.Down:
-            _camerasDown.Add(c);
-            return;
     }
 }
 #endregion
@@ -1884,7 +1835,8 @@ Vector3D GuidanceMain(
             missileAcceleration,
             out adjustedTargetPos);
 
-        double distanceToTgtSq = Vector3D.DistanceSquared(missilePos, adjustedTargetPos);
+        double distanceToTgt = Math.Max(0.0, Vector3D.Distance(missilePos, adjustedTargetPos) - _raycastHoming.TargetSize * 0.5);
+        double distanceToTgtSq = distanceToTgt * distanceToTgt;
         double closingSpeedSq = (missileVel - _targetVel).LengthSquared();
         shouldProximityScan = pastMinArmingRange && (closingSpeedSq > distanceToTgtSq); // Roughly 1 second till impact
 
@@ -2165,12 +2117,13 @@ void CheckProximity()
     Vector3D adjustedTargetPos = _targetPos + _targetVel * (_timeSinceLastLock + _timeSinceLastIngest);
     Vector3D missileVelocity = _missileReference.GetShipVelocities().LinearVelocity;
     Vector3D closingVelocity = _guidanceMode == GuidanceMode.BeamRiding ? missileVelocity : missileVelocity - _targetVel;
+    Vector3D missilePos = _missileReference.GetPosition();
 
-    Vector3D missileToTarget = adjustedTargetPos - _missileReference.GetPosition();
+    Vector3D missileToTarget = adjustedTargetPos - missilePos;
     double distanceToTarget = missileToTarget.Length();
     Vector3D missileToTargetNorm = missileToTarget / distanceToTarget;
 
-    double closingSpeed;
+    double closingSpeed = Math.Max(1e-9, Vector3D.Dot(closingVelocity, missileToTargetNorm));
 
     // If we have no cameras or sensors for detonation, use some approximations
     if (_cameras.Count == 0 && _sensors.Count == 0)
@@ -2190,7 +2143,7 @@ void CheckProximity()
         {
             // Use bounding box estimation for detonation
             double adjustedDetonationRange = _missileReference.CubeGrid.WorldVolume.Radius + _raycastRange;
-            closingSpeed = Vector3D.Dot(closingVelocity, missileToTargetNorm);
+            
             if (distanceToTarget < adjustedDetonationRange + closingSpeed * SecondsPerUpdate)
             {
                 Detonate((distanceToTarget - adjustedDetonationRange) / closingSpeed);
@@ -2202,12 +2155,15 @@ void CheckProximity()
     }
 
     // Try raycast detonation methods
-    double raycastHitDistance = 0;
 
+    Vector3D targetScanPos = missilePos + missileToTargetNorm * (_raycastRange + closingSpeed * SecondsPerUpdate);
+
+    double raycastHitDistance = 0;
+    double trueClosingSpeed = 0;
     // Do one scan in the direction of the target (if applicable)
-    if ((_guidanceMode & GuidanceMode.Homing) != 0 && RaycastTripwireInDirection(missileToTargetNorm, closingVelocity, out raycastHitDistance, out closingSpeed))
+    if ((_guidanceMode & GuidanceMode.Homing) != 0 && RaycastTripwire(targetScanPos, closingVelocity, out raycastHitDistance, out trueClosingSpeed))
     {
-        Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
+        Detonate((raycastHitDistance - _raycastRange) / trueClosingSpeed);
         return;
     }
 
@@ -2218,16 +2174,21 @@ void CheckProximity()
     */
     double apparentRadius = CalculateGridRadiusFromAxis(_missileReference.CubeGrid, closingVelocity) + _raycastRange;
 
-    var baseDirection = VectorMath.SafeNormalize(closingVelocity) * _raycastRange;
+    var displacement = closingVelocity * UpdatesPerSecond;
     var perp1 = Vector3D.CalculatePerpendicularVector(closingVelocity) * apparentRadius;
     var perp2 = VectorMath.SafeNormalize(Vector3D.Cross(perp1, closingVelocity)) * apparentRadius;
-    if (RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed) ||
-        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, perp1) ||
-        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, -perp1) ||
-        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, perp2) ||
-        RaycastTripwireInDirection(closingVelocity, closingVelocity, out raycastHitDistance, out closingSpeed, -perp2))
+
+    var travelDirection = VectorMath.SafeNormalize(closingVelocity);
+    closingSpeed = Vector3D.Dot(travelDirection, closingVelocity);
+    targetScanPos = missilePos + travelDirection * (_raycastRange + closingSpeed * SecondsPerUpdate);
+
+    if (RaycastTripwire(targetScanPos, closingVelocity, out raycastHitDistance, out trueClosingSpeed) ||
+        RaycastTripwire(targetScanPos + perp1, closingVelocity, out raycastHitDistance, out trueClosingSpeed) ||
+        RaycastTripwire(targetScanPos - perp1, closingVelocity, out raycastHitDistance, out trueClosingSpeed) ||
+        RaycastTripwire(targetScanPos + perp2, closingVelocity, out raycastHitDistance, out trueClosingSpeed) ||
+        RaycastTripwire(targetScanPos - perp2, closingVelocity, out raycastHitDistance, out trueClosingSpeed))
     {
-        Detonate((raycastHitDistance - _raycastRange) / closingSpeed);
+        Detonate((raycastHitDistance - _raycastRange) / trueClosingSpeed);
         return;
     }
 
@@ -2256,54 +2217,45 @@ void CheckProximity()
     }
 }
 
-bool RaycastTripwireInDirection(Vector3D directionToTarget, Vector3D closingVelocity, out double raycastHitDistance, out double closingSpeed, Vector3D? offsetVector = null)
+bool TryGetRaycastCamera(List<IMyCameraBlock> cameras, Vector3D worldPosition, out IMyCameraBlock selectedCamera)
+{
+    selectedCamera = null;
+
+    foreach (var c in cameras)
+    {
+        if (c.Closed) { continue; }
+
+        if (c.CanScan(worldPosition))
+        {
+            selectedCamera = c; 
+            break;
+        }
+    }
+
+    return selectedCamera != null;
+}
+
+bool RaycastTripwire(Vector3D scanPosition, Vector3D closingVelocity, out double raycastHitDistance, out double closingSpeed)
 {
     raycastHitDistance = 0;
     closingSpeed = 0;
 
-    var directionToTargetNorm = VectorMath.SafeNormalize(directionToTarget);
-    foreach (var cameraBuffer in _cameraBufferList)
+    IMyCameraBlock camera;
+    if (!TryGetRaycastCamera(_cameras, scanPosition, out camera))
     {
-        if (cameraBuffer.Count == 0)
-        {
-            continue;
-        }
-
-        Vector3D localDirToTgt = Vector3D.TransformNormal(directionToTargetNorm, MatrixD.Transpose(cameraBuffer.Peek().WorldMatrix));
-        if (localDirToTgt.Z < 0 &&
-            Math.Abs(localDirToTgt.X) < .7071 &&
-            Math.Abs(localDirToTgt.Y) < .7071)
-        {
-            IMyCameraBlock cam = cameraBuffer.MoveNext();
-            if (!cam.EnableRaycast)
-            {
-                cam.EnableRaycast = true;
-            }
-
-            if (!cam.Enabled)
-            {
-                cam.Enabled = true;
-            }
-
-            closingSpeed = Math.Max(0, Vector3D.Dot(closingVelocity, directionToTargetNorm));
-            var closingDisplacement = closingSpeed * SecondsPerUpdate;
-            var scanRange = _raycastRange + closingDisplacement;
-            var scanPosition = cam.GetPosition() + directionToTargetNorm * scanRange;
-            if (offsetVector.HasValue)
-            {
-                scanPosition += offsetVector.Value;
-            }
-            MyDetectedEntityInfo targetInfo = cam.Raycast(scanPosition);
-            bool valid = IsValidTarget(targetInfo);
-            if (valid)
-            {
-                raycastHitDistance = Vector3D.Distance(targetInfo.HitPosition.Value, cam.GetPosition());
-            }
-            return valid;
-        }
+        return false;
     }
 
-    return false;
+    MyDetectedEntityInfo targetInfo = camera.Raycast(scanPosition);
+    bool valid = IsValidTarget(targetInfo);
+    if (valid)
+    {
+        var hitDirection = targetInfo.HitPosition.Value - camera.GetPosition();
+        var hitDirectionNorm = VectorMath.SafeNormalize(hitDirection);
+        raycastHitDistance = Vector3D.Dot(hitDirection, hitDirectionNorm);
+        closingSpeed = Math.Max(1e-9, Vector3D.Dot(closingVelocity, hitDirectionNorm));
+    }
+    return valid;
 }
 
 bool IsValidTarget(MyDetectedEntityInfo targetInfo)
@@ -2517,7 +2469,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -2525,12 +2479,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -2651,40 +2611,40 @@ public class ConfigInt : ConfigValue<int>
     }
 }
 
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
+public class ConfigNullable<T> : IConfigValue<T> where T : struct
 {
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
+    public string Name
+    {
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
+    public string Comment
+    {
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
     }
-    
+
     public string NullString;
+
     public T Value
     {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
+        get { return _impl.Value; }
+        set
+        {
+            _impl.Value = value;
             HasValue = true;
             _skipRead = true;
         }
     }
-    public readonly ConfigImplementation Implementation;
+    
     public bool HasValue { get; private set; }
+    readonly IConfigValue<T> _impl;
     bool _skipRead = false;
 
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    public ConfigNullable(IConfigValue<T> impl, string nullString = "none")
     {
-        Implementation = impl;
+        _impl = impl;
         NullString = nullString;
         HasValue = false;
     }
@@ -2702,7 +2662,7 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ini, section);
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -2716,10 +2676,10 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
 
     public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ini, section);
+        _impl.WriteToIni(ini, section);
         if (!HasValue)
         {
-            ini.Set(section, Implementation.Name, NullString);
+            ini.Set(section, _impl.Name, NullString);
         }
     }
 
@@ -2736,7 +2696,7 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -3713,6 +3673,9 @@ class RaycastHoming
         IMyCameraBlock maxRangeCamera = null;
         foreach (var c in cameras)
         {
+            if (c.Closed)
+                continue;
+
             if (c.AvailableScanRange > maxRange)
             {
                 maxRangeCamera = c;
@@ -4200,25 +4163,31 @@ public static class VectorMath
     }
 
     /// <summary>
+    /// Computes angle between 2 vectors in radians.
+    /// </summary>
+    /// <remarks>
+    /// This uses atan2 to avoid numerical precision issues associated
+    /// with acos based dot-product backsolving.
+    /// </remarks>
+    public static double AngleBetween(Vector3D a, Vector3D b)
+    {
+        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        {
+            return 0;
+        }
+        return Math.Atan2(Vector3D.Cross(a, b).Length(), Vector3D.Dot(a, b));
+    }
+
+    /// <summary>
     /// Computes cosine of the angle between 2 vectors.
     /// </summary>
     public static double CosBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        {
             return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
-    public static double AngleBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return Math.Acos(CosBetween(a, b));
+        }
+        return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
     }
 }
 
