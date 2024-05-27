@@ -23,7 +23,7 @@ bool _invertSteerWhenReversing = false;
 string _groupName = "Skid Steering";
 float _turnGyroPower = 100f;
 float _driveGyroPower = 10f;
-float _gyroRotationSpeedRpm = 1f;
+float _gyroRotationSpeedRpm = 10f;
 float _driveFriction = 50f;
 float _turnFriction = 50f;
 float _driveFrictionRampTime = 2f;
@@ -54,8 +54,8 @@ bool _drawTitleScreen = true;
 
 const string
     ScriptName = "WMI Skid Steering",
-    Version = "1.4.0",
-    Date = "2021/10/12",
+    Version = "1.5.1",
+    Date = "2024/05/27",
     IniSection = "Skid Steering",
     IniKeyGroupName = "Group name tag",
     IniKeyDrawTitleScreen = "Draw title screen",
@@ -95,9 +95,16 @@ Program()
 
 void Main(string arg, UpdateType updateSource)
 {
-    _runtimeTracker.AddRuntime();
-    _scheduler.Update();
-    _runtimeTracker.AddInstructions();
+    try
+    {
+        _runtimeTracker.AddRuntime();
+        _scheduler.Update();
+        _runtimeTracker.AddInstructions();
+    }
+    catch (Exception ex)
+    {
+        BlueScreenOfDeath.Show(Me.GetSurface(0), ScriptName, Version, ex);
+    }
 }
 
 void DrawTitleScreen()
@@ -112,7 +119,7 @@ void DrawTitleScreen()
 #region Skid Steering Logic
 void SkidSteer()
 {
-    var controller = GetControlledShipController();
+    var controller = GetControlledShipController(_controllers, _lastController);
     if (controller == null)
     {
         return;
@@ -227,12 +234,20 @@ void SkidSteer()
         _adaptiveFriction,
         isTurning);
 
-    ApplyGyroOverride(0, isTurning ? _gyroRotationSpeedRpm * gyroTurnDirection : 0, 0, gyroPower, _gyros, controller.WorldMatrix);
+    ApplyGyroOverride(0, isTurning ? _gyroRotationSpeedRpm * MathHelper.RPMToRadiansPerSecond * gyroTurnDirection : 0, 0, _gyros, controller.WorldMatrix);
+    SetGyroPower(gyroPower, _gyros);
 }
 #endregion
 
-
 #region Utility Functions
+void SetGyroPower(float power, List<IMyGyro> gyros)
+{
+    foreach (var g in gyros)
+    {
+        g.GyroPower = power;
+    }
+}
+
 void SetWheelPropulsionAndFriction(
     IMyShipController reference,
     Vector3D referencePos,
@@ -306,71 +321,6 @@ Vector3D GetAverageWheelPosition(List<IMyMotorSuspension> wheels)
     }
 
     return sum / count;
-}
-
-IMyShipController GetControlledShipController()
-{
-    if (_controllers.Count == 0)
-        return null;
-
-    if (_lastController != null && _lastController.IsUnderControl)
-    {
-        return _lastController;
-    }
-
-    IMyShipController mainController = null;
-    IMyShipController controlled = null;
-
-    foreach (IMyShipController thisController in _controllers)
-    {
-        if (thisController.IsUnderControl && thisController.CanControlShip)
-        {
-            if (controlled == null)
-            {
-                controlled = thisController;
-            }
-
-            if (thisController.IsMainCockpit)
-            {
-                mainController = thisController; // Only one per grid so no null check needed
-            }
-        }
-    }
-
-    if (mainController != null)
-    {
-        return mainController;
-    }
-
-    if (controlled != null)
-    {
-        return controlled;
-    }
-
-    return _controllers[0];
-}
-
-/*
-Whip's ApplyGyroOverride - Last modified: 2020/08/27
-
-Takes pitch, yaw, and roll speeds relative to the gyro's backwards
-ass rotation axes. 
-*/
-void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, float power, List<IMyGyro> gyroList, MatrixD worldMatrix)
-{
-    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
-    var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
-
-    foreach (var g in gyroList)
-    {
-        var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(g.WorldMatrix));
-
-        g.Pitch = (float)transformedRotationVec.X;
-        g.Yaw = (float)transformedRotationVec.Y;
-        g.Roll = (float)transformedRotationVec.Z;
-        g.GyroOverride = true;
-        g.GyroPower = power * 0.01f;
-    }
 }
 #endregion
 
@@ -489,233 +439,6 @@ bool CollectBlocks(IMyTerminalBlock t)
     AddToListIfType(t, _allWheels);
     AddToListIfType(t, _gyros);
     return false;
-}
-
-bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list) where T : class, IMyTerminalBlock
-{
-    T typedBlock;
-    return AddToListIfType(block, list, out typedBlock);
-}
-
-bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list, out T typedBlock) where T : class, IMyTerminalBlock
-{
-    typedBlock = block as T;
-    if (typedBlock != null)
-    {
-        list.Add(typedBlock);
-        return true;
-    }
-    return false;
-}
-#endregion
-
-#region Scheduler
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
-public class Scheduler
-{
-    public double CurrentTimeSinceLastRun = 0;
-
-    ScheduledAction _currentlyQueuedAction = null;
-    bool _firstRun = true;
-    bool _inUpdate = false;
-
-    readonly bool _ignoreFirstRun;
-    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
-    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
-    readonly Program _program;
-
-    const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
-
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
-    public Scheduler(Program program, bool ignoreFirstRun = false)
-    {
-        _program = program;
-        _ignoreFirstRun = ignoreFirstRun;
-    }
-
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
-    public void Update()
-    {
-        _inUpdate = true;
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * RUNTIME_TO_REALTIME);
-
-        if (_firstRun)
-        {
-            if (_ignoreFirstRun)
-            {
-                deltaTime = 0;
-            }
-            _firstRun = false;
-        }
-
-        _actionsToDispose.Clear();
-        foreach (ScheduledAction action in _scheduledActions)
-        {
-            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTime;
-            action.Update(deltaTime);
-            if (action.JustRan && action.DisposeAfterRun)
-            {
-                _actionsToDispose.Add(action);
-            }
-        }
-
-        if (_actionsToDispose.Count > 0)
-        {
-            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
-        }
-
-        if (_currentlyQueuedAction == null)
-        {
-            // If queue is not empty, populate current queued action
-            if (_queuedActions.Count != 0)
-                _currentlyQueuedAction = _queuedActions.Dequeue();
-        }
-
-        // If queued action is populated
-        if (_currentlyQueuedAction != null)
-        {
-            _currentlyQueuedAction.Update(deltaTime);
-            if (_currentlyQueuedAction.JustRan)
-            {
-                // Set the queued action to null for the next cycle
-                _currentlyQueuedAction = null;
-            }
-        }
-        _inUpdate = false;
-
-        if (_actionsToAdd.Count > 0)
-        {
-            _scheduledActions.AddRange(_actionsToAdd);
-            _actionsToAdd.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
-    {
-        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
-    public void AddScheduledAction(ScheduledAction scheduledAction)
-    {
-        if (!_inUpdate)
-            _scheduledActions.Add(scheduledAction);
-        else
-            _actionsToAdd.Add(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
-    {
-        if (updateInterval <= 0)
-        {
-            updateInterval = 0.001; // avoids divide by zero
-        }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, true);
-        _queuedActions.Enqueue(scheduledAction);
-    }
-
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
-    {
-        _queuedActions.Enqueue(scheduledAction);
-    }
-}
-
-public class ScheduledAction
-{
-    public bool JustRan { get; private set; } = false;
-    public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public double RunInterval
-    {
-        get
-        {
-            return _runInterval;
-        }
-        set
-        {
-            if (value == _runInterval)
-                return;
-
-            _runInterval = value < Epsilon ? 0 : value;
-            _runFrequency = value == 0 ? double.MaxValue : 1.0 / _runInterval;
-        }
-    }
-    public double RunFrequency
-    {
-        get
-        {
-            return _runFrequency;
-        }
-        set
-        {
-            if (value == _runFrequency)
-                return;
-
-            if (value == 0)
-                RunInterval = double.MaxValue;
-            else
-                RunInterval = 1.0 / value;
-        }
-    }
-
-    double _runInterval = -1e9;
-    double _runFrequency = -1e9;
-    readonly Action _action;
-
-    const double Epsilon = 1e-12;
-
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
-    public ScheduledAction(Action action, double runFrequency = 0, bool removeAfterRun = false, double timeOffset = 0)
-    {
-        _action = action;
-        RunFrequency = runFrequency; // Implicitly sets RunInterval
-        DisposeAfterRun = removeAfterRun;
-        TimeSinceLastRun = timeOffset;
-    }
-
-    public void Update(double deltaTime)
-    {
-        TimeSinceLastRun += deltaTime;
-
-        if (TimeSinceLastRun + Epsilon >= RunInterval)
-        {
-            _action.Invoke();
-            TimeSinceLastRun = 0;
-
-            JustRan = true;
-        }
-        else
-        {
-            JustRan = false;
-        }
-    }
 }
 #endregion
 
@@ -894,6 +617,78 @@ new AnimationParams(WasdKey.A, 15f),
     #endregion
 }
 
+#endregion
+
+#region INCLUDES
+
+static class BlueScreenOfDeath 
+{
+    const int MAX_BSOD_WIDTH = 50;
+    const string BSOD_TEMPLATE =
+    "{0} - v{1}\n\n"+ 
+    "A fatal exception has occured at\n"+
+    "{2}. The current\n"+
+    "program will be terminated.\n"+
+    "\n"+ 
+    "EXCEPTION:\n"+
+    "{3}\n"+
+    "\n"+
+    "* Please REPORT this crash message to\n"+ 
+    "  the Bug Reports discussion of this script\n"+ 
+    "\n"+
+    "* Press RECOMPILE to restart the program";
+
+    static StringBuilder bsodBuilder = new StringBuilder(256);
+    
+    public static void Show(IMyTextSurface surface, string scriptName, string version, Exception e)
+    {
+        if (surface == null) 
+        { 
+            return;
+        }
+        surface.ContentType = ContentType.TEXT_AND_IMAGE;
+        surface.Alignment = TextAlignment.LEFT;
+        float scaleFactor = 512f / (float)Math.Min(surface.TextureSize.X, surface.TextureSize.Y);
+        surface.FontSize = scaleFactor * surface.TextureSize.X / (19.5f * MAX_BSOD_WIDTH);
+        surface.FontColor = Color.White;
+        surface.BackgroundColor = Color.Blue;
+        surface.Font = "Monospace";
+        string exceptionStr = e.ToString();
+        string[] exceptionLines = exceptionStr.Split('\n');
+        bsodBuilder.Clear();
+        foreach (string line in exceptionLines)
+        {
+            if (line.Length <= MAX_BSOD_WIDTH)
+            {
+                bsodBuilder.Append(line).Append("\n");
+            }
+            else
+            {
+                string[] words = line.Split(' ');
+                int lineLength = 0;
+                foreach (string word in words)
+                {
+                    lineLength += word.Length;
+                    if (lineLength >= MAX_BSOD_WIDTH)
+                    {
+                        bsodBuilder.Append("\n");
+                        lineLength = word.Length;
+                    }
+                    bsodBuilder.Append(word).Append(" ");
+                    lineLength += 1;
+                }
+                bsodBuilder.Append("\n");
+            }
+        }
+
+        surface.WriteText(string.Format(BSOD_TEMPLATE, 
+                                        scriptName.ToUpperInvariant(),
+                                        version,
+                                        DateTime.Now, 
+                                        bsodBuilder));
+    }
+}
+
 /// <summary>
 /// Class that tracks runtime history.
 /// </summary>
@@ -984,4 +779,325 @@ public class RuntimeTracker
     }
 }
 
+#region Scheduler
+/// <summary>
+/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
+/// </summary>
+public class Scheduler
+{
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
+    QueuedAction _currentlyQueuedAction = null;
+    bool _firstRun = true;
+    bool _inUpdate = false;
+
+    readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
+    readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
+    readonly Program _program;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
+
+    /// <summary>
+    /// Constructs a scheduler object with timing based on the runtime of the input program.
+    /// </summary>
+    public Scheduler(Program program, bool ignoreFirstRun = false)
+    {
+        _program = program;
+        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Updates all ScheduledAcions in the schedule and the queue.
+    /// </summary>
+    public void Update()
+    {
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
+
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
+        _actionsToDispose.Clear();
+        foreach (ScheduledAction action in _scheduledActions)
+        {
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
+            if (action.JustRan && action.DisposeAfterRun)
+            {
+                _actionsToDispose.Add(action);
+            }
+        }
+
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
+
+        if (_currentlyQueuedAction == null)
+        {
+            // If queue is not empty, populate current queued action
+            if (_queuedActions.Count != 0)
+                _currentlyQueuedAction = _queuedActions.Dequeue();
+        }
+
+        // If queued action is populated
+        if (_currentlyQueuedAction != null)
+        {
+            _currentlyQueuedAction.Update(deltaTicks);
+            if (_currentlyQueuedAction.JustRan)
+            {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
+                // Set the queued action to null for the next cycle
+                _currentlyQueuedAction = null;
+            }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Adds an Action to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
+    {
+        ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
+    /// </summary>
+    public void AddScheduledAction(ScheduledAction scheduledAction)
+    {
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds an Action to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
+    {
+        if (updateInterval <= 0)
+        {
+            updateInterval = 0.001; // avoids divide by zero
+        }
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
+        _queuedActions.Enqueue(scheduledAction);
+    }
+
+    /// <summary>
+    /// Adds a ScheduledAction to the queue. Queue is FIFO.
+    /// </summary>
+    public void AddQueuedAction(QueuedAction scheduledAction)
+    {
+        _queuedActions.Enqueue(scheduledAction);
+    }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
+}
+
+public class ScheduledAction
+{
+    public bool JustRan { get; private set; } = false;
+    public bool DisposeAfterRun { get; private set; } = false;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
+
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
+    readonly Action _action;
+
+    /// <summary>
+    /// Class for scheduling an action to occur at a specified frequency (in Hz).
+    /// </summary>
+    /// <param name="action">Action to run</param>
+    /// <param name="runFrequency">How often to run in Hz</param>
+    public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
+    {
+        _action = action;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
+        DisposeAfterRun = removeAfterRun;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
+    }
+
+    public void Update(long deltaTicks)
+    {
+        TicksSinceLastRun += deltaTicks;
+
+        if (TicksSinceLastRun >= RunIntervalTicks)
+        {
+            _action.Invoke();
+            TicksSinceLastRun = 0;
+
+            JustRan = true;
+        }
+        else
+        {
+            JustRan = false;
+        }
+    }
+}
+#endregion
+bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list) where T : class, IMyTerminalBlock
+{
+    T typedBlock;
+    return AddToListIfType(block, list, out typedBlock);
+}
+
+bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list, out T typedBlock) where T : class, IMyTerminalBlock
+{
+    typedBlock = block as T;
+    if (typedBlock != null)
+    {
+        list.Add(typedBlock);
+        return true;
+    }
+    return false;
+}
+
+/*
+Whip's ApplyGyroOverride - Last modified: 2023/11/19
+
+Takes pitch, yaw, and roll speeds relative to the gyro's backwards
+ass rotation axes. 
+*/
+void ApplyGyroOverride(Vector3D rotationSpeedPYR, List<IMyGyro> gyros, MatrixD worldMatrix)
+{
+    var worldRotationPYR = Vector3D.TransformNormal(rotationSpeedPYR, worldMatrix);
+
+    foreach (var g in gyros)
+    {
+        var gyroRotationPYR = Vector3D.TransformNormal(worldRotationPYR, Matrix.Transpose(g.WorldMatrix));
+
+        g.Pitch = (float)gyroRotationPYR.X;
+        g.Yaw = (float)gyroRotationPYR.Y;
+        g.Roll = (float)gyroRotationPYR.Z;
+        g.GyroOverride = true;
+    }
+}
+
+void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyros, MatrixD worldMatrix)
+{
+    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed);
+    ApplyGyroOverride(rotationVec, gyros, worldMatrix);
+}
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
+}
 #endregion
