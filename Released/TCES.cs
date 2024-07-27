@@ -51,10 +51,11 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.12.3",
-    Date = "2024/04/22",
+    Version = "1.13.3",
+    Date = "2024/05/16",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
+    IniKeySyncGroupNameTag = "Synced group name tag",
     IniKeyAzimuthName = "Azimuth rotor name tag",
     IniKeyElevationName = "Elevation rotor name tag",
     IniKeyAutoRestAngle = "Should auto return to rest angle",
@@ -71,6 +72,7 @@ long _runCount = 0;
 
 ConfigSection _config = new ConfigSection(IniSectionGeneral);
 ConfigString _groupNameTag = new ConfigString(IniKeyGroupNameTag, "TCES");
+ConfigString _syncGroupNameTag = new ConfigString(IniKeySyncGroupNameTag, "SYNC");
 public ConfigString AzimuthName = new ConfigString(IniKeyAzimuthName, "Azimuth");
 public ConfigString ElevationName = new ConfigString(IniKeyElevationName, "Elevation");
 public ConfigBool AutomaticRest = new ConfigBool(IniKeyAutoRestAngle, true);
@@ -80,11 +82,13 @@ ConfigBool _drawTitleScreen = new ConfigBool(IniKeyDrawTitleScreen, true);
 
 TCESTitleScreen _titleScreen;
 
-List<CustomTurretController> _turretControllers = new List<CustomTurretController>();
+List<TCESTurret> _tcesTurrets = new List<TCESTurret>();
+List<TCESSynced> _syncedTurrets = new List<TCESSynced>();
+Dictionary<IMyTurretControlBlock, TCESTurret> _tcesTurretMap = new Dictionary<IMyTurretControlBlock, TCESTurret>();
 
 MyIni _ini = new MyIni();
 
-class CustomTurretController
+class TCESTurret
 {
     class ConfigMinMax : ConfigValue<Vector2>
     {
@@ -155,7 +159,7 @@ class CustomTurretController
         }
 
         public void Update(MyIni ini, IMyMotorStator azimuth, IMyMotorStator elevation)
-        {    
+        {
             if (azimuth != null)
             {
                 _azimuthDeadzoneRange.Update(ini, _sectionName);
@@ -183,7 +187,7 @@ class CustomTurretController
             }
 
             float angleDeg = MathHelper.ToDegrees(rotor.Angle);
-            
+
             float delta = 0;
             if (angleDeg < min)
             {
@@ -222,7 +226,7 @@ class CustomTurretController
     {
         public ConfigInt DeadzoneCount = new ConfigInt("Weapon deadzone count", 0);
         public List<WeaponDeadzone> Deadzones = new List<WeaponDeadzone>();
-        public DeadzoneConfig() : base("TCES - Weapon Deadzone Config") 
+        public DeadzoneConfig() : base("TCES - Weapon Deadzone Config")
         {
             AddValues(DeadzoneCount);
         }
@@ -268,9 +272,14 @@ class CustomTurretController
     StabilizedRotor _azimuthStabilizer = new StabilizedRotor();
     StabilizedRotor _elevationStabilizer = new StabilizedRotor();
 
+    public IMyMotorStator AzimuthRotor => _azimuthStabilizer.Rotor;
+    public IMyMotorStator ElevationRotor => _elevationStabilizer.Rotor;
+    public IMyTurretControlBlock TurretController => _controller;
+
     DeadzoneConfig _deadzoneConfig = new DeadzoneConfig();
     RotorConfig _azimuthConfig = new RotorConfig();
     RotorConfig _elevationConfig = new RotorConfig();
+    List<IMyTurretControlBlock> _foundControllers = new List<IMyTurretControlBlock>();
     IMyTurretControlBlock _controller;
 
     Program _p;
@@ -286,7 +295,6 @@ class CustomTurretController
     float _idleTime = 0f;
     float _cachedElevationBrakingTorque = 0;
     bool _wasSafed = false;
-
 
     const float RestSpeed = 10f;
     const float PlayerInputMultiplier = 1f / 50f; // Magic number from: SpaceEngineers.ObjectBuilders.ObjectBuilders.Definitions.MyObjectBuilder_TurretControlBlockDefinition.PlayerInputDivider
@@ -343,7 +351,7 @@ class CustomTurretController
         }
     }
 
-    public CustomTurretController(Program p, IMyBlockGroup group)
+    public TCESTurret(Program p, IMyBlockGroup group)
     {
         _rotorControlSM.AddState(new State(ControlState.ManualControl, onUpdate: OnUpdateManualControl));
         _rotorControlSM.AddState(new State(ControlState.AiControl, onUpdate: OnUpdateAiControl, onEnter: OnEnterAiControl, onLeave: OnAiControlBothRotors));
@@ -596,7 +604,7 @@ class CustomTurretController
     void EvaluateDeadzones()
     {
         bool safed = false;
-        
+
         foreach (var deadzone in _deadzoneConfig.Deadzones)
         {
             safed = deadzone.ShouldSafe(_azimuthStabilizer.Rotor, _elevationStabilizer.Rotor);
@@ -655,6 +663,7 @@ class CustomTurretController
         _controller = null;
         _azimuthStabilizer.Rotor = null;
         _elevationStabilizer.Rotor = null;
+        _foundControllers.Clear();
         _extraRotors.Clear();
         _tools.Clear();
         _cameras.Clear();
@@ -677,13 +686,19 @@ class CustomTurretController
             }
         }
 
-        if (_controller == null)
+        if (_foundControllers.Count == 0)
         {
             _setupReturnCode |= ReturnCode.MissingController;
         }
         else
         {
+            _controller = _foundControllers[0];
             ParseCTCIni(_controller);
+
+            if (_foundControllers.Count > 1)
+            {
+                _setupReturnCode |= ReturnCode.MultipleTurretControllers;
+            }
         }
         if (_azimuthStabilizer.Rotor == null)
         {
@@ -800,14 +815,7 @@ class CustomTurretController
         var tcb = b as IMyTurretControlBlock;
         if (tcb != null)
         {
-            if (_controller != null)
-            {
-                _setupReturnCode |= ReturnCode.MultipleTurretControllers;
-            }
-            else
-            {
-                _controller = tcb;
-            }
+            _foundControllers.Add(tcb);
         }
 
         var func = b as IMyFunctionalBlock;
@@ -923,6 +931,10 @@ class CustomTurretController
         if ((_setupReturnCode & ReturnCode.MultipleTurretControllers) != 0)
         {
             Echo("> WARN: Multiple custom turret controllers. Only one is supported.");
+            for (int ii = 0; ii < _foundControllers.Count; ++ii)
+            {
+                Echo($"    {ii+1}: \"{_foundControllers[ii].CustomName}\"");
+            }
         }
 
         if (!missingRotors)
@@ -1150,10 +1162,278 @@ class CustomTurretController
     #endregion
 }
 
+class TCESSynced
+{
+    Program _program;
+    IMyBlockGroup _group;
+    IMyTurretControlBlock _controller;
+    List<IMyTurretControlBlock> _foundControllers = new List<IMyTurretControlBlock>();
+    List<IMyMotorStator> _syncedRotors = new List<IMyMotorStator>();
+    List<IMyFunctionalBlock> _syncedTools = new List<IMyFunctionalBlock>();
+    List<IMyFunctionalBlock> _controllerTools = new List<IMyFunctionalBlock>();
+    IMyMotorStator ParentAzimuthRotor;
+    IMyMotorStator ParentElevationRotor;
+    const float VelocityMultiplier = 1f / 6f;
+    bool _tcesTurretFound = false;
+
+    enum ReturnCode
+    {
+        None = 0,
+        NoSyncedRotors = 1 << 0,
+        NoSyncedTools = 1 << 1,
+        NoCTC = 1 << 2,
+        MultipleCTCs = 1 << 3,
+        NoDirectionSource = 1 << 3,
+        SetupError = NoSyncedRotors | NoSyncedTools | NoCTC,
+    }
+
+    ReturnCode _setupCode;
+    ReturnCode _updateCode;
+
+    bool _isShooting = true; // True because this will force shoot off when evaluated the first time
+    bool IsShooting
+    {
+        get
+        {
+            return _isShooting;
+        }
+        set
+        {
+            if (value != _isShooting)
+            {
+                _isShooting = value;
+
+                foreach (var func in _syncedTools)
+                {
+                    var gun = func as IMyUserControllableGun;
+                    if (gun != null)
+                    {
+                        gun.Shoot = _isShooting;
+                    }
+                    else if (func is IMyShipToolBase || func is IMyLightingBlock)
+                    {
+                        func.Enabled = _isShooting;
+                    }
+                }
+            }
+        }
+    }
+
+    public TCESSynced(Program program, IMyBlockGroup group)
+    {
+        _program = program;
+        _group = group;
+
+        _setupCode = Setup();
+    }
+
+    ReturnCode Setup()
+    {
+        ReturnCode setupCode = ReturnCode.None;
+
+        _controller = null;
+        _syncedRotors.Clear();
+        _syncedTools.Clear();
+        _foundControllers.Clear();
+
+        _group.GetBlocks(null, CollectBlocks);
+
+        if (_syncedRotors.Count == 0)
+        {
+            setupCode |= ReturnCode.NoSyncedRotors;
+        }
+
+        if (_syncedTools.Count == 0)
+        {
+            setupCode |= ReturnCode.NoSyncedTools;
+        }
+
+        if (_foundControllers.Count == 0)
+        {
+            setupCode |= ReturnCode.NoCTC;
+        }
+        else
+        {
+            _controller = _foundControllers[0];
+            _controller.GetTools(_controllerTools);
+
+            if (_foundControllers.Count > 1)
+            {
+                setupCode |= ReturnCode.MultipleCTCs;
+            }
+        }
+
+        return setupCode;
+    }
+
+    bool CollectBlocks(IMyTerminalBlock b)
+    {
+        var tcb = b as IMyTurretControlBlock;
+        if (tcb != null)
+        {
+            _foundControllers.Add(tcb);
+        }
+
+        var r = b as IMyMotorStator;
+        if (r != null)
+        {
+            _syncedRotors.Add(r);
+        }
+
+        var func = b as IMyFunctionalBlock;
+        if (func != null &&
+                ((b is IMyUserControllableGun && !(b is IMyLargeTurretBase)) ||
+                  b is IMyCameraBlock ||
+                  b is IMyShipToolBase ||
+                  b is IMyLightingBlock ||
+                  b is IMyShipConnector))
+        {
+            _syncedTools.Add(func);
+        }
+
+        return false;
+    }
+
+    public void Init(Dictionary<IMyTurretControlBlock, TCESTurret> turretMap)
+    {
+        if ((_setupCode & ReturnCode.SetupError) != 0)
+        {
+            return;
+        }
+
+        TCESTurret tcesTurret;
+        _tcesTurretFound = turretMap.TryGetValue(_controller, out tcesTurret);
+        if (_tcesTurretFound)
+        {
+            ParentAzimuthRotor = tcesTurret.AzimuthRotor;
+            ParentElevationRotor = tcesTurret.ElevationRotor;
+        }
+        else
+        {
+            ParentAzimuthRotor = _controller.AzimuthRotor;
+            ParentElevationRotor = _controller.ElevationRotor;
+        }
+    }
+
+    public void Update10()
+    {
+        _updateCode = ReturnCode.None;
+
+        if ((_setupCode & ReturnCode.SetupError) != 0)
+        {
+            return;
+        }
+
+        IMyTerminalBlock directionSource = _controller.GetDirectionSource();
+        if (directionSource == null)
+        {
+            _updateCode |= ReturnCode.NoDirectionSource;
+            return;
+        }
+
+        Vector3D totalVelocityCommand = Vector3D.Zero;
+        if (ParentAzimuthRotor != null)
+        {
+            totalVelocityCommand += ParentAzimuthRotor.WorldMatrix.Up * ParentAzimuthRotor.TargetVelocityRad;
+        }
+        if (ParentElevationRotor != null)
+        {
+            totalVelocityCommand += ParentElevationRotor.WorldMatrix.Up * ParentElevationRotor.TargetVelocityRad;
+        }
+
+        IMyTerminalBlock reference = _syncedTools[0];
+        foreach (var r in _syncedRotors)
+        {
+            AimRotorAtPosition(r, _controller.GetShootDirection(), reference.WorldMatrix.Forward);
+            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.WorldMatrix.Up);
+            r.TargetVelocityRad += commandedVelocity * VelocityMultiplier;
+        }
+
+        bool shouldShoot = GetControllerIsShooting();
+        IsShooting = shouldShoot;
+    }
+
+    bool GetControllerIsShooting()
+    {
+        foreach (var func in _controllerTools)
+        {
+            var gun = func as IMyUserControllableGun;
+            if (gun != null)
+            {
+                if (gun.IsShooting)
+                {
+                    return true;
+                }
+                continue;
+            }
+
+            if (func.Enabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void Echo(string msg)
+    {
+        _program.Echo(msg);
+    }
+
+    public void WriteStatus()
+    {
+        Echo(_group.Name);
+
+        if ((_setupCode & ReturnCode.NoCTC) != 0)
+        {
+            Echo("> ERROR: No custom turret controller found");
+        }
+        else if ((_setupCode & ReturnCode.MultipleCTCs) != 0)
+        {
+            Echo("> WARN: Multiple custom turret controllers found");
+            for (int ii = 0; ii < _foundControllers.Count; ++ii)
+            {
+                Echo($"    {ii+1}: \"{_foundControllers[ii].CustomName}\"");
+            }
+        }
+
+        if ((_setupCode & ReturnCode.NoSyncedRotors) != 0)
+        {
+            Echo("> ERROR: No rotors found");
+        }
+        else
+        {
+            Echo($"> INFO: {_syncedRotors.Count} synced rotor(s)");
+        }
+
+        if ((_setupCode & ReturnCode.NoSyncedTools) != 0)
+        {
+            Echo("> ERROR: No weapons, tools, or cameras found");
+        }
+        else
+        {
+            Echo($"> INFO: {_syncedTools.Count} synced weapons, tools, and/or cameras");
+            Echo($"> INFO: Using \"{_syncedTools[0].CustomName}\" as aim reference");
+        }
+
+        if ((_updateCode & ReturnCode.NoDirectionSource) != 0)
+        {
+            Echo($"> ERROR: No direction source for CTC \"{_controller}\"");
+        }
+
+        if (_tcesTurretFound)
+        {
+            Echo("> INFO: Found TCES turret");
+        }
+    }
+}
+
 Program()
 {
     _config.AddValues(
         _groupNameTag,
+        _syncGroupNameTag,
         AzimuthName,
         ElevationName,
         AutomaticRest,
@@ -1172,10 +1452,17 @@ Program()
 
 void Setup()
 {
-    _turretControllers.Clear();
+    _tcesTurrets.Clear();
+    _syncedTurrets.Clear();
+    _tcesTurretMap.Clear();
 
     ProcessIni();
     GridTerminalSystem.GetBlockGroups(null, CollectGroups);
+
+    foreach (var s in _syncedTurrets)
+    {
+        s.Init(_tcesTurretMap);
+    }
 }
 
 void ProcessIni()
@@ -1197,11 +1484,16 @@ void ProcessIni()
 
 bool CollectGroups(IMyBlockGroup g)
 {
-    if (!g.Name.Contains(_groupNameTag))
+    if (g.Name.Contains(_groupNameTag))
     {
-        return false;
+        var tcesTurret = new TCESTurret(this, g);
+        _tcesTurrets.Add(tcesTurret);
+        _tcesTurretMap[tcesTurret.TurretController] = tcesTurret;
     }
-    _turretControllers.Add(new CustomTurretController(this, g));
+    else if (g.Name.Contains(_syncGroupNameTag))
+    {
+        _syncedTurrets.Add(new TCESSynced(this, g));
+    }
     return false;
 }
 
@@ -1217,7 +1509,7 @@ void Main(string arg, UpdateType updateSource)
                 Setup();
                 break;
             case "rest":
-                foreach (var c in _turretControllers)
+                foreach (var c in _tcesTurrets)
                 {
                     c.GoToRest();
                 }
@@ -1246,13 +1538,13 @@ void Main(string arg, UpdateType updateSource)
     catch (Exception e)
     {
         BlueScreenOfDeath.Show(Me.GetSurface(0), "TCES", Version, e);
-        throw e;
+        throw;
     }
 }
 
 void OnUpdate1()
 {
-    foreach (var c in _turretControllers)
+    foreach (var c in _tcesTurrets)
     {
         c.Update1();
     }
@@ -1261,10 +1553,15 @@ void OnUpdate1()
 void OnUpdate10()
 {
     bool needsFastUpdate = false;
-    foreach (var c in _turretControllers)
+    foreach (var c in _tcesTurrets)
     {
         c.Update10();
         needsFastUpdate |= c.IsManuallyControlled;
+    }
+
+    foreach (var s in _syncedTurrets)
+    {
+        s.Update10();
     }
 
     if (_drawTitleScreen)
@@ -1304,15 +1601,21 @@ void OnUpdate60()
 {
     Echo($"TCES | Turret Controller\nEnhancement Script\n(Version {Version} - {Date})\n");
     Echo("Run the argument \"setup\" to refetch blocks or process custom data changes.\n");
-    Echo($"Custom Turret Groups: {_turretControllers.Count}");
+    Echo($"TCES groups: {_tcesTurrets.Count}");
+    Echo($"SYNC groups: {_syncedTurrets.Count}");
     Echo($"Run frequency: {Runtime.UpdateFrequency}\n");
 
     Echo(_runtimeTracker.Write());
     Echo("");
 
-    foreach (var controller in _turretControllers)
+    foreach (var controller in _tcesTurrets)
     {
         controller.WriteStatus();
+    }
+
+    foreach (var synced in _syncedTurrets)
+    {
+        synced.WriteStatus();
     }
 
     WriteEcho();
