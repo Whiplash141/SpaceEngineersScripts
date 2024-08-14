@@ -51,8 +51,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.13.3",
-    Date = "2024/05/16",
+    Version = "1.13.4",
+    Date = "2024/08/14",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
     IniKeySyncGroupNameTag = "Synced group name tag",
@@ -676,7 +676,7 @@ class TCESTurret
 
         foreach (var r in _extraRotors)
         {
-            if (!_gridToToolDict.ContainsKey(r.TopGrid))
+            if (r.TopGrid == null || !_gridToToolDict.ContainsKey(r.TopGrid))
             {
                 _unusedRotors.Add(r);
             }
@@ -1095,7 +1095,7 @@ class TCESTurret
             }
 
             IMyFunctionalBlock reference;
-            if (!_gridToToolDict.TryGetValue(r.TopGrid, out reference))
+            if (r.TopGrid == null || !_gridToToolDict.TryGetValue(r.TopGrid, out reference))
             {
                 // Not theoretically possible, but just to be safe
                 continue;
@@ -1431,23 +1431,31 @@ class TCESSynced
 
 Program()
 {
-    _config.AddValues(
-        _groupNameTag,
-        _syncGroupNameTag,
-        AzimuthName,
-        ElevationName,
-        AutomaticRest,
-        AutomaticRestDelay,
-        AutomaticDeviationAngle,
-        _drawTitleScreen
-    );
+    try
+    {
+        _config.AddValues(
+            _groupNameTag,
+            _syncGroupNameTag,
+            AzimuthName,
+            ElevationName,
+            AutomaticRest,
+            AutomaticRestDelay,
+            AutomaticDeviationAngle,
+            _drawTitleScreen
+        );
 
-    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+        Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
-    Setup();
-    _titleScreen = new TCESTitleScreen(Version, this);
+        Setup();
+        _titleScreen = new TCESTitleScreen(Version, this);
 
-    _runtimeTracker = new RuntimeTracker(this);
+        _runtimeTracker = new RuntimeTracker(this);
+    }
+    catch (Exception e)
+    {
+        BlueScreenOfDeath.Show(Me.GetSurface(0), "TCES", Version, e);
+        throw;
+    }
 }
 
 void Setup()
