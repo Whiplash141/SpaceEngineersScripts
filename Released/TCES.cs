@@ -51,8 +51,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.13.4",
-    Date = "2024/08/14",
+    Version = "1.13.5",
+    Date = "2024/08/17",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
     IniKeySyncGroupNameTag = "Synced group name tag",
@@ -1496,7 +1496,10 @@ bool CollectGroups(IMyBlockGroup g)
     {
         var tcesTurret = new TCESTurret(this, g);
         _tcesTurrets.Add(tcesTurret);
-        _tcesTurretMap[tcesTurret.TurretController] = tcesTurret;
+        if (tcesTurret.TurretController != null)
+        {
+            _tcesTurretMap[tcesTurret.TurretController] = tcesTurret;
+        }
     }
     else if (g.Name.Contains(_syncGroupNameTag))
     {
