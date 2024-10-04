@@ -30,155 +30,348 @@
 ============================================
 */
 
-const string VERSION = "1.10.2";
-const string DATE = "2024/03/01";
-
-
-const NormalAxis DEFAULT_NORMAL_AXIS = NormalAxis.X;
-const float DEFAULT_ROTATION = 0f;
-const bool DEFAULT_INVERT = false;
-const float DEFAULT_LEGEND_SCALE = 1f;
+const string VERSION = "1.13.2";
+const string DATE = "2024/04/13";
 
 const int BLOCKS_TO_STORE_PER_TICK = 500;
 const int BLOCKS_TO_CHECK_PER_TICK = 100;
 const int SPRITES_TO_CREATE_PER_TICK = 250;
 const int DISCRETE_DENSITY_STEPS = 4;
 
-const string INI_SECTION_NAME = "SIMPL - General Config";
-const string INI_KEY_GROUP_NAME = "Group name";
-const string INI_KEY_AUTO_SCAN = "Auto scan";
-
-const string INI_SECTION_COLOR = "SIMPL - Colors";
-const string INI_COMMENT_COLOR = " Colors are in the format: Red, Green, Blue, Alpha.\n If you do not want to see a particular subsystem color\n simply set the Alpha value to 0 and it will be\n omitted from the legend.";
-const string INI_KEY_COLOR_MAX = "Max block density";
-const string INI_KEY_COLOR_MIN = "Min block density";
-const string INI_KEY_COLOR_MISSING = "Missing block";
-const string INI_KEY_COLOR_POWER = "Power";
-const string INI_KEY_COLOR_WEAPON = "Weapons";
-const string INI_KEY_COLOR_GYRO = "Gyro";
-const string INI_KEY_COLOR_THRUST = "Thrust";
-const string INI_KEY_COLOR_BG = "Background";
-
 const string INI_SCREEN_ID_TEMPLATE = " - Screen {0}";
-
 const string INI_SECTION_LEGEND = "SIMPL - Legend Config{0}";
 const string INI_SECTION_TEXT_CONFIG_TEMPLATE = "SIMPL - Display Config{0} - View {1}";
-
 const string INI_SECTION_TEXT_CONFIG_COMPAT = "SIMPL - Display Config{0}";
-
-const string INI_KEY_LEGEND_SCALE = "Legend Scale";
-const string INI_KEY_LEGEND_POS = "Position";
-
-const string INI_KEY_NORMAL = "View axis";
-const string INI_KEY_ROTATION = "Rotation (deg)";
-const string INI_KEY_SCALE = "Scale";
-const string INI_KEY_VIEW_POS = "Position";
-
-const string INI_KEY_NORMAL_COMPAT = "Normal axis";
-const string INI_KEY_AUTOSCALE_COMPAT = "Autoscale layout";
-const string INI_KEY_SCALE_COMPAT = "Manual layout scale";
-const string INI_KEY_INVERT_COMPAT = "Flip horizontally";
-
 const string INI_SECTION_TEXT_SURF = "SIMPL - Text Surface Config";
 const string INI_KEY_TEXT_SURF_TEMPLATE = "Show on screen {0}";
 const string INI_KEY_NUM_VIEWS = "Number of views";
 const string INI_KEY_NUM_VIEWS_TEMPLATE = "Number of views for screen {0}";
 
-const string INI_COMMENT_NORMAL = " View axis values: X, Y, Z, NegativeX, NegativeY, NegativeZ";
 
-const string INI_SECTION_MULTISCREEN = "SIMPL - Multiscreen Config";
-const string INI_KEY_MULTISCREEN_ROWS = "Screen rows";
-const string INI_KEY_MULTISCREEN_COLS = "Screen cols";
+public class GeneralSection : ConfigSection
+{
+    public ConfigString TextSurfaceGroupName = new ConfigString("Group name", "SIMPL");
+    public ConfigBool Autoscan = new ConfigBool("Auto scan", true);
 
-// Configurable
-ConfigString _textSurfaceGroupName = new ConfigString(INI_KEY_GROUP_NAME, "SIMPL");
-ConfigBool _autoscan = new ConfigBool(INI_KEY_AUTO_SCAN, true);
+    public GeneralSection() : base("SIMPL - General Config")
+    {
+        AddValues(TextSurfaceGroupName, Autoscan);
+    }
+}
 
-ConfigColor _bgColor = new ConfigColor(INI_KEY_COLOR_BG, new Color(0, 0, 0));
+public class ColorSection : ConfigSection
+{
+    public ConfigColor MinDensityColor = new ConfigColor("Min block density", new Color(10, 10, 10));
+    public ConfigColor MaxDensityColor = new ConfigColor("Max block density", new Color(50, 50, 50));
+    public ConfigColor DamageColor = new ConfigColor("Missing block", new Color(100, 0, 0, 200));
+    public ConfigColor BackgroundColor = new ConfigColor("Background", new Color(0, 0, 0));
 
-ConfigFloat _legendScale = new ConfigFloat(INI_KEY_LEGEND_SCALE, DEFAULT_LEGEND_SCALE);
-ConfigVector2 _legendPosition = new ConfigVector2(INI_KEY_LEGEND_POS, new Vector2(-1f, -1f), " Elements should range from -1 to 1 where 0 indicates centered");
+    const string IniCommentColor = " Colors are in the format: Red, Green, Blue, Alpha";
 
-ConfigEnum<NormalAxis> _normal = new ConfigEnum<NormalAxis>(INI_KEY_NORMAL, DEFAULT_NORMAL_AXIS, INI_COMMENT_NORMAL);
-ConfigFloat _rotation = new ConfigFloat(INI_KEY_ROTATION, DEFAULT_ROTATION);
-ConfigNullable<float, ConfigFloat> _screenScale = new ConfigNullable<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE), "auto");
-ConfigVector2 _viewPosition = new ConfigVector2(INI_KEY_VIEW_POS, new Vector2(0, 0), " Elements should range from -1 to 1 where 0 indicates centered");
+    public ColorSection() : base("SIMPL - Colors", IniCommentColor)
+    {
+        AddValues(MinDensityColor, MaxDensityColor, DamageColor, BackgroundColor);
+    }
+}
 
-ConfigDeprecated<bool, ConfigBool> _autoscaleCompat = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(INI_KEY_AUTOSCALE_COMPAT, true));
-ConfigDeprecated<float, ConfigFloat> _screenScaleCompat = new ConfigDeprecated<float, ConfigFloat>(new ConfigFloat(INI_KEY_SCALE_COMPAT, 1f));
-ConfigDeprecated<NormalAxis, ConfigEnum<NormalAxis>> _normalCompat = new ConfigDeprecated<NormalAxis, ConfigEnum<NormalAxis>>(new ConfigEnum<NormalAxis>(INI_KEY_NORMAL_COMPAT, NormalAxis.X));
-ConfigDeprecated<bool, ConfigBool> _invertCompat = new ConfigDeprecated<bool, ConfigBool>(new ConfigBool(INI_KEY_INVERT_COMPAT, false));
+public class LegendSection : ConfigSection
+{
+    public ConfigFloat LegendScale = new ConfigFloat("Legend Scale", 1f);
+    public ConfigVector2 LegendPosition = new ConfigVector2("Position", new Vector2(-1f, -1f), " Elements should range from -1 to 1 where 0 indicates centered");
 
-ConfigInt _rows = new ConfigInt(INI_KEY_MULTISCREEN_ROWS, 1);
-ConfigInt _cols = new ConfigInt(INI_KEY_MULTISCREEN_COLS, 1);
+    public LegendSection() : base("")
+    {
+        AddValues(LegendScale, LegendPosition);
+    }
+}
 
-ConfigSection _sectionGeneral = new ConfigSection(INI_SECTION_NAME);
-ConfigSection _sectionColors = new ConfigSection(INI_SECTION_COLOR, INI_COMMENT_COLOR);
-ConfigSection 
-    _sectionLegend = new ConfigSection(""),
-    _sectionDisplay = new ConfigSection(""),
-    _sectionDisplayCompat = new ConfigSection("");
-ConfigSection _sectionMultiscreen = new ConfigSection(INI_SECTION_MULTISCREEN);
+public class DisplaySection : ConfigSection
+{
+    public ConfigEnum<NormalAxis> _normal = new ConfigEnum<NormalAxis>("View axis", NormalAxis.X, " View axis values: X, Y, Z, NegativeX, NegativeY, NegativeZ");
+    public ConfigFloat _rotation = new ConfigFloat("Rotation (deg)", 0f);
+    public ConfigNullable<float> _screenScale = new ConfigNullable<float>(new ConfigFloat("Scale"), "auto");
+    public ConfigVector2 _viewPosition = new ConfigVector2("Position", new Vector2(0, 0), " Elements should range from -1 to 1 where 0 indicates centered");
+
+    protected void RegisterValues()
+    {
+        AddValues(_normal, _rotation, _screenScale, _viewPosition);
+    }
+
+    public DisplaySection() : base("")
+    {
+        RegisterValues();
+    }
+
+    protected struct Deferred { }
+    protected static readonly Deferred kDeferred = new Deferred();
+
+    protected DisplaySection(Deferred _) : base("") {}
+}
+
+public class CompatDisplaySection : DisplaySection
+{
+    public ConfigDeprecated<bool> AutoscaleCompat = new ConfigDeprecated<bool>(new ConfigBool("Autoscale layout", true));
+    public ConfigDeprecated<float> ScreenScaleCompat = new ConfigDeprecated<float>(new ConfigFloat("Manual layout scale", 1f));
+    public ConfigDeprecated<NormalAxis> NormalCompat = new ConfigDeprecated<NormalAxis>(new ConfigEnum<NormalAxis>("Normal axis", NormalAxis.X));
+    public ConfigDeprecated<bool> InvertCompat = new ConfigDeprecated<bool>(new ConfigBool("Flip horizontally", false));
+
+    public CompatDisplaySection() : base(kDeferred) 
+    {
+        AddValues(AutoscaleCompat, ScreenScaleCompat, NormalCompat, InvertCompat);
+        RegisterValues();
+    }
+}
+
+public class MultiscreenSection : ConfigSection
+{
+    public ConfigInt Rows = new ConfigInt("Screen rows", 1);
+    public ConfigInt Cols = new ConfigInt("Screen cols", 1);
+
+    const string MultiScreenTemplate = "{0} - Multiscreen Config";
+
+    public MultiscreenSection(string scriptName) : base(string.Format(MultiScreenTemplate, scriptName))
+    {
+        AddValues(Rows, Cols);
+    }
+}
+
+public class ConfigDefinitionIdList : ConfigValue<List<MyDefinitionId>>
+{
+    StringBuilder _buffer = new StringBuilder();
+
+    public ConfigDefinitionIdList(string name, List<MyDefinitionId> defs = null, string comment = null) : base(name, defs ?? new List<MyDefinitionId>(), comment)
+    { }
+
+    protected override void InitializeValue()
+    {
+        _value = new List<MyDefinitionId>();
+    }
+
+    protected override void SetDefault()
+    {
+        _value.Clear();
+        if (DefaultValue != null)
+        {
+            _value.AddRange(DefaultValue);
+        }
+    }
+
+    protected override bool SetValue(ref MyIniValue pVal)
+    {
+        bool read = false;
+        _value.Clear();
+        string[] definitionNames = pVal.ToString().Split(',');
+        foreach (var name in definitionNames)
+        {
+            MyDefinitionId def;
+            bool parsed = MyDefinitionId.TryParse(name, out def);
+            if (parsed)
+            {
+                _value.Add(def);
+            }
+            read |= parsed;
+        }
+        return read;
+    }
+
+    public override string ToString()
+    {
+        _buffer.Clear();
+        for (int ii = 0; ii < _value.Count; ++ii)
+        {
+            _buffer.Append(_value[ii].TypeId.ToString());
+            if (ii < _value.Count - 1)
+            {
+                _buffer.Append(",");
+            }
+        }
+        return _buffer.ToString();
+    }
+}
+
+public class ConfigBlockTypeLegendItemList : ConfigValue<List<BlockTypeLegendItem>>
+{
+    
+    class LegendItemSection : ConfigSection
+    {
+        public ConfigColor ItemColor = new ConfigColor("Color", Color.Transparent);
+        public ConfigEnum<BlockType> ItemBlockType = new ConfigEnum<BlockType>("Block type", BlockType.None);
+        public ConfigDefinitionIdList ItemBlockDefinitions = new ConfigDefinitionIdList("Block definitions", new List<MyDefinitionId>());
+
+        public LegendItemSection() : base("")
+        {
+            AddValues(ItemColor, ItemBlockType, ItemBlockDefinitions);
+        }
+    }
+
+    MyIni _ini = new MyIni();
+    List<string> _itemNames = new List<string>();
+    LegendItemSection _legendItem = new LegendItemSection();
+    StringBuilder _buffer = new StringBuilder();
+
+    public ConfigBlockTypeLegendItemList(string name, List<BlockTypeLegendItem> value = null, string section = null) : base(name, value ?? new List<BlockTypeLegendItem>(), section)
+    { }
+
+    protected override void InitializeValue()
+    {
+        _value = new List<BlockTypeLegendItem>();
+    }
+
+    protected override void SetDefault()
+    {
+        _value.Clear();
+
+        if (DefaultValue == null)
+        {
+            return;
+        }
+
+        foreach (var item in DefaultValue)
+        {
+            _value.Add(item.Clone());
+        }    
+    }
+
+    protected override bool SetValue(ref MyIniValue pVal)
+    {
+        _ini.Clear();
+        _ini.TryParse(pVal.ToString());
+
+        _itemNames.Clear();
+        _ini.GetSections(_itemNames);
+
+        _value.Clear();
+        if (_itemNames.Count == 0)
+        {
+            SetDefault();
+            return false;
+        }
+
+        foreach (var categoryName in _itemNames)
+        {
+            _legendItem.Section = categoryName;
+            _legendItem.Update(_ini);
+
+            var category = new BlockTypeLegendItem(categoryName, _legendItem.ItemColor, _legendItem.ItemBlockType, _legendItem.ItemBlockDefinitions.Value);
+
+            _value.Add(category);
+        }
+
+        return true;
+    }
+
+    public override string ToString()
+    {
+        _buffer.Clear();
+        for (int ii = 0; ii < _value.Count; ++ii)
+        {
+            var item = _value[ii];
+            _legendItem.Section = item.Name;
+            _legendItem.ItemColor.Value = item.Color;
+            _legendItem.ItemBlockType.Value = item.BlockType;
+            item.GetDefinitions(_legendItem.ItemBlockDefinitions.Value);
+
+            _ini.Clear();
+            _legendItem.WriteToIni(_ini);
+
+            _buffer.Append(_ini.ToString());
+            if (ii + 1 < _value.Count)
+            {
+                _buffer.Append('\n');
+            }
+        }
+        return _buffer.ToString();
+    }
+}
+
+public class LegendCategoriesSection : ConfigSection
+{
+    static readonly List<BlockTypeLegendItem> _defaultLegendCats = new List<BlockTypeLegendItem>()
+    {
+        new BlockTypeLegendItem("Weapons", new Color(100, 50, 0, 100), BlockType.Weapons, null),
+        new BlockTypeLegendItem("Power", new Color(0, 100, 0, 100), BlockType.Power, null),
+        new BlockTypeLegendItem("Gyros", new Color(100, 100, 0, 100), BlockType.Gyros, null),
+        new BlockTypeLegendItem("Thrust", new Color(0, 0, 100, 100), BlockType.Thrust, null)
+    };
+
+    const string Key = "Legend categories";
+    static readonly string LegendComment =
+        "\n Every line *must* start with the pipe (|) symbol." +
+        "\n To create a new legend category, put the category name in brackets and" +
+        "\n add the 'Color', 'Block type', and 'Block definitions' keys as described" +
+        "\n below. The order in which you define your custom categories " +
+        "\n determines its draw priority. The first legend category has the highest" +
+        "\n priority and the last has the lowest priority." +
+        "\n" +
+        "\n Color" +
+        "\n   - Specifies the color associated with this category" +
+        "\n   - The format is R, G, B, A" +
+        "\n   - 255, 255, 255, 255 is white and 0, 0, 0, 0 is transparent" +
+        "\n" +
+        "\n Block type" +
+        "\n   - Specifies the block type to associate with this legend category" +
+        "\n   - Valid values: None, Weapons, Thrust, Gyros, Power, Cargo, Tools," +
+        "\n     Doors, or Functional" +
+        "\n" +
+        "\n Block definitions" +
+        "\n   - Can contain one or more comma-separated block MyObjectBuilder" +
+        "\n     type definitions" +
+        "\n   - For a list of all block tyoe definitions in the vanilla game, see:" +
+        "\n     https://github.com/malware-dev/MDK-SE/wiki/Type-Definition-Listing#blocks" +
+        "\n   - You can also use this to specify type definitions that are added" +
+        "\n     by mods" +
+        "\n   - Leave this key blank if you do not wish to use it" +
+        "\n" +
+        "\n Example:" +
+        $"\n   {Key}=" +
+        "\n   |[Cargo]" +
+        "\n   |Color=0,100,100,100" +
+        "\n   |Block type=Cargo" +
+        "\n   |Block definitions=" +
+        "\n   |" +
+        "\n   |[Sample text]" +
+        "\n   |Color=100, 0, 50, 100" +
+        "\n   |Block type=None" +
+        "\n   |Block definitions=MyObjectBuilder_Assembler/LargeAssembler,MyObjectBuilder_Assembler/BasicAssembler,MyObjectBuilder_Refinery/Blast Furnace" +
+        "\n\n";
+
+    public ConfigBlockTypeLegendItemList LegendCategories = new ConfigBlockTypeLegendItemList(Key, _defaultLegendCats, LegendComment);
+
+    public LegendCategoriesSection() : base("SIMPL - Legend Categories")
+    {        
+        AddValue(LegendCategories);
+    }
+}
+
+public GeneralSection GeneralConfig = new GeneralSection();
+public ColorSection ColorConfig = new ColorSection();
+public LegendSection LegendConfig = new LegendSection();
+public DisplaySection DisplayConfig = new DisplaySection();
+public CompatDisplaySection CompatDisplayConfig = new CompatDisplaySection();
+public MultiscreenSection MultiscreenConfig = new MultiscreenSection("SIMPL");
+public LegendCategoriesSection LegendCategoriesConfig = new LegendCategoriesSection();
 
 void ConfigureIni()
 {
-    _screenScaleCompat.Callback = (scale) => {
-        if (!_autoscaleCompat.Implementation.Value)
+    CompatDisplayConfig.ScreenScaleCompat.Callback = (scale) => {
+        if (!CompatDisplayConfig.AutoscaleCompat.Value)
         {
-            _screenScale.Value = scale;
+            DisplayConfig._screenScale.Value = scale;
         }
     };
 
-    _normalCompat.Callback = (normal) =>
+    CompatDisplayConfig.NormalCompat.Callback = (normal) =>
     {
-        _normal.Value = normal;
+        DisplayConfig._normal.Value = normal;
     };
 
-    _invertCompat.Callback = (invert) =>
+    CompatDisplayConfig.InvertCompat.Callback = (invert) =>
     {
         if (invert)
         {
-            _normal.Value |= NormalAxis.Negative;
+            DisplayConfig._normal.Value |= NormalAxis.Negative;
         }
     };
-
-    _sectionGeneral.AddValues(_textSurfaceGroupName, _autoscan);
-
-    _sectionColors.AddValues(
-        _planarMap.ColorMaxDensity,
-        _planarMap.ColorMinDensity,
-        _planarMap.ColorMissing,
-        _bgColor,
-        _planarMap.ColorWeapon,
-        _planarMap.ColorPower,
-        _planarMap.ColorGyro,
-        _planarMap.ColorThrust
-    );
-
-    _sectionLegend.AddValues(
-        _legendScale,
-        _legendPosition
-    );
-
-    _sectionDisplay.AddValues(
-        _normal, 
-        _rotation, 
-        _screenScale, 
-        _viewPosition
-    );
-
-    _sectionDisplayCompat.AddValues(
-        _autoscaleCompat, 
-        _screenScaleCompat, 
-        _normalCompat, 
-        _invertCompat, 
-        _normal, 
-        _rotation,
-        _screenScale,
-        _viewPosition
-    );
-
-    _sectionMultiscreen.AddValues(_rows, _cols);
 }
 
 float _textSize = 0.5f;
@@ -188,9 +381,10 @@ List<BlockInfo> _blockInfoArray = new List<BlockInfo>();
 PlanarMap _planarMap;
 Scheduler _scheduler;
 RuntimeTracker _runtimeTracker;
-Legend _legend;
+public Legend LegendInstance;
 LoadingScreen _loadingScreen = new LoadingScreen($"Loading SIMPL (v{VERSION})", "");
 MyIni _ini = new MyIni();
+
 StringBuilder _echoBuilder = new StringBuilder(512);
 
 IEnumerator<float> _blockStorageStateMachine = null;
@@ -213,12 +407,64 @@ int _spritesY = 0;
 int _spritesZ = 0;
 
 public enum NormalAxis { X = 0, Y = 1, Z = 2, Axes = X | Y | Z, Negative = 4, NegativeX = Negative | X, NegativeY = Negative | Y, NegativeZ = Negative | Z };
-public enum BlockMask { None, Power = 1, Gyro = 2, Thrust = 4, Weapon = 8 }
 public enum BlockStatus { Nominal = 0, Damaged = 1, Missing = 2 };
+public enum BlockType
+{
+    None = 0,
+    Weapons = 1 << 0,
+    Thrust = 1 << 1,
+    Gyros = 1 << 2,
+    Power = 1 << 3,
+    Cargo = 1 << 4,
+    Tools = 1 << 5,
+    Functional = 1 << 6,
+    Doors = 1 << 7,
+}
+
+public static BlockType GetBlockType<T>(T block) where T : IMyCubeBlock
+{
+    BlockType blockType = BlockType.None;
+    if (block is IMyUserControllableGun)
+    {
+        blockType |= BlockType.Weapons;
+    }
+    if (block is IMyThrust)
+    {
+        blockType |= BlockType.Thrust;
+    }
+    if (block is IMyGyro)
+    {
+        blockType |= BlockType.Gyros;
+    }
+    if (block is IMyPowerProducer)
+    {
+        blockType |= BlockType.Power;
+    }
+    if (block is IMyCargoContainer)
+    {
+        blockType |= BlockType.Cargo;
+    }
+    if (block is IMyShipToolBase)
+    {
+        blockType |= BlockType.Tools;
+    }
+    if (block is IMyFunctionalBlock)
+    {
+        blockType |= BlockType.Functional;
+    }
+    if (block is IMyDoor)
+    {
+        blockType |= BlockType.Doors;
+    }
+    return blockType;
+}
 
 Program()
 {
-    _planarMap = new PlanarMap(Me.CubeGrid);
+    OldEcho = Echo;
+    Echo = NewEcho;
+
+    _planarMap = new PlanarMap(this, Me.CubeGrid);
     ConfigureIni();
 
     InitializeGridBlockStorage();
@@ -231,19 +477,16 @@ Program()
 
     _forceDrawTimeout = new ScheduledAction(() => _allowForceDraw = true, 1.0 / 30.0, true);
 
-    _legend = new Legend(_textSize);
-    _legend.AddLegendItem(INI_KEY_COLOR_MISSING, "Damage", _planarMap.ColorMissing);
-    _legend.AddLegendItem(INI_KEY_COLOR_WEAPON, "Weapons", _planarMap.ColorWeapon);
-    _legend.AddLegendItem(INI_KEY_COLOR_POWER, "Power", _planarMap.ColorPower);
-    _legend.AddLegendItem(INI_KEY_COLOR_GYRO, "Gyros", _planarMap.ColorGyro);
-    _legend.AddLegendItem(INI_KEY_COLOR_THRUST, "Thrust", _planarMap.ColorThrust);
+    LegendInstance = new Legend(_textSize);
 
     GetScreens();
 
     Runtime.UpdateFrequency |= UpdateFrequency.Update10;
 }
 
-new public void Echo(string text)
+public Action<string> OldEcho;
+
+public void NewEcho(string text)
 {
     _echoBuilder.Append(text).Append("\n");
 }
@@ -281,7 +524,7 @@ void WriteDetailedInfo()
     }
 
     string output = _echoBuilder.ToString();
-    base.Echo(output);
+    OldEcho(output);
     _echoBuilder.Clear();
 }
 
@@ -306,7 +549,7 @@ void Main(string arg, UpdateType updateSource)
             break;
 
         case "SCAN":
-            if (!_autoscan)
+            if (!GeneralConfig.Autoscan)
             {
                 TryStartBlockCheck(true);
             }
@@ -363,14 +606,14 @@ void GetSurfaceConfigValues(IMyTerminalBlock b, int? surfaceIdx, int numViews, T
     {
         surfName = "";
     }
-    
+
     string legendSection = string.Format(INI_SECTION_LEGEND, surfName);
 
 
     for (int ii = 1; ii <= numViews; ++ii)
     {
         string displaySection = string.Format(INI_SECTION_TEXT_CONFIG_TEMPLATE, surfName, ii);
-        _sectionDisplay.Section = displaySection;
+        DisplayConfig.Section = displaySection;
 
         if (ii == 1)
         {
@@ -378,28 +621,28 @@ void GetSurfaceConfigValues(IMyTerminalBlock b, int? surfaceIdx, int numViews, T
 
             if (_ini.ContainsSection(compatName))
             {
-                _legendScale.ReadFromIni(ref _ini, compatName);
-                _sectionDisplayCompat.Section = compatName;
-                _sectionDisplayCompat.ReadFromIni(ref _ini);
+                LegendConfig.LegendScale.ReadFromIni(_ini, compatName);
+                CompatDisplayConfig.Section = compatName;
+                CompatDisplayConfig.ReadFromIni(_ini);
 
                 _ini.DeleteSection(compatName);
 
-                _legendScale.WriteToIni(ref _ini, legendSection);
-                _sectionDisplayCompat.Section = displaySection;
-                _sectionDisplayCompat.WriteToIni(ref _ini);
+                LegendConfig.LegendScale.WriteToIni(_ini, legendSection);
+                CompatDisplayConfig.Section = displaySection;
+                CompatDisplayConfig.WriteToIni(_ini);
             }
         }
 
-        _sectionLegend.Section = legendSection;
-        _sectionDisplay.Update(ref _ini);
+        LegendConfig.Section = legendSection;
+        DisplayConfig.Update(_ini);
 
-        config.AddView(_normal, _rotation, _screenScale.HasValue ? _screenScale.Value : (float?)null, _viewPosition);
+        config.AddView(DisplayConfig._normal, DisplayConfig._rotation, DisplayConfig._screenScale.HasValue ? DisplayConfig._screenScale.Value : (float?)null, DisplayConfig._viewPosition);
     }
 
-    _sectionLegend.Update(ref _ini);
+    LegendConfig.Update(_ini);
 
-    config.LegendScale = _legendScale;
-    config.LegendRelativePos = _legendPosition;
+    config.LegendScale = LegendConfig.LegendScale;
+    config.LegendRelativePos = LegendConfig.LegendPosition;
 }
 
 bool CollectScreens(IMyTerminalBlock b)
@@ -429,16 +672,16 @@ bool CollectScreens(IMyTerminalBlock b)
 
         if (numViews > 0)
         {
-            bool multiscreen = _ini.ContainsSection(INI_SECTION_MULTISCREEN);
+            bool multiscreen = _ini.ContainsSection(MultiscreenConfig.Section);
             if (multiscreen)
             {
-                _sectionMultiscreen.Update(ref _ini); // TODO: clamp
+                MultiscreenConfig.Update(_ini); // TODO: clamp
             }
 
             ISpriteSurface surf;
-            if (multiscreen && (_rows > 1 || _cols > 1))
+            if (multiscreen && (MultiscreenConfig.Rows > 1 || MultiscreenConfig.Cols > 1))
             {
-                surf = new MultiScreenSpriteSurface(tp, _rows, _cols, this);
+                surf = new MultiScreenSpriteSurface(tp, MultiscreenConfig.Rows, MultiscreenConfig.Cols, this);
             }
             else
             {
@@ -459,7 +702,6 @@ bool CollectScreens(IMyTerminalBlock b)
         {
             int numViews = i == 0 ? 1 : 0;
 
-            // Compatability code
             string displayKey = string.Format(INI_KEY_TEXT_SURF_TEMPLATE, i);
             bool legacyDisplay = _ini.Get(INI_SECTION_TEXT_SURF, displayKey).ToBoolean(i == 0);
             _ini.Delete(INI_SECTION_TEXT_SURF, displayKey);
@@ -497,19 +739,18 @@ void ParseGeneralConfig()
     _ini.Clear();
     bool parsed = _ini.TryParse(Me.CustomData);
 
-    _sectionGeneral.Update(ref _ini);
-    _sectionColors.Update(ref _ini);
+    GeneralConfig.Update(_ini);
+    ColorConfig.Update(_ini);
+    LegendCategoriesConfig.Update(_ini);
+
+    LegendInstance.DamageCategory.Color = ColorConfig.DamageColor;
+    LegendInstance.BlockCategories.Clear();
+    LegendInstance.BlockCategories.AddRange(LegendCategoriesConfig.LegendCategories.Value);
 
     if (!parsed && !string.IsNullOrWhiteSpace(Me.CustomData))
     {
         _ini.EndContent = Me.CustomData;
     }
-
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_MISSING, _planarMap.ColorMissing);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_WEAPON, _planarMap.ColorWeapon);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_POWER, _planarMap.ColorPower);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_GYRO, _planarMap.ColorGyro);
-    _legend.UpdateLegendItemColor(INI_KEY_COLOR_THRUST, _planarMap.ColorThrust);
 
     string output = _ini.ToString();
 
@@ -524,7 +765,7 @@ void GetScreens()
     _textSurfaces.Clear();
     ParseGeneralConfig();
 
-    var group = GridTerminalSystem.GetBlockGroupWithName(_textSurfaceGroupName);
+    var group = GridTerminalSystem.GetBlockGroupWithName(GeneralConfig.TextSurfaceGroupName);
     if (group == null)
         return;
 
@@ -603,11 +844,10 @@ public IEnumerator<float> GridSpaceStorageIterator()
         int checkedVolume = (_maxCheckedPos - _minCheckedPos + Vector3I.One).Volume();
         if (Me.CubeGrid.CubeExists(pos))
         {
-            BlockInfo blockInfo = new BlockInfo(ref pos, Me.CubeGrid);
+            BlockInfo blockInfo = new BlockInfo(this, ref pos, Me.CubeGrid);
             _blockInfoArray.Add(blockInfo);
             _planarMap.StoreBlockInfo(blockInfo);
 
-            // Step towards neighbors
             EnqueuePositionIfUnique(pos + Vector3I.UnitX);
             EnqueuePositionIfUnique(pos + Vector3I.UnitY);
             EnqueuePositionIfUnique(pos + Vector3I.UnitZ);
@@ -682,8 +922,7 @@ void TryStartBlockCheck(bool commanded)
 {
     if (!_blockCheckRunning)
     {
-        // Restart block checking
-        if (commanded || _autoscan)
+        if (commanded || GeneralConfig.Autoscan)
         {
             InitializeGridBlockChecking();
         }
@@ -747,8 +986,7 @@ void TryStartSpriteDraw()
         return;
 
     _spriteDrawRunning = true;
-    if (_spriteDrawStateMachine != null)
-        _spriteDrawStateMachine.Dispose();
+    _spriteDrawStateMachine?.Dispose();
     _spriteDrawStateMachine = SpriteDrawStateMachine();
 }
 
@@ -773,7 +1011,7 @@ public IEnumerator<float> SpriteDrawStateMachine()
         TextSurfaceConfig config = _textSurfaces[jj];
         ISpriteSurface surf = config.Surface;
 
-        surf.ScriptBackgroundColor = _bgColor;
+        surf.ScriptBackgroundColor = ColorConfig.BackgroundColor;
 
         Vector2 screenCenter = surf.TextureSize * 0.5f;
         Vector2 halfSurface = surf.SurfaceSize * 0.5f;
@@ -785,7 +1023,6 @@ public IEnumerator<float> SpriteDrawStateMachine()
             continue;
         }
 
-        // Adding or removing this sprite will force an entire resync of the sprite cache
         if (_drawRefreshSprite)
         {
             surf.Add(new MySprite());
@@ -793,12 +1030,11 @@ public IEnumerator<float> SpriteDrawStateMachine()
 
         foreach (var view in config.Views)
         {
-            // TODO: Fix the percentages
 
             NormalAxis normal = view.Normal & NormalAxis.Axes;
             float rotation = view.RotationRad;
             bool autoscale = !view.Scale.HasValue;
-            float scale = view.Scale.HasValue ? view.Scale.Value : 1;
+            float scale = view.Scale ?? 1;
             bool invert = (view.Normal & NormalAxis.Negative) != 0;
             Vector2 position = screenCenter + view.RelativePosition * halfSurface;
 
@@ -839,7 +1075,7 @@ public IEnumerator<float> SpriteDrawStateMachine()
             for (int ii = 0; ii < quadTree.FinishedNodes.Count; ++ii)
             {
                 var leaf = quadTree.FinishedNodes[ii];
-                quadTree.AddSpriteFromQuadTreeLeaf(surf, normal, invert, scale, rotation, _planarMap, leaf, ref position, ref rotationMatrix);
+                quadTree.AddSpriteFromQuadTreeLeaf(surf, invert, scale, rotation, _planarMap, leaf, ref position, ref rotationMatrix);
 
                 if ((ii + 1) % SPRITES_TO_CREATE_PER_TICK == 0)
                 {
@@ -872,9 +1108,8 @@ public IEnumerator<float> SpriteDrawStateMachine()
 
         }
 
-        _legend.GenerateSprites(surf, screenCenter + config.LegendRelativePos * halfSurface, config.LegendScale);
+        LegendInstance.GenerateSprites(surf, screenCenter + config.LegendRelativePos * halfSurface, config.LegendScale);
 
-        // Draw max of one surface per tick
         surf.Draw();
         yield return 100f * (jj + 1) / _textSurfaces.Count;
     }
@@ -921,27 +1156,22 @@ public class LoadingScreen
         Vector2 scaleVec = surf.TextureSize / 512f;
         float scale = Math.Min(scaleVec.X, scaleVec.Y);
 
-        // Background
         MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: BackgroundColor);
         surf.Add(background);
 
-        // Title
         MySprite title = MySprite.CreateText(_title, "Debug", TextColor, TitleSize * scale, TextAlignment.CENTER);
         title.Position = screenCenter + TitleLocation * scale;
         surf.Add(title);
 
-        // Subtitle
         MySprite subtitle = MySprite.CreateText(_subtitle, "Debug", TextColor, SubtitleSize * scale, TextAlignment.CENTER);
         subtitle.Position = screenCenter + SubtitleLocation * scale;
         surf.Add(subtitle);
 
-        // Status bar background
         Vector2 loadingBarSize = scale * LoadingBarSize;
         MySprite barBackground = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarBackgroundColor, size: loadingBarSize);
         barBackground.Position = screenCenter + LoadingBarLocation * scale;
         surf.Add(barBackground);
 
-        // Status bar
         Vector2 statusBarSize = loadingBarSize * new Vector2(progress, 1f);
         MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: LoadingBarColor, size: statusBarSize);
         bar.Position = screenCenter + LoadingBarLocation * scale + new Vector2(-0.5f * (loadingBarSize.X - statusBarSize.X), 0);
@@ -1040,7 +1270,7 @@ public class QuadTree
 
     public bool Finished { get; private set; } = false;
 
-    public void AddSpriteFromQuadTreeLeaf(ISpriteSurface surf, NormalAxis normal, bool invert, float scale, float rotation, PlanarMap _planarMapPtr, QuadTreeLeaf leaf, ref Vector2 screenCenter, ref Matrix rotationMatrix)
+    public void AddSpriteFromQuadTreeLeaf(ISpriteSurface surf, bool invert, float scale, float rotation, PlanarMap _planarMapPtr, QuadTreeLeaf leaf, ref Vector2 screenCenter, ref Matrix rotationMatrix)
     {
         Vector2 leafCenter = (Vector2)(leaf.Max + leaf.Min) * 0.5f;
         Vector2 fromCenterPlanar = leafCenter - _center;
@@ -1141,7 +1371,7 @@ public class QuadTree
     }
 }
 
-public struct LegendItem
+public abstract class LegendItem
 {
     public string Name;
     public Color Color;
@@ -1153,11 +1383,73 @@ public struct LegendItem
     }
 }
 
+public class DamageLegendItem : LegendItem
+{
+    public DamageLegendItem() : base("Damage", Color.Black) { }
+}
+
+public class BlockTypeLegendItem : LegendItem
+{
+    List<MyDefinitionId> _definitions = new List<MyDefinitionId>();
+    
+    BlockType _blockType = BlockType.None;
+    public BlockType BlockType => _blockType;
+
+    public BlockTypeLegendItem(string name, Color color, BlockType blockType, List<MyDefinitionId> list) : base(name, color)
+    {
+        _blockType = blockType;
+        if (list != null)
+        {
+            _definitions.AddRange(list);
+        }
+    }
+
+    public int DefinitionCount
+    {
+        get { return _definitions.Count; }
+    }
+
+    public void AddDefinition(MyDefinitionId def)
+    {
+        _definitions.Add(def);
+    }
+
+    public void GetDefinitions(List<MyDefinitionId> list)
+    {
+        list?.Clear();
+        list?.AddRange(_definitions);
+    }
+
+    public bool Matches(IMyCubeBlock block)
+    {
+        if ((GetBlockType(block) & _blockType) != 0)
+        {
+            return true;
+        }
+
+        foreach (var def in _definitions)
+        {
+            if (def.TypeId == block.BlockDefinition.TypeId)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public BlockTypeLegendItem Clone()
+    {
+        var clone = new BlockTypeLegendItem(Name, Color, _blockType, _definitions);
+        return clone;
+    }
+}
+
 public class Legend
 {
-    Dictionary<string, LegendItem> _legendItems = new Dictionary<string, LegendItem>();
+    public DamageLegendItem DamageCategory = new DamageLegendItem();
+    public List<BlockTypeLegendItem> BlockCategories = new List<BlockTypeLegendItem>();
 
-    Color _textColor = new Color(100, 100, 100);
+    Color _textColor = new Color(100, 100, 100); // TODO: Make configurable
     float _legendSquareSize;
     float _legendFontSize;
 
@@ -1176,52 +1468,40 @@ public class Legend
     {
         Vector2 textVerticalOffset = TEXT_OFFSET_BASE * _legendFontSize * scale;
         Vector2 legendPosition = topLeftPos + Vector2.One * (_legendSquareSize * scale * 0.5f + 4f);
-        foreach (var kvp in _legendItems)
+
+        DrawItem(surf, DamageCategory, ref legendPosition, textVerticalOffset, scale);
+        foreach (var item in BlockCategories)
         {
-            var item = kvp.Value;
-
-            if (item.Color.A == 0)
-                continue;
-
-            // Add colored square
-            surf.Add(new MySprite(
-                SpriteType.TEXTURE,
-                "SquareSimple",
-                legendPosition,
-                Vector2.One * _legendSquareSize * scale,
-                item.Color));
-
-            Vector2 textOffset = legendPosition + Vector2.UnitX * (HORIZONTAL_SPACING * scale + _legendSquareSize * scale * 0.5f) + textVerticalOffset;
-
-            surf.Add(new MySprite(
-                SpriteType.TEXT,
-                data: item.Name,
-                position: textOffset,
-                color: _textColor,
-                fontId: "DEBUG",
-                rotation: _legendFontSize * scale,
-                alignment: TextAlignment.LEFT
-            ));
-
-            legendPosition.Y += BASE_TEXT_HEIGHT_PX * scale * _legendFontSize + Math.Max(VERTICAL_SPACING, VERTICAL_SPACING * scale);
+            DrawItem(surf, item, ref legendPosition, textVerticalOffset, scale);
         }
     }
 
-    public void AddLegendItem(string key, string name, Color color)
+    void DrawItem(ISpriteSurface surf, LegendItem item, ref Vector2 legendPosition, Vector2 textVerticalOffset, float scale)
     {
-        _legendItems[key] = new LegendItem(name, color);
+        if (item.Color.A == 0)
+            return; // TODO: Remove?
+
+        surf.Add(new MySprite(
+            SpriteType.TEXTURE,
+            "SquareSimple",
+            legendPosition,
+            Vector2.One * _legendSquareSize * scale,
+            item.Color));
+
+        Vector2 textOffset = legendPosition + Vector2.UnitX * (HORIZONTAL_SPACING * scale + _legendSquareSize * scale * 0.5f) + textVerticalOffset;
+
+        surf.Add(new MySprite(
+            SpriteType.TEXT,
+            data: item.Name,
+            position: textOffset,
+            color: _textColor,
+            fontId: "DEBUG",
+            rotation: _legendFontSize * scale,
+            alignment: TextAlignment.LEFT
+        ));
+
+        legendPosition.Y += BASE_TEXT_HEIGHT_PX * scale * _legendFontSize + Math.Max(VERTICAL_SPACING, VERTICAL_SPACING * scale);
     }
-
-    public void UpdateLegendItemColor(string key, Color color)
-    {
-        LegendItem item;
-        if (!_legendItems.TryGetValue(key, out item))
-            return;
-
-        item.Color = color;
-        _legendItems[key] = item;
-    }
-
 }
 
 public class BlockInfo
@@ -1247,12 +1527,12 @@ public class BlockInfo
         }
     }
 
-    public BlockMask BlockMask;
+    public int? BlockColorIndex = null; // indicates no special color
 
     IMyCubeGrid _grid;
     IMyCubeBlock _cube;
 
-    public BlockInfo(ref Vector3I gridPosition, IMyCubeGrid grid)
+    public BlockInfo(Program program, ref Vector3I gridPosition, IMyCubeGrid grid)
     {
         GridPosition = gridPosition;
         _grid = grid;
@@ -1269,17 +1549,14 @@ public class BlockInfo
             return;
         }
 
-        if (_cube as IMyPowerProducer != null)
-            BlockMask |= BlockMask.Power;
-
-        if (_cube as IMyGyro != null)
-            BlockMask |= BlockMask.Gyro;
-
-        if (_cube as IMyThrust != null)
-            BlockMask |= BlockMask.Thrust;
-
-        if (_cube as IMyUserControllableGun != null)
-            BlockMask |= BlockMask.Weapon;
+        for (int ii = 0; ii < program.LegendInstance.BlockCategories.Count; ++ii)
+        {
+            if (program.LegendInstance.BlockCategories[ii].Matches(_cube))
+            {
+                BlockColorIndex = ii;
+                return;
+            }
+        }
     }
 }
 
@@ -1331,7 +1608,6 @@ public class BlockStatusSpriteCreator
     }
 }
 
-// Stores block densities and which ones are missing
 public class PlanarMap
 {
     public List<BlockStatusSpriteCreator> StatusSpriteCreatorsX = new List<BlockStatusSpriteCreator>();
@@ -1345,9 +1621,9 @@ public class PlanarMap
     readonly Swappable<BlockStatus[,]> _statusXNormal;
     readonly Swappable<BlockStatus[,]> _statusYNormal;
     readonly Swappable<BlockStatus[,]> _statusZNormal;
-    readonly BlockMask[,] _masksXNormal;
-    readonly BlockMask[,] _masksYNormal;
-    readonly BlockMask[,] _masksZNormal;
+    readonly int?[,] _colorIndexXNormal;
+    readonly int?[,] _colorIndexYNormal;
+    readonly int?[,] _colorIndexZNormal;
     public QuadTree QuadTreeXNormal = new QuadTree();
     public QuadTree QuadTreeYNormal = new QuadTree();
     public QuadTree QuadTreeZNormal = new QuadTree();
@@ -1363,16 +1639,12 @@ public class PlanarMap
     int _maxDensityY = 0;
     int _maxDensityZ = 0;
 
-    public ConfigColor ColorMinDensity = new ConfigColor(INI_KEY_COLOR_MIN, new Color(10, 10, 10));
-    public ConfigColor ColorMaxDensity = new ConfigColor(INI_KEY_COLOR_MAX, new Color(50, 50, 50));
-    public ConfigColor ColorMissing = new ConfigColor(INI_KEY_COLOR_MISSING, new Color(100, 0, 0, 200));
-    public ConfigColor ColorPower = new ConfigColor(INI_KEY_COLOR_POWER, new Color(0, 100, 0, 100));
-    public ConfigColor ColorWeapon = new ConfigColor(INI_KEY_COLOR_WEAPON, new Color(100, 50, 0, 100));
-    public ConfigColor ColorGyro = new ConfigColor(INI_KEY_COLOR_GYRO, new Color(100, 100, 0, 100));
-    public ConfigColor ColorThrust = new ConfigColor(INI_KEY_COLOR_THRUST, new Color(0, 0, 100, 100));
+    Program _program;
 
-    public PlanarMap(IMyCubeGrid grid)
+    public PlanarMap(Program program, IMyCubeGrid grid)
     {
+        _program = program;
+
         _min = grid.Min;
         _max = grid.Max;
         _center = (Vector3)(_min + _max) * 0.5f;
@@ -1386,9 +1658,9 @@ public class PlanarMap
         _statusYNormal = new Swappable<BlockStatus[,]>(new BlockStatus[diff.Z + 1, diff.X + 1], new BlockStatus[diff.Z + 1, diff.X + 1]);
         _statusZNormal = new Swappable<BlockStatus[,]>(new BlockStatus[diff.X + 1, diff.Y + 1], new BlockStatus[diff.X + 1, diff.Y + 1]);
 
-        _masksXNormal = new BlockMask[diff.Y + 1, diff.Z + 1];
-        _masksYNormal = new BlockMask[diff.Z + 1, diff.X + 1];
-        _masksZNormal = new BlockMask[diff.X + 1, diff.Y + 1];
+        _colorIndexXNormal = new int?[diff.Y + 1, diff.Z + 1];
+        _colorIndexYNormal = new int?[diff.Z + 1, diff.X + 1];
+        _colorIndexZNormal = new int?[diff.X + 1, diff.Y + 1];
     }
 
     public void CreateQuadTrees()
@@ -1396,6 +1668,20 @@ public class PlanarMap
         QuadTreeXNormal.Initialize(_densityXNormal, DISCRETE_DENSITY_STEPS);
         QuadTreeYNormal.Initialize(_densityYNormal, DISCRETE_DENSITY_STEPS);
         QuadTreeZNormal.Initialize(_densityZNormal, DISCRETE_DENSITY_STEPS);
+    }
+
+    void UpdateColorIndices(int?[,] colorIndices, int x, int y, int? newColorIndex)
+    {
+        int? colorIndex = colorIndices[x, y];
+        if (!colorIndex.HasValue)
+        {
+            colorIndex = newColorIndex;
+        }
+        else if (newColorIndex.HasValue)
+        {
+            colorIndex = Math.Min(colorIndex.Value, newColorIndex.Value);
+        }
+        colorIndices[x, y] = colorIndex;
     }
 
     public void StoreBlockInfo(BlockInfo info)
@@ -1407,9 +1693,9 @@ public class PlanarMap
         _densityYNormal[diff.Z, diff.X] += 1;
         _densityZNormal[diff.X, diff.Y] += 1;
 
-        _masksXNormal[diff.Y, diff.Z] |= info.BlockMask;
-        _masksYNormal[diff.Z, diff.X] |= info.BlockMask;
-        _masksZNormal[diff.X, diff.Y] |= info.BlockMask;
+        UpdateColorIndices(_colorIndexXNormal, diff.Y, diff.Z, info.BlockColorIndex);
+        UpdateColorIndices(_colorIndexYNormal, diff.Z, diff.X, info.BlockColorIndex);
+        UpdateColorIndices(_colorIndexZNormal, diff.X, diff.Y, info.BlockColorIndex);
 
         UpdateStatus(info);
 
@@ -1470,55 +1756,41 @@ public class PlanarMap
         var diff = blockPosition - _min;
 
         BlockStatus status;
-        BlockMask blockMasks;
+        int? colorIndex;
         if (NormalAxis.X == normal)
         {
-            blockMasks = _masksXNormal[diff.Y, diff.Z];
+            colorIndex = _colorIndexXNormal[diff.Y, diff.Z];
             status = _statusXNormal.Active[diff.Y, diff.Z];
         }
         else if (NormalAxis.Y == normal)
         {
-            blockMasks = _masksYNormal[diff.Z, diff.X];
+            colorIndex = _colorIndexYNormal[diff.Z, diff.X];
             status = _statusYNormal.Active[diff.Z, diff.X];
         }
         else
         {
-            blockMasks = _masksZNormal[diff.X, diff.Y];
+            colorIndex = _colorIndexZNormal[diff.X, diff.Y];
             status = _statusZNormal.Active[diff.X, diff.Y];
         }
 
         spriteName = "SquareSimple";
+        functionalSpriteColor = Color.Transparent;
+
         if ((status & (BlockStatus.Missing | BlockStatus.Damaged)) != 0)
         {
-            functionalSpriteColor = ColorMissing;
+            functionalSpriteColor = _program.LegendInstance.DamageCategory.Color;
         }
-        else if (ColorWeapon.Value.A > 0 && (blockMasks & BlockMask.Weapon) != 0)
+        else if (colorIndex.HasValue)
         {
-            functionalSpriteColor = ColorWeapon;
-        }
-        else if (ColorPower.Value.A > 0 && (blockMasks & BlockMask.Power) != 0)
-        {
-            functionalSpriteColor = ColorPower;
-        }
-        else if (ColorGyro.Value.A > 0 && (blockMasks & BlockMask.Gyro) != 0)
-        {
-            functionalSpriteColor = ColorGyro;
-        }
-        else if (ColorThrust.Value.A > 0 && (blockMasks & BlockMask.Thrust) != 0)
-        {
-            functionalSpriteColor = ColorThrust;
-        }
-        else
-        {
-            functionalSpriteColor = Color.Transparent;
+            functionalSpriteColor = _program.LegendInstance.BlockCategories[colorIndex.Value].Color;
         }
 
-        return status == BlockStatus.Missing || status == BlockStatus.Damaged || blockMasks != BlockMask.None;
+        return status == BlockStatus.Missing || status == BlockStatus.Damaged || colorIndex.HasValue;
     }
 
     public Color GetColor(float lerpScale)
     {
-        return Color.Lerp(ColorMinDensity, ColorMaxDensity, lerpScale);
+        return Color.Lerp(_program.ColorConfig.MinDensityColor, _program.ColorConfig.MaxDensityColor, lerpScale);
     }
 
     public Color GetColor(NormalAxis normal, ref Vector3I blockPosition)
@@ -1546,7 +1818,7 @@ public class PlanarMap
 
         float lerpScale = (float)density / maxDensity;
         lerpScale = (float)(Math.Round(lerpScale * DISCRETE_DENSITY_STEPS) / DISCRETE_DENSITY_STEPS);
-        return Color.Lerp(ColorMinDensity, ColorMaxDensity, lerpScale);
+        return GetColor(lerpScale);
     }
 }
 #endregion
@@ -1590,19 +1862,16 @@ class Swappable<T> where T : class
 
 #region INCLUDES
 
-/// <summary>
-/// Class that tracks runtime history.
-/// </summary>
 public class RuntimeTracker
 {
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
@@ -1681,9 +1950,6 @@ public class RuntimeTracker
 }
 
 #region Scheduler
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
 public class Scheduler
 {
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
@@ -1704,18 +1970,12 @@ public class Scheduler
     public const double TickDurationSeconds = 1.0 / TicksPerSecond;
     const long ClockTicksPerGameTick = 166666L;
 
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
         _ignoreFirstRun = ignoreFirstRun;
     }
 
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
     public void Update()
     {
         _inUpdate = true;
@@ -1749,12 +2009,10 @@ public class Scheduler
 
         if (_currentlyQueuedAction == null)
         {
-            // If queue is not empty, populate current queued action
             if (_queuedActions.Count != 0)
                 _currentlyQueuedAction = _queuedActions.Dequeue();
         }
 
-        // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
             _currentlyQueuedAction.Update(deltaTicks);
@@ -1764,7 +2022,6 @@ public class Scheduler
                 {
                     _queuedActions.Enqueue(_currentlyQueuedAction);
                 }
-                // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
         }
@@ -1777,9 +2034,6 @@ public class Scheduler
         }
     }
 
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
@@ -1789,9 +2043,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
         if (!_inUpdate)
@@ -1800,9 +2051,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
@@ -1813,9 +2061,6 @@ public class Scheduler
         _queuedActions.Enqueue(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
@@ -1884,11 +2129,6 @@ public class ScheduledAction
     double _runFrequency;
     readonly Action _action;
 
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
@@ -2018,11 +2258,8 @@ public class SingleScreenSpriteSurface : ISpriteSurface
     }
 }
 
-// Assumes that all text panels are the same size
 public class MultiScreenSpriteSurface : ISpriteSurface
 {
-    public bool Initialized { get; private set; } = false;
-
     float Rotation
     {
         get
@@ -2124,6 +2361,20 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     readonly SingleScreenSpriteSurface[,] _surfaces;
     readonly Vector2[,] _screenOrigins;
 
+    static List<MyDefinitionId> _insetScreenDefs = new List<MyDefinitionId>()
+    {
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeFullBlockLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallFullBlockLCDPanel"),
+    };
+
+    static List<MyDefinitionId> _diagonalScreenDefs = new List<MyDefinitionId>()
+    {
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeCurvedLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallCurvedLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/LargeDiagonalLCDPanel"),
+        MyDefinitionId.Parse("MyObjectBuilder_TextPanel/SmallDiagonalLCDPanel"),
+    };
+
     public MultiScreenSpriteSurface(IMyTextPanel anchor, int rows, int cols, Program p)
     {
         _anchor = anchor;
@@ -2135,12 +2386,12 @@ public class MultiScreenSpriteSurface : ISpriteSurface
 
         _rotationProp = _anchor.GetProperty("Rotate").Cast<float>();
 
+        Vector3 anchorRight, anchorDown;
+        GetAnchorDirections(anchor, out anchorRight, out anchorDown);
+        Vector3 anchorBlockSize = new Vector3(_anchor.Max - _anchor.Min) + Vector3.One;
+        Vector3I stepRight = Vector3I.Round(Math.Abs(Vector3.Dot(anchorBlockSize, anchorRight)) * anchorRight);
+        Vector3I stepDown = Vector3I.Round(Math.Abs(Vector3.Dot(anchorBlockSize, anchorDown)) * anchorDown);
         Vector3I anchorPos = _anchor.Position;
-        Vector3I anchorRight = -Base6Directions.GetIntVector(_anchor.Orientation.Left);
-        Vector3I anchorDown = -Base6Directions.GetIntVector(_anchor.Orientation.Up);
-        Vector3I anchorBlockSize = _anchor.Max - _anchor.Min + Vector3I.One;
-        Vector3I stepRight = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorRight)) * anchorRight;
-        Vector3I stepDown = Math.Abs(Vector3I.Dot(anchorBlockSize, anchorDown)) * anchorDown;
         IMyCubeGrid grid = _anchor.CubeGrid;
         for (int r = 0; r < Rows; ++r)
         {
@@ -2153,6 +2404,26 @@ public class MultiScreenSpriteSurface : ISpriteSurface
         }
 
         UpdateRotation();
+    }
+
+    static void GetAnchorDirections(IMyTextPanel anchor, out Vector3 anchorRight, out Vector3 anchorDown)
+    {
+        var def = anchor.BlockDefinition;
+        if (_insetScreenDefs.Contains(def))
+        {
+            anchorRight = Base6Directions.GetVector(anchor.Orientation.Forward);
+        }
+        else if (_diagonalScreenDefs.Contains(def))
+        {
+            anchorRight = Base6Directions.GetVector(anchor.Orientation.Forward) + Base6Directions.GetVector(anchor.Orientation.Left);
+            anchorRight.Normalize();
+        }
+        else
+        {
+            anchorRight = -Base6Directions.GetVector(anchor.Orientation.Left);
+        }
+
+        anchorDown = -Base6Directions.GetVector(anchor.Orientation.Up);
     }
 
     public void UpdateRotation()
@@ -2168,7 +2439,6 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             _rotationProp.SetValue(surf.CubeBlock, Rotation);
         }
 
-        // Calc screen coords
         Vector2 screenCenter = BasePanelSizeNoRotation * new Vector2(c + 0.5f, r + 0.5f);
         Vector2 fromCenter = screenCenter - 0.5f * TextureSizeNoRotation;
         Vector2 fromCenterRotated = RotateToDisplayOrientation(fromCenter, RotationRads);
@@ -2260,7 +2530,6 @@ public class MultiScreenSpriteSurface : ISpriteSurface
             Vector2 fromCenterRotated = RotateToBaseOrientation(fromCenter, RotationRads);
             Vector2 basePos = TextureSizeNoRotation * 0.5f + fromCenterRotated;
 
-            // Determine span of the sprite used for culling
             Vector2 rotatedSize = (sprite.Type == SpriteType.TEXTURE ? GetRotatedSize(spriteSize, sprite.RotationOrScale) : spriteSize);
             Vector2 topLeft, bottomRight;
             switch (sprite.Alignment)
@@ -2341,12 +2610,11 @@ public class MultiScreenSpriteSurface : ISpriteSurface
     }
 }
 #endregion
-
 public interface IConfigValue
 {
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
     void Reset();
     string Name { get; set; }
     string Comment { get; set; }
@@ -2371,7 +2639,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -2379,12 +2649,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -2392,14 +2668,14 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return Value.ToString();
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
@@ -2419,7 +2695,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
         ini.Set(section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(Comment))
@@ -2443,7 +2719,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -2470,7 +2746,7 @@ class ConfigSection
         _values.AddRange(values);
     }
 
-    void SetComment(ref MyIni ini)
+    void SetComment(MyIni ini)
     {
         if (!string.IsNullOrWhiteSpace(Comment))
         {
@@ -2478,30 +2754,30 @@ class ConfigSection
         }
     }
 
-    public void ReadFromIni(ref MyIni ini)
+    public void ReadFromIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.ReadFromIni(ref ini, Section);
+            c.ReadFromIni(ini, Section);
         }
     }
 
-    public void WriteToIni(ref MyIni ini)
+    public void WriteToIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.WriteToIni(ref ini, Section);
+            c.WriteToIni(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 
-    public void Update(ref MyIni ini)
+    public void Update(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.Update(ref ini, Section);
+            c.Update(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 }
 public class ConfigString : ConfigValue<string>
@@ -2616,87 +2892,93 @@ public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
         return true;
     }
 }
-public class ConfigDeprecated<T, ConfigImplementation> : IConfigValue where ConfigImplementation : IConfigValue<T>, IConfigValue
+public class ConfigDeprecated<T> : IConfigValue<T>
 {
-    public readonly ConfigImplementation Implementation;
     public Action<T> Callback;
+    readonly IConfigValue<T> _impl;
 
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
-    }
-
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
-    }
-
-    public ConfigDeprecated(ConfigImplementation impl)
+    public string Name
     {
-        Implementation = impl;
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public string Comment
     {
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
+    }
+
+    public T Value
+    {
+        get { return _impl.Value; }
+        set { _impl.Value = value; }
+    }
+
+    public ConfigDeprecated(IConfigValue<T> impl)
+    {
+        _impl = impl;
+    }
+
+    public bool ReadFromIni(MyIni ini, string section)
+    {
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
-            Callback?.Invoke(Implementation.Value);
+            Callback?.Invoke(_impl.Value);
         }
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        ini.Delete(section, Implementation.Name);
+        ini.Delete(section, _impl.Name);
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public void Reset() {}
+    public void Reset() { }
 }
 
-public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigValue
-    where ConfigImplementation : IConfigValue<T>, IConfigValue
-    where T : struct
+public class ConfigNullable<T> : IConfigValue<T> where T : struct
 {
-    public string Name 
-    { 
-        get { return Implementation.Name; }
-        set { Implementation.Name = value; }
+    public string Name
+    {
+        get { return _impl.Name; }
+        set { _impl.Name = value; }
     }
 
-    public string Comment 
-    { 
-        get { return Implementation.Comment; } 
-        set { Implementation.Comment = value; } 
+    public string Comment
+    {
+        get { return _impl.Comment; }
+        set { _impl.Comment = value; }
     }
-    
+
     public string NullString;
+
     public T Value
     {
-        get { return Implementation.Value; }
-        set 
-        { 
-            Implementation.Value = value;
+        get { return _impl.Value; }
+        set
+        {
+            _impl.Value = value;
             HasValue = true;
             _skipRead = true;
         }
     }
-    public readonly ConfigImplementation Implementation;
+    
     public bool HasValue { get; private set; }
+    readonly IConfigValue<T> _impl;
     bool _skipRead = false;
 
-    public ConfigNullable(ConfigImplementation impl, string nullString = "none")
+    public ConfigNullable(IConfigValue<T> impl, string nullString = "none")
     {
-        Implementation = impl;
+        _impl = impl;
         NullString = nullString;
         HasValue = false;
     }
@@ -2707,14 +2989,14 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         _skipRead = true;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
             _skipRead = false;
             return true;
         }
-        bool read = Implementation.ReadFromIni(ref ini, section);
+        bool read = _impl.ReadFromIni(ini, section);
         if (read)
         {
             HasValue = true;
@@ -2726,19 +3008,19 @@ public class ConfigNullable<T, ConfigImplementation> : IConfigValue<T>, IConfigV
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
-        Implementation.WriteToIni(ref ini, section);
+        _impl.WriteToIni(ini, section);
         if (!HasValue)
         {
-            ini.Set(section, Implementation.Name, NullString);
+            ini.Set(section, _impl.Name, NullString);
         }
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
@@ -2753,7 +3035,6 @@ public class ConfigVector2 : ConfigValue<Vector2>
     public ConfigVector2(string name, Vector2 value = default(Vector2), string comment = null) : base(name, value, comment) { }
     protected override bool SetValue(ref MyIniValue val)
     {
-        // Source formatting example: {X:2.75 Y:-14.4}
         string source = val.ToString("");
         int xIndex = source.IndexOf("X:");
         int yIndex = source.IndexOf("Y:");
