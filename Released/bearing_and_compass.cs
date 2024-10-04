@@ -23,8 +23,8 @@ Code by Whiplash141
 */
 
 #region Fields
-const string VERSION = "22.0.2";
-const string DATE = "2020/04/22";
+const string VERSION = "22.0.3";
+const string DATE = "2024/10/03";
 
 string _referenceNameTag = "Reference";
 string _screenNameTag = "Compass";
@@ -332,7 +332,6 @@ class Compass
     public Compass(Program program, ref CompassConfig compassConfig)
     {
         _program = program;
-        // Easy access to Echo for debugging
         UpdateConfigValues(ref compassConfig);
     }
 
@@ -349,7 +348,6 @@ class Compass
 
     public void CalculateParameters(ref Vector3D forward, ref Vector3D gravity)
     {
-        //check if grav vector exists 
         if (Vector3D.IsZero(gravity))
         {
             InGravity = false;
@@ -357,24 +355,19 @@ class Compass
         }
         InGravity = true;
 
-        //get east vector 
         Vector3D relativeEastVec = gravity.Cross(_absNorthVec);
 
-        //get relative north vector 
         Vector3D relativeNorthVec;
         Vector3D.Cross(ref relativeEastVec, ref gravity, out relativeNorthVec);
 
-        //project forward vector onto a plane comprised of the north and east vectors 
         Vector3D forwardProjNorthVec;
         VectorMathRef.Projection(ref forward, ref relativeNorthVec, out forwardProjNorthVec);
         Vector3D forwardProjEastVec;
         VectorMathRef.Projection(ref forward, ref relativeEastVec, out forwardProjEastVec);
         Vector3D forwardProjPlaneVec = forwardProjEastVec + forwardProjNorthVec;
 
-        //find angle from abs north to projected forward vector measured clockwise 
         Bearing = VectorMathRef.AngleBetween(ref forwardProjPlaneVec, ref relativeNorthVec) * RAD_TO_DEG;
 
-        //check direction of angle 
         if (Vector3D.Dot(forward, relativeEastVec) < 0)
         {
             Bearing = 360 - Bearing; //because of how the angle is measured 
@@ -398,7 +391,6 @@ class Compass
         float referenceHeight = drawRadialCompass ? 512f : compassHeight;
         float scale = Math.Min(1, viewportSize.Y / referenceHeight);
         scale = Math.Min(scale, viewportSize.X / 512f);
-        //_program._detailedInfo.Append($"{scale}: {viewportSize}\n");
 
         using (var frame = surf.DrawFrame())
         {
@@ -435,16 +427,13 @@ class Compass
         Vector2 textBoxPosOffset = majorTextPosOffset + new Vector2(0, 0.5f * scale * FONT_SIZE * BASE_TEXT_HEIGHT_PX);
         Vector2 textBoxTextPos = offsetCenterPos + majorTextPosOffset;
 
-        // Create pip
         MySprite pipSprite = MySprite.CreateSprite("Triangle", offsetCenterPos + pipPosOffset, scale * PIP_SIZE);
         pipSprite.Color = _pipColor;
         frame.Add(pipSprite);
 
-        // Create tick sprite to reuse
         MySprite tickSprite = MySprite.CreateSprite("SquareSimple", offsetCenterPos, Vector2.Zero);
         tickSprite.Color = _tickColor;
 
-        // Draw tick marks and labels
         int angle = lowerAngleMinor;
         for (int i = 0; i <= numMinorTicks; ++i)
         {
@@ -472,30 +461,23 @@ class Compass
 
         if (_drawBearing)
         {
-            // Draw angle text box
             Vector2 textBoxSize = scale * TEXT_BOX_SIZE;
             Vector2 textHorizOffset = TEXT_BOX_HORIZ_SPACING * scale;
             Vector2 textBoxCenter = offsetCenterPos + textBoxPosOffset;
-            // background
             MySprite textBox = MySprite.CreateSprite("SquareSimple", textBoxCenter, textBoxSize);
             textBox.Color = _backgroundColor;
             frame.Add(textBox);
-            // box
             textBox.Data = "AH_TextBox";
             textBox.Color = _textBoxColor;
             frame.Add(textBox);
 
-            // Write digits
             string bearingStr = $"{Bearing:000}";
-            // hundreds
             MySprite digit = MySprite.CreateText(bearingStr.Substring(0, 1), FONT, _textColor, FONT_SIZE * scale);
             digit.Position = textBoxTextPos - textHorizOffset;
             frame.Add(digit);
-            // tens
             digit.Data = bearingStr.Substring(1, 1);
             digit.Position = textBoxTextPos;
             frame.Add(digit);
-            // ones
             digit.Data = bearingStr.Substring(2, 1);
             digit.Position = textBoxTextPos + textHorizOffset;
             frame.Add(digit);
@@ -514,7 +496,6 @@ class Compass
 
         MySprite line = MySprite.CreateSprite("SquareSimple", screenCenter, scale * RADIAL_COMPASS_LINE_SIZE);
         line.Color = _tickColor;
-        // Draw minor ticks
         for (int angle = 0; angle < 180;  angle += MINOR_TICK_INTERVAL)
         {
             if (angle % MAJOR_TICK_INTERVAL == 0)
@@ -526,7 +507,6 @@ class Compass
             frame.Add(line);
         }
 
-        // Clip center of minor ticks
         MySprite circleClip = MySprite.CreateSprite("Circle", screenCenter, scale * RADIAL_COMPASS_MINOR_CLIP_SIZE);
         circleClip.Color = _backgroundColor;
         frame.Add(circleClip);
@@ -535,7 +515,6 @@ class Compass
         Vector2 fontVertOffset = new Vector2(0f, -scaledFontSize * BASE_TEXT_HEIGHT_PX * 0.5f);
         MySprite labelSprite = MySprite.CreateText("", FONT, _textColor, scaledFontSize);
 
-        // Draw major ticks
         for (int angle = 0; angle < 180; angle += MAJOR_TICK_INTERVAL)
         {
             float rotation = (float)MathHelper.ToRadians(angle + angleOffset);
@@ -546,11 +525,9 @@ class Compass
             }
         }
 
-        // Clip center of major ticks
         circleClip.Size = scale * RADIAL_COMPASS_MAJOR_CLIP_SIZE;
         frame.Add(circleClip);
 
-        // Draw labels
         for (int angle = 0; angle < 360; angle += MAJOR_TICK_INTERVAL)
         {
             if (angle % 90 != 0)
@@ -565,38 +542,30 @@ class Compass
             frame.Add(labelSprite);
         }
 
-        // Add pip indicator
         MySprite pipSprite = MySprite.CreateSprite("Triangle", screenCenter + scale * RADIAL_COMPASS_PIP_LOCATION, scale * PIP_SIZE);
         pipSprite.Color = _pipColor;
         frame.Add(pipSprite);
 
         if (_drawBearing)
         {
-            // Draw angle text box
             Vector2 textBoxPos = screenCenter + fontVertOffset;
             Vector2 textBoxSize = scale * TEXT_BOX_SIZE;
             Vector2 textHorizOffset = TEXT_BOX_HORIZ_SPACING * scale;
             Vector2 textBoxCenter = screenCenter;
-            // background
             MySprite textBox = MySprite.CreateSprite("SquareSimple", textBoxCenter, textBoxSize);
             textBox.Color = _backgroundColor;
             frame.Add(textBox);
-            // box
             textBox.Data = "AH_TextBox";
             textBox.Color = _textBoxColor;
             frame.Add(textBox);
 
-            // Write digits
             string bearingStr = $"{Bearing:000}";
-            // hundreds
             MySprite digit = MySprite.CreateText(bearingStr.Substring(0, 1), FONT, _textColor, FONT_SIZE * scale);
             digit.Position = textBoxPos - textHorizOffset;
             frame.Add(digit);
-            // tens
             digit.Data = bearingStr.Substring(1, 1);
             digit.Position = textBoxPos;
             frame.Add(digit);
-            // ones
             digit.Data = bearingStr.Substring(2, 1);
             digit.Position = textBoxPos + textHorizOffset;
             frame.Add(digit);
@@ -635,6 +604,11 @@ void Setup()
 
 bool CollectFunction(IMyTerminalBlock b)
 {
+    if (!Me.IsSameConstructAs(b))
+    {
+        return false;
+    }
+    
     if (b is IMyTextPanel && (StringExtensions.Contains(b.CustomName, _screenNameTag) || StringExtensions.Contains(b.CustomName, SCREEN_NAME_TAG_COMPAT)))
     {
         AddTextSurfaces(b, _textSurfaces);
@@ -644,7 +618,6 @@ bool CollectFunction(IMyTerminalBlock b)
     if (b is IMyTextSurfaceProvider && StringExtensions.Contains(b.CustomName, _screenNameTag))
     {
         AddTextSurfaces(b, _textSurfaces);
-        // No return because cockpits can fit both criteria
     }
 
     if (b is IMyShipController)
@@ -691,7 +664,6 @@ void AddTextSurfaces(IMyTerminalBlock block, List<TextSurfaceConfig> textSurface
         textSurfaces.Add(surfConfig);
         return;
     }
-    // implied text surface provider
 
     int surfaceCount = surfaceProvider.SurfaceCount;
     for (int i = 0; i < surfaceCount; ++i)
@@ -765,9 +737,6 @@ void ParseGeneralIni()
 #region Helper Classes
 public static class VectorMathRef
 {
-    /// <summary>
-    ///  Normalizes a vector only if it is non-zero and non-unit
-    /// </summary>
     public static void SafeNormalize(ref Vector3D a, out Vector3D aNorm)
     {
         aNorm = Vector3D.Zero;
@@ -786,9 +755,6 @@ public static class VectorMathRef
         return true;
     }
 
-    /// <summary>
-    /// Reflects vector a over vector b with an optional rejection factor
-    /// </summary>
     public static void Reflection(ref Vector3D a, ref Vector3D b, out Vector3D result, double rejectionFactor = 1) //reflect a over b
     {
         Vector3D proj, rej;
@@ -798,9 +764,6 @@ public static class VectorMathRef
         Vector3D.Subtract(ref proj, ref rej, out result);
     }
 
-    /// <summary>
-    /// Rejects vector a on vector b
-    /// </summary>
     public static void Rejection(ref Vector3D a, ref Vector3D b, out Vector3D result) //reject a on b
     {
         if (IsZero(ref a) || IsZero(ref b))
@@ -814,9 +777,6 @@ public static class VectorMathRef
         Vector3D.Subtract(ref a, ref proj, out result);
     }
 
-    /// <summary>
-    /// Projects vector a onto vector b
-    /// </summary>
     public static void Projection(ref Vector3D a, ref Vector3D b, out Vector3D result)
     {
         if (IsZero(ref a) || IsZero(ref b))
@@ -839,9 +799,6 @@ public static class VectorMathRef
         Vector3D.Multiply(ref b, dot / lenSq, out result);
     }
 
-    /// <summary>
-    /// Scalar projection of a onto b
-    /// </summary>
     public static double ScalarProjection(ref Vector3D a, ref Vector3D b)
     {
         if (IsZero(ref a) || IsZero(ref b))
@@ -859,9 +816,6 @@ public static class VectorMathRef
         return result / b.Length(); // Divide by length to normalize b
     }
 
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
     public static double AngleBetween(ref Vector3D a, ref Vector3D b)
     {
         if (IsZero(ref a) || IsZero(ref b))
@@ -873,9 +827,6 @@ public static class VectorMathRef
         return Math.Acos(cosBtwn);
     }
 
-    /// <summary>
-    /// Computes cosine of the angle between 2 vectors.
-    /// </summary>
     public static double CosBetween(ref Vector3D a, ref Vector3D b)
     {
         if (IsZero(ref a) || IsZero(ref b))
@@ -887,10 +838,6 @@ public static class VectorMathRef
         return MathHelper.Clamp(dot / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
     }
 
-    /// <summary>
-    /// Returns if the normalized dot product between two vectors is greater than the tolerance.
-    /// This is helpful for determining if two vectors are "more parallel" than a tolerance.
-    /// </summary>
     public static bool IsDotProductWithinTolerance(ref Vector3D a, ref Vector3D b, double toleranceCos)
     {
         double dot;
@@ -908,9 +855,6 @@ public static class StringExtensions
     }
 }
 
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
 public class Scheduler
 {
     public double CurrentTimeSinceLastRun = 0;
@@ -928,18 +872,12 @@ public class Scheduler
 
     const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
 
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
         _ignoreFirstRun = ignoreFirstRun;
     }
 
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
     public void Update()
     {
         _inUpdate = true;
@@ -960,23 +898,19 @@ public class Scheduler
             }
         }
 
-        // Remove all actions that we should dispose
         _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
 
         if (_currentlyQueuedAction == null)
         {
-            // If queue is not empty, populate current queued action
             if (_queuedActions.Count != 0)
                 _currentlyQueuedAction = _queuedActions.Dequeue();
         }
 
-        // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
             _currentlyQueuedAction.Update(deltaTime);
             if (_currentlyQueuedAction.JustRan)
             {
-                // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
         }
@@ -989,9 +923,6 @@ public class Scheduler
         }
     }
 
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
@@ -1001,9 +932,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
         if (!_inUpdate)
@@ -1012,9 +940,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(Action action, double updateInterval)
     {
         if (updateInterval <= 0)
@@ -1025,9 +950,6 @@ public class Scheduler
         _queuedActions.Enqueue(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(ScheduledAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
@@ -1078,11 +1000,6 @@ public class ScheduledAction
 
     const double Epsilon = 1e-12;
 
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
     public ScheduledAction(Action action, double runFrequency = 0, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
@@ -1109,10 +1026,6 @@ public class ScheduledAction
     }
 }
 
-/// <summary>
-/// A simple, generic circular buffer class with a fixed capacity.
-/// </summary>
-/// <typeparam name="T"></typeparam>
 public class CircularBuffer<T>
 {
     public readonly int Capacity;
@@ -1121,10 +1034,6 @@ public class CircularBuffer<T>
     int _setIndex = 0;
     int _getIndex = 0;
 
-    /// <summary>
-    /// CircularBuffer ctor.
-    /// </summary>
-    /// <param name="capacity">Capacity of the CircularBuffer.</param>
     public CircularBuffer(int capacity)
     {
         if (capacity < 1)
@@ -1133,20 +1042,12 @@ public class CircularBuffer<T>
         _array = new T[Capacity];
     }
 
-    /// <summary>
-    /// Adds an item to the buffer. If the buffer is full, it will overwrite the oldest value.
-    /// </summary>
-    /// <param name="item"></param>
     public void Add(T item)
     {
         _array[_setIndex] = item;
         _setIndex = ++_setIndex % Capacity;
     }
 
-    /// <summary>
-    /// Retrieves the current item in the buffer and increments the buffer index.
-    /// </summary>
-    /// <returns></returns>
     public T MoveNext()
     {
         T val = _array[_getIndex];
@@ -1154,10 +1055,6 @@ public class CircularBuffer<T>
         return val;
     }
 
-    /// <summary>
-    /// Retrieves the current item in the buffer without incrementing the buffer index.
-    /// </summary>
-    /// <returns></returns>
     public T Peek()
     {
         return _array[_getIndex];
@@ -1217,9 +1114,6 @@ public static class MyIniHelper
     }
 }
 
-/// <summary>
-/// Class that tracks runtime history.
-/// </summary>
 public class RuntimeTracker
 {
     public int Capacity { get; set; }
