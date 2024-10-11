@@ -1,7 +1,7 @@
 
 #region This goes in the programmable block
-const string VERSION = "122.0.2";
-const string DATE = "2022/12/12";
+const string VERSION = "122.0.4";
+const string DATE = "2024/10/11";
 
 /*
 / //// / Whip's Turret Slaver / //// /
@@ -230,7 +230,6 @@ Program()
     _scheduler.AddScheduledAction(_screenManager.Animate, 0.2);
     _scheduler.Init();
 
-    // IGC Register
     _broadcastListener = IGC.RegisterBroadcastListener(IgcTag);
     _broadcastListener.SetMessageCallback(IgcTag);
 
@@ -265,7 +264,7 @@ void Main(string arg, UpdateType updateType)
     catch (Exception e)
     {
         PrintBsod(Me.GetSurface(0), "Whip's Turret Slaver", VERSION, 0.5f, e);
-        throw e;
+        throw;
     }
 }
 #endregion
@@ -298,7 +297,6 @@ void UpdateTurrets(double startProportion, double endProportion)
         }
     }
 
-    // End of cycle
     if (endInt == _turretList.Count && !_writtenTurretEcho)
     {
         _writtenTurretEcho = true;
@@ -569,7 +567,6 @@ void GetBlockGroups()
     _allShipGrids.Clear();
     _allShipGrids.Add(Me.CubeGrid);
 
-    // Update existing
     foreach (var turret in _turretList)
     {
         turret.GetTurretGroupBlocks(defaultVars: _defaultVars);
@@ -578,7 +575,6 @@ void GetBlockGroups()
     GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectDesignatorsDebugAndMech);
     GridTerminalSystem.GetBlockGroups(null, CollectTurretGroups);
 
-    // Remove dead groups
     _turretList.RemoveAll(x => !_currentTurretGroups.Contains(x.Group));
 
     _lastTurretGroups.Clear();
@@ -602,7 +598,6 @@ void RefreshDesignatorTargeting()
             continue;
         if (t.HasTarget)
         {
-            // Force a new target selection
             if (t.TargetMeteors)
             {
                 t.TargetMeteors = false;
@@ -780,7 +775,6 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
             CollectBlocks(block);
         }
 
-        // Find azimuth rotors by finding which rotors have rotors atop them
         for (int i = _unsortedRotors.Count - 1; i >= 0; --i)
         {
             var rotor = _unsortedRotors[i];
@@ -790,7 +784,6 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
                 continue;
             }
 
-            // Found a azimuth rotor
             if (_rotorGrids.Contains(rotor.TopGrid))
             {
                 if (_azimuthRotor == null)
@@ -808,7 +801,6 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
             }
         }
 
-        // Find elevation rotors
         for (int i = _unsortedRotors.Count - 1; i >= 0; --i)
         {
             var rotor = _unsortedRotors[i];
@@ -817,19 +809,16 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
                 continue;
             }
 
-            // Check that this rotor resides on the azimuth's top grid
             if (rotor.CubeGrid != _azimuthTopGrid)
             {
                 continue;
             }
 
-            // Check if elevation rotor has weapons
             if (!_weaponGrids.Contains(rotor.TopGrid))
             {
                 continue;
             }
 
-            // This is an elevation rotor
             if (_mainElevationRotor == null)
             {
                 _rotorTurretReference = GetTurretReferenceOnRotorHead(rotor);
@@ -846,7 +835,6 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
             _unsortedRotors.RemoveAt(i);
         }
 
-        // Check for orphaned rotors
         if (_unsortedRotors.Count > 0)
         {
             Log.Warning("Unsorted rotor(s) found:", false);
@@ -1083,7 +1071,8 @@ class DualAxisRotorTurretGroup : RotorTurretGroupBase
             $"\nCameras: {_cameras.Count}" +
             $"\nDesignators: {_designators.Count}" +
             $"\nMuzzle velocity: {_muzzleVelocity} m/s" +
-            $"\nIs Firing: {_isShooting}"
+            $"\nIs working: {_designator.IsWorking}" + 
+            $"\nDesignator aim: {_designator.Aim}"
         );
     }
 
@@ -1403,7 +1392,6 @@ abstract class RotorTurretGroupBase : TurretGroupBase
         bool useManual = false;
         float restAngle = 0;
 
-        // Migrate old configs
         if (!r.CustomData.Contains(IniRotorSection) && !string.IsNullOrWhiteSpace(IniRotorSection))
         {
             useManual = float.TryParse(r.CustomData, out restAngle);
@@ -2260,7 +2248,6 @@ abstract class TurretGroupBase
         if (_isSetup) // Verify that all vital blocks are working
             _isSetup = VerifyBlocks(_vitalBlocks);
 
-        // If the turret group is not functional, grab blocks and return
         if (!_isSetup)
         {
             GetTurretGroupBlocks(true);
@@ -2301,12 +2288,10 @@ abstract class TurretGroupBase
         foreach (var kvp in _friendlyData)
         {
             var friendly = kvp.Value;
-            // Friendly out of range
             if (Vector3D.DistanceSquared(friendly.Position, position) > _autoEngagementRange * _autoEngagementRange)
                 continue;
 
             Vector3D toFriendly = friendly.Position - position;
-            // Friendly is behind you
             if (Vector3D.Dot(direction, toFriendly) < 0)
                 continue;
 
@@ -2353,8 +2338,8 @@ abstract class TurretGroupBase
             var targetInfo = designator.GetTargetedEntity();
 
             /*
-                * We reset our PID controllers and make acceleration compute to zero to handle switching off targets.
-                */
+             * We reset our PID controllers and make acceleration compute to zero to handle switching off targets.
+             */
             if (targetInfo.EntityId != _lastTargetEntityId)
             {
                 _lastTargetVelocity = targetInfo.Velocity;
@@ -2684,12 +2669,10 @@ abstract class TurretGroupBase
             if (_thisTurretGrids.Contains(cubeGrid))
                 continue;
 
-            // Inlined because profiler costs were too damn high
             double radSq = cubeGrid.WorldVolume.Radius + 2.5;
             radSq *= radSq;
             Vector3D startToCenter = cubeGrid.WorldVolume.Center - startPosWorld;
 
-            // Fast check for when we are outside the bounding sphere
             if (startToCenter.LengthSquared() > radSq)
             {
                 Vector3D startToEnd = endPosWorld - startPosWorld;
@@ -2842,7 +2825,9 @@ public class TurretInterface
             {
                 return TurretGroupBase.VectorAzimuthElevation(T);
             }
-            return TCB.GetShootDirection();
+
+            Vector3D direction = TCB.GetShootDirection();
+            return direction == Vector3D.Forward ? (TCB.Camera?.WorldMatrix.Forward ?? Vector3D.Forward) : direction; 
         }
     }
 
@@ -2909,16 +2894,19 @@ public class TurretInterface
         }
     }
 
+    T NullIfClosed<T>(T block) where T : class, IMyTerminalBlock
+    {
+        return block.Closed ? null : block;
+    }
+
     public Vector3D WorldPos
     {
         get
         {
             if (T != null)
                 return T.GetPosition();
-            var ds = TCB.GetDirectionSource();
-            if (ds != null)
-                return ds.GetPosition();
-            return Vector3D.Zero;
+
+            return NullIfClosed(TCB.GetDirectionSource())?.GetPosition() ?? (NullIfClosed(TCB.Camera)?.GetPosition() ?? TCB.GetPosition());
         }
     }
 }
@@ -2931,7 +2919,6 @@ void MigrateConfig()
     if (!Me.CustomData.Contains(_iniMigrationKey))
         return;
 
-    // Hijack our INI builder for a bit...
     _iniOutput.Clear();
     _iniOutput.Append(Me.CustomData);
 
@@ -3336,9 +3323,6 @@ public class ScheduledAction
 #endregion
 
 #region PID Class
-/// <summary>
-/// Discrete time PID controller class.
-/// </summary>
 public class PID
 {
     public double Kp = 0;
