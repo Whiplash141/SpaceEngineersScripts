@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 
 */
 
-const string VERSION = "1.12.7";
-const string DATE = "2024/02/15";
+const string VERSION = "1.12.8";
+const string DATE = "2024/10/14";
 
 #region Fields
 List<IMyShipController> Controllers
@@ -75,7 +75,6 @@ ConfigSection
     _configGeneral = new ConfigSection("Artificial Horizon - General"),
     _configColor = new ConfigSection("Artificial Horizon - Colors");
 
-// General
 ConfigString _textSurfaceNameTag = new ConfigString("Text surface name tag", "Horizon");
 public ConfigDouble TimeToCollisionThreshold = new ConfigDouble("Collision warning time threshold (s)", 5, " Time before predicted collision that the AH will\n warn you to pull up (-1 disables warning)");
 ConfigString _soundBlockNameTag = new ConfigString("Collision warning sound name tag", "Horizon");
@@ -88,7 +87,6 @@ public ConfigVector3 SunRotationAxis = new ConfigVector3("Sun rotation axis", ne
 public ConfigEnum<AccelUnits> AccelerationMode = new ConfigEnum<AccelUnits>("Acceleration display mode", AccelUnits.m_per_s2, " Accepted values are:\n m_per_s2 or G_force");
 public ConfigDouble AltitudeOffset = new ConfigDouble("Altitude offset (m)", 0);
 
-// Colors
 public ConfigColor
     SkyColor = new ConfigColor("Sky background", new Color(10, 30, 50)),
     GroundColor = new ConfigColor("Ground background", new Color(10, 10, 10)),
@@ -184,7 +182,6 @@ Program()
     _buffer.Add(() => UpdateScreens(7 * step, 8 * step));
     _buffer.Add(() => UpdateScreens(8 * step, 9 * step));
 
-    // Scheduled actions
     _scheduler.AddScheduledAction(_scheduledSetup);
     _scheduler.AddScheduledAction(PrintDetailedInfo, 1);
     _scheduler.AddScheduledAction(PlaySounds, 6);
@@ -284,8 +281,8 @@ void ParseIni()
         _ini.EndContent = Me.CustomData;
     }
 
-    _configGeneral.Update(ref _ini);
-    _configColor.Update(ref _ini);
+    _configGeneral.Update(_ini);
+    _configColor.Update(_ini);
 
 
     string output = _ini.ToString();
@@ -585,7 +582,6 @@ class ArtificialHorizon
 
     void CalculateSpaceParameters(IMyShipController controller)
     {
-        // Flattening axes onto the screen surface
         MatrixD transposedMatrix = MatrixD.Transpose(controller.WorldMatrix);
         Vector3D xTrans = Vector3D.Rotate(Vector3D.UnitX, transposedMatrix);
         Vector3D yTrans = Vector3D.Rotate(Vector3D.UnitY, transposedMatrix);
@@ -598,12 +594,10 @@ class ArtificialHorizon
         _zAxisFlattened.X = (float)(zTrans.X) * AXIS_LENGTH_SCALE;
         _zAxisFlattened.Y = (float)(-zTrans.Y) * AXIS_LENGTH_SCALE;
 
-        // Getting non-zero sign of vectors for positioning the axis label text
         _xAxisSign = Vector2.SignNonZero(_xAxisFlattened);
         _yAxisSign = Vector2.SignNonZero(_yAxisFlattened);
         _zAxisSign = Vector2.SignNonZero(_zAxisFlattened);
 
-        // Get normalized axis directions for drawing arrow heads
         if (!Vector2.IsZero(ref _xAxisFlattened, MathHelper.EPSILON))
             _xAxisDirn = Vector2.Normalize(_xAxisFlattened);
 
@@ -617,7 +611,6 @@ class ArtificialHorizon
         double max = _axisZCosVector.Max();
         double min = _axisZCosVector.Min();
 
-        // Determining the order to draw the axes so that perspective looks correct.
         AxisEnum usedAxes = AxisEnum.None;
         if (max == _axisZCosVector.X)
         {
@@ -652,7 +645,7 @@ class ArtificialHorizon
             usedAxes |= AxisEnum.Z;
         }
 
-        _axisDrawOrder[1] = (AxisEnum)MathHelper.Clamp((byte)(ALL_AXIS_ENUMS & ~usedAxes), 0, (byte)ALL_AXIS_ENUMS);
+        _axisDrawOrder[1] = (AxisEnum)MathHelper.Clamp((byte)(ALL_AXIS_ENUMS & ~usedAxes), (byte)0, (byte)ALL_AXIS_ENUMS);
     }
 
     #endregion
@@ -708,7 +701,6 @@ class ArtificialHorizon
                 DrawTextBoxes(frame, surface, screenCenter, avgViewportSize, scale, $"{_speed:n1}", $"{acc.ToString(accFormat)}", "m/s", units);
             }
 
-            // Draw orientation indicator
             DrawLine(frame, new Vector2(0, screenCenter.Y), new Vector2(screenCenter.X - 64 * scale, screenCenter.Y), HORIZON_THICKNESS * scale, _program.OrientationLineColor);
             DrawLine(frame, new Vector2(screenCenter.X + 64 * scale, screenCenter.Y), new Vector2(screenCenter.X * 2f, screenCenter.Y), HORIZON_THICKNESS * scale, _program.OrientationLineColor);
 
@@ -717,7 +709,6 @@ class ArtificialHorizon
             centerSprite.RotationOrScale = -MathHelper.PiOver2;
             frame.Add(centerSprite);
 
-            // Draw velocity indicator
             MySprite velocitySprite = new MySprite(SpriteType.TEXTURE, "AH_VelocityVector", size: scaledIconSize, color: !_movingBackwards ? _program.ProgradeColor : _program.RetrogradeColor);
             float sign = _movingBackwards ? -1 : 1;
             velocitySprite.Position = screenCenter + (squareViewportSize * 0.5f * _flattenedVelocity * sign);
@@ -743,8 +734,6 @@ class ArtificialHorizon
         Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);
         Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), boxSize.Y * 0.5f);
 
-        // Vector2 leftBoxPos = screenCenter + new Vector2(-0.5f * (screenSize.X - boxSize.X), screenSize.Y * 0.25f);
-        // Vector2 rightBoxPos = screenCenter + new Vector2(0.5f * (screenSize.X - boxSize.X), screenSize.Y * 0.25f);
 
         float textHeight = textSize * 28.8f;
 
@@ -845,7 +834,6 @@ class ArtificialHorizon
         skySprite.Position = skyMidPt + _rollOffset + _pitchOffset * pitchProportion;
         frame.Add(skySprite);
 
-        // Draw horizon line
         MySprite horizonLineSprite = new MySprite(SpriteType.TEXTURE, "SquareSimple", color: _program.HorizonLineColor, size: new Vector2(skySpriteSize.X, HORIZON_THICKNESS * scale));
         horizonLineSprite.RotationOrScale = _roll;
         horizonLineSprite.Position = screenCenter + _pitchOffset * pitchProportion;
@@ -962,7 +950,6 @@ class ArtificialHorizon
 
 class ArtificialHorizonTitleScreen
 {
-    // General
     readonly Color _topBarColor = new Color(25, 25, 25);
     readonly Color _white = new Color(200, 200, 200);
     readonly Color _black = Color.Black;
@@ -972,7 +959,6 @@ class ArtificialHorizonTitleScreen
     Program _program;
     int _idx = 0;
 
-    // Specific
     const float SpriteScale = 1f;
     readonly Vector2 _spritePos = new Vector2(0, 30);
     enum FrameId { Neg60, Neg40, Neg20, Level, Pos20, Pos40, Pos60 }
@@ -1088,31 +1074,15 @@ new AnimationParams(-20),
 
 public static class VectorMath
 {
-    /// <summary>
-    /// Computes cosine of the angle between 2 vectors.
-    /// </summary>
-    public static double CosBetween(Vector3D a, Vector3D b)
-    {
-        if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
-            return 0;
-        else
-            return MathHelper.Clamp(a.Dot(b) / Math.Sqrt(a.LengthSquared() * b.LengthSquared()), -1, 1);
-    }
-
-    /// <summary>
-    /// Computes angle between 2 vectors in radians.
-    /// </summary>
     public static double AngleBetween(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
+        {
             return 0;
-        else
-            return Math.Acos(CosBetween(a, b));
+        }
+        return Math.Atan2(Vector3D.Cross(a, b).Length(), Vector3D.Dot(a, b));
     }
 
-    /// <summary>
-    /// Projects vector a onto vector b
-    /// </summary>
     public static Vector3D Projection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
@@ -1124,9 +1094,6 @@ public static class VectorMath
         return a.Dot(b) / b.LengthSquared() * b;
     }
 
-    /// <summary>
-    /// Rejects vector a on vector b
-    /// </summary>
     public static Vector3D Rejection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
@@ -1135,9 +1102,6 @@ public static class VectorMath
         return a - a.Dot(b) / b.LengthSquared() * b;
     }
 
-    /// <summary>
-    /// Scalar projection of a onto b
-    /// </summary>
     public static double ScalarProjection(Vector3D a, Vector3D b)
     {
         if (Vector3D.IsZero(a) || Vector3D.IsZero(b))
@@ -1150,10 +1114,6 @@ public static class VectorMath
     }
 }
 
-/// <summary>
-/// A simple, generic circular buffer class with a fixed capacity.
-/// </summary>
-/// <typeparam name="T"></typeparam>
 public class CircularBuffer<T>
 {
     public readonly int Capacity;
@@ -1162,10 +1122,6 @@ public class CircularBuffer<T>
     int _setIndex = 0;
     int _getIndex = 0;
 
-    /// <summary>
-    /// CircularBuffer ctor.
-    /// </summary>
-    /// <param name="capacity">Capacity of the CircularBuffer.</param>
     public CircularBuffer(int capacity)
     {
         if (capacity < 1)
@@ -1174,20 +1130,12 @@ public class CircularBuffer<T>
         _array = new T[Capacity];
     }
 
-    /// <summary>
-    /// Adds an item to the buffer. If the buffer is full, it will overwrite the oldest value.
-    /// </summary>
-    /// <param name="item"></param>
     public void Add(T item)
     {
         _array[_setIndex] = item;
         _setIndex = ++_setIndex % Capacity;
     }
 
-    /// <summary>
-    /// Retrieves the current item in the buffer and increments the buffer index.
-    /// </summary>
-    /// <returns></returns>
     public T MoveNext()
     {
         T val = _array[_getIndex];
@@ -1195,10 +1143,6 @@ public class CircularBuffer<T>
         return val;
     }
 
-    /// <summary>
-    /// Retrieves the current item in the buffer without incrementing the buffer index.
-    /// </summary>
-    /// <returns></returns>
     public T Peek()
     {
         return _array[_getIndex];
@@ -1206,9 +1150,6 @@ public class CircularBuffer<T>
 }
 
 #region Scheduler
-/// <summary>
-/// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
-/// </summary>
 public class Scheduler
 {
     public double CurrentTimeSinceLastRun { get; private set; } = 0;
@@ -1229,18 +1170,12 @@ public class Scheduler
     public const double TickDurationSeconds = 1.0 / TicksPerSecond;
     const long ClockTicksPerGameTick = 166666L;
 
-    /// <summary>
-    /// Constructs a scheduler object with timing based on the runtime of the input program.
-    /// </summary>
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
         _ignoreFirstRun = ignoreFirstRun;
     }
 
-    /// <summary>
-    /// Updates all ScheduledAcions in the schedule and the queue.
-    /// </summary>
     public void Update()
     {
         _inUpdate = true;
@@ -1274,12 +1209,10 @@ public class Scheduler
 
         if (_currentlyQueuedAction == null)
         {
-            // If queue is not empty, populate current queued action
             if (_queuedActions.Count != 0)
                 _currentlyQueuedAction = _queuedActions.Dequeue();
         }
 
-        // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
             _currentlyQueuedAction.Update(deltaTicks);
@@ -1289,7 +1222,6 @@ public class Scheduler
                 {
                     _queuedActions.Enqueue(_currentlyQueuedAction);
                 }
-                // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
         }
@@ -1302,9 +1234,6 @@ public class Scheduler
         }
     }
 
-    /// <summary>
-    /// Adds an Action to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
@@ -1314,9 +1243,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the schedule. All actions are updated each update call.
-    /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
         if (!_inUpdate)
@@ -1325,9 +1251,6 @@ public class Scheduler
             _actionsToAdd.Add(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds an Action to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
@@ -1338,9 +1261,6 @@ public class Scheduler
         _queuedActions.Enqueue(scheduledAction);
     }
 
-    /// <summary>
-    /// Adds a ScheduledAction to the queue. Queue is FIFO.
-    /// </summary>
     public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
@@ -1409,11 +1329,6 @@ public class ScheduledAction
     double _runFrequency;
     readonly Action _action;
 
-    /// <summary>
-    /// Class for scheduling an action to occur at a specified frequency (in Hz).
-    /// </summary>
-    /// <param name="action">Action to run</param>
-    /// <param name="runFrequency">How often to run in Hz</param>
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
@@ -1441,19 +1356,16 @@ public class ScheduledAction
 }
 #endregion
 
-/// <summary>
-/// Class that tracks runtime history.
-/// </summary>
 public class RuntimeTracker
 {
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
@@ -1628,9 +1540,6 @@ public static class StringExtensions
     }
 }
 
-/// <summary>
-/// Draws a line of specified width and color between two points.
-/// </summary>
 public static void DrawLine(MySpriteDrawFrame frame, Vector2 point1, Vector2 point2, float width, Color color, bool roundedEnds = false)
 {
     Vector2 position = 0.5f * (point1 + point2);
@@ -1718,13 +1627,6 @@ public static Vector2 DrawTitleBar(ref MySpriteDrawFrame frame, IMyTextSurface s
     return titleBarPos;
 }
 
-/// <summary>
-/// Selects the active controller from a list using the following priority:
-/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
-/// </summary>
-/// <param name="controllers">List of ship controlers</param>
-/// <param name="lastController">Last actively controlled controller</param>
-/// <returns>Actively controlled ship controller or null if none is controlled</returns>
 public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
 {
     IMyShipController currentlyControlled = null;
@@ -1735,37 +1637,29 @@ public static IMyShipController GetControlledShipController(List<IMyShipControll
             return ctrl;
         }
 
-        // Grab the first seat that has a player sitting in it
-        // and save it away in-case we don't have a main contoller
         if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
         {
             currentlyControlled = ctrl;
         }
     }
 
-    // We did not find a main controller, so if the first controlled controller
-    // from last cycle if it is still controlled
     if (lastController != null && lastController.IsUnderControl)
     {
         return lastController;
     }
 
-    // Otherwise we return the first ship controller that we
-    // found that was controlled.
     if (currentlyControlled != null)
     {
         return currentlyControlled;
     }
 
-    // Nothing is under control, return the controller from last cycle.
     return lastController;
 }
-
 public interface IConfigValue
 {
-    void WriteToIni(ref MyIni ini, string section);
-    bool ReadFromIni(ref MyIni ini, string section);
-    bool Update(ref MyIni ini, string section);
+    void WriteToIni(MyIni ini, string section);
+    bool ReadFromIni(MyIni ini, string section);
+    bool Update(MyIni ini, string section);
     void Reset();
     string Name { get; set; }
     string Comment { get; set; }
@@ -1790,7 +1684,9 @@ public abstract class ConfigValue<T> : IConfigValue<T>
             _skipRead = true;
         }
     }
+
     readonly T _defaultValue;
+    protected T DefaultValue => _defaultValue;
     bool _skipRead = false;
 
     public static implicit operator T(ConfigValue<T> cfg)
@@ -1798,12 +1694,18 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return cfg.Value;
     }
 
+    protected virtual void InitializeValue()
+    {
+        _value = default(T);
+    }
+
     public ConfigValue(string name, T defaultValue, string comment)
     {
         Name = name;
-        _value = defaultValue;
+        InitializeValue();
         _defaultValue = defaultValue;
         Comment = comment;
+        SetDefault();
     }
 
     public override string ToString()
@@ -1811,14 +1713,14 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return Value.ToString();
     }
 
-    public bool Update(ref MyIni ini, string section)
+    public bool Update(MyIni ini, string section)
     {
-        bool read = ReadFromIni(ref ini, section);
-        WriteToIni(ref ini, section);
+        bool read = ReadFromIni(ini, section);
+        WriteToIni(ini, section);
         return read;
     }
 
-    public bool ReadFromIni(ref MyIni ini, string section)
+    public bool ReadFromIni(MyIni ini, string section)
     {
         if (_skipRead)
         {
@@ -1838,7 +1740,7 @@ public abstract class ConfigValue<T> : IConfigValue<T>
         return read;
     }
 
-    public void WriteToIni(ref MyIni ini, string section)
+    public void WriteToIni(MyIni ini, string section)
     {
         ini.Set(section, Name, this.ToString());
         if (!string.IsNullOrWhiteSpace(Comment))
@@ -1890,7 +1792,7 @@ public class ConfigDouble : ConfigValue<double>
     }
 }
 
-class ConfigSection
+public class ConfigSection
 {
     public string Section { get; set; }
     public string Comment { get; set; }
@@ -1917,7 +1819,7 @@ class ConfigSection
         _values.AddRange(values);
     }
 
-    void SetComment(ref MyIni ini)
+    void SetComment(MyIni ini)
     {
         if (!string.IsNullOrWhiteSpace(Comment))
         {
@@ -1925,30 +1827,30 @@ class ConfigSection
         }
     }
 
-    public void ReadFromIni(ref MyIni ini)
+    public void ReadFromIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.ReadFromIni(ref ini, Section);
+            c.ReadFromIni(ini, Section);
         }
     }
 
-    public void WriteToIni(ref MyIni ini)
+    public void WriteToIni(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.WriteToIni(ref ini, Section);
+            c.WriteToIni(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 
-    public void Update(ref MyIni ini)
+    public void Update(MyIni ini)
     {    
         foreach (IConfigValue c in _values)
         {
-            c.Update(ref ini, Section);
+            c.Update(ini, Section);
         }
-        SetComment(ref ini);
+        SetComment(ini);
     }
 }
 public class ConfigBool : ConfigValue<bool>
@@ -1970,7 +1872,6 @@ public class ConfigVector3 : ConfigValue<Vector3>
     public ConfigVector3(string name, Vector3 value = default(Vector3), string comment = null) : base(name, value, comment) { }
     protected override bool SetValue(ref MyIniValue val)
     {
-        // Source formatting example: {X:2.75 Y:-14.4 Z:11.29}
         string source = val.ToString("");
         int xIndex = source.IndexOf("X:");
         int yIndex = source.IndexOf("Y:");
