@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.13.2";
-const string DATE = "2024/04/13";
+const string VERSION = "1.13.3";
+const string DATE = "2024/10/14";
 
 const int BLOCKS_TO_STORE_PER_TICK = 500;
 const int BLOCKS_TO_CHECK_PER_TICK = 100;
@@ -179,7 +179,7 @@ public class ConfigDefinitionIdList : ConfigValue<List<MyDefinitionId>>
         _buffer.Clear();
         for (int ii = 0; ii < _value.Count; ++ii)
         {
-            _buffer.Append(_value[ii].TypeId.ToString());
+            _buffer.Append(_value[ii].ToString());
             if (ii < _value.Count - 1)
             {
                 _buffer.Append(",");
@@ -301,7 +301,9 @@ public class LegendCategoriesSection : ConfigSection
         "\n add the 'Color', 'Block type', and 'Block definitions' keys as described" +
         "\n below. The order in which you define your custom categories " +
         "\n determines its draw priority. The first legend category has the highest" +
-        "\n priority and the last has the lowest priority." +
+        "\n priority and the last has the lowest priority. You *must* recompile" +
+        "\n if you change the number and/or order of legend items to get SIMPL to" +
+        "\n draw the new items properly." +
         "\n" +
         "\n Color" +
         "\n   - Specifies the color associated with this category" +
