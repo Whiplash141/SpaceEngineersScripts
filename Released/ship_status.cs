@@ -30,8 +30,8 @@
 ============================================
 */
 
-const string VERSION = "1.13.3";
-const string DATE = "2024/10/14";
+const string VERSION = "1.14.0";
+const string DATE = "2024/10/23";
 
 const int BLOCKS_TO_STORE_PER_TICK = 500;
 const int BLOCKS_TO_CHECK_PER_TICK = 100;
@@ -312,8 +312,9 @@ public class LegendCategoriesSection : ConfigSection
         "\n" +
         "\n Block type" +
         "\n   - Specifies the block type to associate with this legend category" +
-        "\n   - Valid values: None, Weapons, Thrust, Gyros, Power, Cargo, Tools," +
-        "\n     Doors, or Functional" +
+        "\n   - Valid values: None, Weapons, Thrust, Gyros, Power, Cargo," +
+        "\n     Tools, Functional, Doors, Pistons, RotorsAndHinges, Wheels," +
+        "\n     Production, JumpDrives, ShipControllers, or Mechanical" +
         "\n" +
         "\n Block definitions" +
         "\n   - Can contain one or more comma-separated block MyObjectBuilder" +
@@ -421,6 +422,13 @@ public enum BlockType
     Tools = 1 << 5,
     Functional = 1 << 6,
     Doors = 1 << 7,
+    Pistons = 1 << 8,
+    RotorsAndHinges = 1 << 9,
+    Wheels = 1 << 10,
+    Production = 1 << 11,
+    JumpDrives = 1 << 12,
+    ShipControllers = 1 << 13,
+    Mechanical = Pistons | RotorsAndHinges | Wheels,
 }
 
 public static BlockType GetBlockType<T>(T block) where T : IMyCubeBlock
@@ -458,6 +466,31 @@ public static BlockType GetBlockType<T>(T block) where T : IMyCubeBlock
     {
         blockType |= BlockType.Doors;
     }
+    if (block is IMyPistonBase)
+    {
+        blockType |= BlockType.Pistons;
+    }
+    if (block is IMyMotorStator)
+    {
+        blockType |= BlockType.RotorsAndHinges;
+    }
+    if (block is IMyMotorSuspension)
+    {
+        blockType |= BlockType.Wheels;
+    }
+    if (block is IMyProductionBlock)
+    {
+        blockType |= BlockType.Production;
+    }
+    if (block is IMyJumpDrive)
+    {
+        blockType |= BlockType.JumpDrives;
+    }
+    if (block is IMyShipController)
+    {
+        blockType |= BlockType.ShipControllers;
+    }
+
     return blockType;
 }
 
