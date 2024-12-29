@@ -51,8 +51,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.13.5",
-    Date = "2024/08/17",
+    Version = "1.14.1",
+    Date = "2024/12/28",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
     IniKeySyncGroupNameTag = "Synced group name tag",
@@ -82,11 +82,24 @@ ConfigBool _drawTitleScreen = new ConfigBool(IniKeyDrawTitleScreen, true);
 
 TCESTitleScreen _titleScreen;
 
+GridConnectionSolver ConnectionSolver { get; } = new GridConnectionSolver();
 List<TCESTurret> _tcesTurrets = new List<TCESTurret>();
 List<TCESSynced> _syncedTurrets = new List<TCESSynced>();
 Dictionary<IMyTurretControlBlock, TCESTurret> _tcesTurretMap = new Dictionary<IMyTurretControlBlock, TCESTurret>();
 
 MyIni _ini = new MyIni();
+
+class InvertibleRotor
+{
+    public IMyMotorStator Rotor;
+    public float Multiplier { get; }
+
+    public InvertibleRotor(IMyMotorStator rotor, bool invert)
+    {
+        Rotor = rotor;
+        Multiplier = invert ? -1f : 1f;
+    }
+}
 
 class TCESTurret
 {
@@ -267,7 +280,7 @@ class TCESTurret
     List<IMyFunctionalBlock> _otherTools = new List<IMyFunctionalBlock>();
 
     List<IMyMotorStator> _extraRotors = new List<IMyMotorStator>();
-    List<IMyMotorStator> _controlledExtraRotors = new List<IMyMotorStator>();
+    List<InvertibleRotor> _controlledExtraRotors = new List<InvertibleRotor>();
     List<IMyMotorStator> _unusedRotors = new List<IMyMotorStator>();
     StabilizedRotor _azimuthStabilizer = new StabilizedRotor();
     StabilizedRotor _elevationStabilizer = new StabilizedRotor();
@@ -371,9 +384,9 @@ class TCESTurret
         Setup();
         SetBlocks();
 
-        if (_elevationStabilizer.Rotor != null)
+        if (ElevationRotor != null)
         {
-            _cachedElevationBrakingTorque = _elevationStabilizer.Rotor.BrakingTorque;
+            _cachedElevationBrakingTorque = ElevationRotor.BrakingTorque;
         }
     }
 
@@ -404,47 +417,49 @@ class TCESTurret
     #region Rotor Control State Machine
     void ResetRotors()
     {
-        if (BlockValid(_azimuthStabilizer.Rotor))
+        if (BlockValid(AzimuthRotor))
         {
-            _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
-            _azimuthStabilizer.Rotor.TargetVelocityRad = 0;
+            _controller.AzimuthRotor = AzimuthRotor;
+            AzimuthRotor.TargetVelocityRad = 0;
         }
 
-        if (BlockValid(_elevationStabilizer.Rotor))
+        if (BlockValid(ElevationRotor))
         {
-            _controller.ElevationRotor = _elevationStabilizer.Rotor;
-            _elevationStabilizer.Rotor.TargetVelocityRad = 0;
+            _controller.ElevationRotor = ElevationRotor;
+            ElevationRotor.TargetVelocityRad = 0;
         }
 
         foreach (var r in _controlledExtraRotors)
         {
-            r.TargetVelocityRad = 0f;
+            r.Rotor.TargetVelocityRad = 0f;
         }
     }
 
     void OnUpdateManualControl()
     {
         _controller.AzimuthRotor = null;
-        if (BlockValid(_azimuthStabilizer.Rotor))
+        if (BlockValid(AzimuthRotor))
         {
             if (_azimuthConfig.EnableStabilization)
             {
                 _azimuthStabilizer.Update(1f / 60f);
             }
-            _azimuthStabilizer.Rotor.TargetVelocityRPM =
-                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, _azimuthStabilizer.Rotor) +
+
+            AzimuthRotor.TargetVelocityRPM =
+                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.Y, _controller.VelocityMultiplierAzimuthRpm, AzimuthRotor) +
                 (_azimuthConfig.EnableStabilization && _wasManuallyControlled ? _azimuthStabilizer.Velocity : 0);
         }
 
         _controller.ElevationRotor = null;
-        if (BlockValid(_elevationStabilizer.Rotor))
+        if (BlockValid(ElevationRotor))
         {
             if (_elevationConfig.EnableStabilization)
             {
                 _elevationStabilizer.Update(1f / 60f);
             }
-            _elevationStabilizer.Rotor.TargetVelocityRPM =
-                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, _elevationStabilizer.Rotor) +
+
+            ElevationRotor.TargetVelocityRPM =
+                MouseInputToRotorVelocityRpm(_controller.RotationIndicator.X, _controller.VelocityMultiplierElevationRpm, ElevationRotor) +
                 (_elevationConfig.EnableStabilization && _wasManuallyControlled ? _elevationStabilizer.Velocity : 0);
         }
 
@@ -473,14 +488,14 @@ class TCESTurret
 
         Vector3D targetDirection = info.HitPosition.Value - aimRef.WorldMatrix.Translation;
 
-        if (_azimuthStabilizer.Rotor == null)
+        if (AzimuthRotor == null)
         {
             _aiControlSM.SetState(AiTargetingState.BothRotors);
         }
         else
         {
-            Vector3D flattenedAimDirection = VectorMath.Rejection(aimRef.WorldMatrix.Forward, _azimuthStabilizer.Rotor.WorldMatrix.Up);
-            Vector3D flattenedTargetDirection = VectorMath.Rejection(targetDirection, _azimuthStabilizer.Rotor.WorldMatrix.Up);
+            Vector3D flattenedAimDirection = VectorMath.Rejection(aimRef.WorldMatrix.Forward, AzimuthRotor.WorldMatrix.Up);
+            Vector3D flattenedTargetDirection = VectorMath.Rejection(targetDirection, AzimuthRotor.WorldMatrix.Up);
             double cosBtwn = VectorMath.CosBetween(flattenedAimDirection, flattenedTargetDirection);
             if (cosBtwn > 0.7071)
             {
@@ -505,19 +520,19 @@ class TCESTurret
 
     void OnAiControlBothRotors()
     {
-        if (BlockValid(_elevationStabilizer.Rotor))
+        if (BlockValid(ElevationRotor))
         {
-            _elevationStabilizer.Rotor.BrakingTorque = _cachedElevationBrakingTorque;
-            _elevationStabilizer.Rotor.Enabled = true;
+            ElevationRotor.BrakingTorque = _cachedElevationBrakingTorque;
+            ElevationRotor.Enabled = true;
         }
     }
 
     void OnAiControlAzimuthOnly()
     {
-        if (BlockValid(_elevationStabilizer.Rotor))
+        if (BlockValid(ElevationRotor))
         {
-            _elevationStabilizer.Rotor.BrakingTorque = _elevationStabilizer.Rotor.Torque;
-            _elevationStabilizer.Rotor.Enabled = false;
+            ElevationRotor.BrakingTorque = ElevationRotor.Torque;
+            ElevationRotor.Enabled = false;
         }
     }
 
@@ -607,7 +622,7 @@ class TCESTurret
 
         foreach (var deadzone in _deadzoneConfig.Deadzones)
         {
-            safed = deadzone.ShouldSafe(_azimuthStabilizer.Rotor, _elevationStabilizer.Rotor);
+            safed = deadzone.ShouldSafe(AzimuthRotor, ElevationRotor);
 
             if (safed)
             {
@@ -676,13 +691,17 @@ class TCESTurret
 
         foreach (var r in _extraRotors)
         {
-            if (r.TopGrid == null || !_gridToToolDict.ContainsKey(r.TopGrid))
+            if (r.TopGrid != null && _gridToToolDict.ContainsKey(r.TopGrid))
             {
-                _unusedRotors.Add(r);
+                _controlledExtraRotors.Add(new InvertibleRotor(r, false));
+            }
+            else if (r.TopGrid != null && _gridToToolDict.ContainsKey(r.CubeGrid))
+            {
+                _controlledExtraRotors.Add(new InvertibleRotor(r, true));
             }
             else
             {
-                _controlledExtraRotors.Add(r);
+                _unusedRotors.Add(r);
             }
         }
 
@@ -700,11 +719,11 @@ class TCESTurret
                 _setupReturnCode |= ReturnCode.MultipleTurretControllers;
             }
         }
-        if (_azimuthStabilizer.Rotor == null)
+        if (AzimuthRotor == null)
         {
             _setupReturnCode |= ReturnCode.MissingAzimuth;
         }
-        if (_elevationStabilizer.Rotor == null)
+        if (ElevationRotor == null)
         {
             _setupReturnCode |= ReturnCode.MissingElevation;
         }
@@ -720,7 +739,61 @@ class TCESTurret
         {
             _setupReturnCode |= ReturnCode.MissingTools;
         }
+
+        _otherTools.Clear();
+        _mainTools.Clear();
+        _controller.ClearTools();
+        foreach (var t in _tools)
+        {
+            if (BlockValid(t))
+            {
+                if (_controlledExtraRotors.Count > 0) // Special behavior
+                {
+
+                    if ((AzimuthRotor != null && AzimuthRotor.IsAttached && (t.CubeGrid == AzimuthRotor.TopGrid || t.CubeGrid == AzimuthRotor.CubeGrid)) ||
+                        (ElevationRotor != null && ElevationRotor.IsAttached && (t.CubeGrid == ElevationRotor.TopGrid || t.CubeGrid == ElevationRotor.CubeGrid)))
+                    {
+                        _mainTools.Add(t);
+                        _controller.AddTool(t);
+                    }
+                    else
+                    {
+                        _otherTools.Add(t);
+                    }
+                }
+                else // Default behavior
+                {
+                    _mainTools.Add(t);
+                    _controller.AddTool(t);
+                }
+            }
+        }
+
+        var reference = _controller.GetDirectionSource();
+        _azimuthStabilizer.IsInverted = DetermineIfRotorInverted(reference, AzimuthRotor, _p.ConnectionSolver);
+        _elevationStabilizer.IsInverted = DetermineIfRotorInverted(reference, ElevationRotor, _p.ConnectionSolver);
     }
+
+    public static bool DetermineIfRotorInverted(IMyTerminalBlock reference, IMyMotorStator rotor, GridConnectionSolver solver)
+    {
+        if (reference != null && rotor != null)
+        {
+            if (rotor.TopGrid != null)
+            {
+                GridConnectionSolver.GridNode node;
+                if (solver.FindConnectionBetween(reference.CubeGrid, (g) => g == rotor.CubeGrid || g == rotor.TopGrid, out node))
+                {
+                    if (node.Grid == rotor.CubeGrid)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
 
     void PreparseIni(IMyTerminalBlock b)
     {
@@ -759,7 +832,7 @@ class TCESTurret
         for (int ii = 0; ii < _deadzoneConfig.DeadzoneCount; ++ii)
         {
             var deadzone = new WeaponDeadzone(ii);
-            deadzone.Update(_ini, _azimuthStabilizer.Rotor, _elevationStabilizer.Rotor);
+            deadzone.Update(_ini, AzimuthRotor, ElevationRotor);
             _deadzoneConfig.Deadzones.Add(deadzone);
         }
 
@@ -777,26 +850,26 @@ class TCESTurret
         {
             if (StringExtensions.Contains(b.CustomName, _p.AzimuthName))
             {
-                if (_azimuthStabilizer.Rotor != null)
+                if (AzimuthRotor != null)
                 {
                     _extraRotors.Add(rotor);
                 }
                 else
                 {
                     _azimuthStabilizer.Rotor = rotor;
-                    ParseRotorIni(_azimuthStabilizer.Rotor, _azimuthConfig);
+                    ParseRotorIni(AzimuthRotor, _azimuthConfig);
                 }
             }
             else if (StringExtensions.Contains(b.CustomName, _p.ElevationName))
             {
-                if (_elevationStabilizer.Rotor != null)
+                if (ElevationRotor != null)
                 {
                     _extraRotors.Add(rotor);
                 }
                 else
                 {
                     _elevationStabilizer.Rotor = rotor;
-                    ParseRotorIni(_elevationStabilizer.Rotor, _elevationConfig);
+                    ParseRotorIni(ElevationRotor, _elevationConfig);
                 }
             }
             else
@@ -862,40 +935,22 @@ class TCESTurret
         }
         if ((ControlState)_rotorControlSM.StateId != ControlState.MoveToRest)
         {
-            if (BlockValid(_azimuthStabilizer.Rotor))
+            if (BlockValid(AzimuthRotor))
             {
-                _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
+                _controller.AzimuthRotor = AzimuthRotor;
             }
-            if (BlockValid(_elevationStabilizer.Rotor))
+            if (BlockValid(ElevationRotor))
             {
-                _controller.ElevationRotor = _elevationStabilizer.Rotor;
+                _controller.ElevationRotor = ElevationRotor;
             }
         }
+
         _controller.ClearTools();
-        _otherTools.Clear();
-        _mainTools.Clear();
-        foreach (var t in _tools)
+        foreach (var t in _mainTools)
         {
             if (BlockValid(t))
             {
-                if (_controlledExtraRotors.Count > 0) // Special behavior
-                {
-
-                    if ((_azimuthStabilizer.Rotor != null && _azimuthStabilizer.Rotor.IsAttached && t.CubeGrid == _azimuthStabilizer.Rotor.TopGrid) ||
-                        (_elevationStabilizer.Rotor != null && _elevationStabilizer.Rotor.IsAttached && t.CubeGrid == _elevationStabilizer.Rotor.TopGrid))
-                    {
-                        _mainTools.Add(t);
-                        _controller.AddTool(t);
-                    }
-                    else
-                    {
-                        _otherTools.Add(t);
-                    }
-                }
-                else // Default behavior
-                {
-                    _controller.AddTool(t);
-                }
+                _controller.AddTool(t); 
             }
         }
     }
@@ -933,7 +988,7 @@ class TCESTurret
             Echo("> WARN: Multiple custom turret controllers. Only one is supported.");
             for (int ii = 0; ii < _foundControllers.Count; ++ii)
             {
-                Echo($"    {ii+1}: \"{_foundControllers[ii].CustomName}\"");
+                Echo($"    {ii + 1}: \"{_foundControllers[ii].CustomName}\"");
             }
         }
 
@@ -943,9 +998,18 @@ class TCESTurret
             {
                 Echo("> INFO: No azimuth rotor.");
             }
+            else
+            {
+                Echo($"> INFO: Azimuth inverted: {_azimuthStabilizer.IsInverted}");
+            }
+
             if ((_setupReturnCode & ReturnCode.MissingElevation) != 0)
             {
                 Echo("> INFO: No elevation rotor.");
+            }
+            else
+            {
+                Echo($"> INFO: Elevation inverted: {_elevationStabilizer.IsInverted}");
             }
         }
 
@@ -1002,19 +1066,19 @@ class TCESTurret
         */
     bool HandleAzimuthAndElevationRestAngles()
     {
-        bool done = TryMoveRotorToRestAngle(_azimuthStabilizer.Rotor, _azimuthConfig.RestAngleRad, _azimuthConfig.RestSpeedRatio);
+        bool done = TryMoveRotorToRestAngle(AzimuthRotor, _azimuthConfig.RestAngleRad, _azimuthConfig.RestSpeedRatio);
         if (done)
         {
-            if (BlockValid(_azimuthStabilizer.Rotor))
+            if (BlockValid(AzimuthRotor))
             {
-                _controller.AzimuthRotor = _azimuthStabilizer.Rotor;
+                _controller.AzimuthRotor = AzimuthRotor;
             }
-            done = TryMoveRotorToRestAngle(_elevationStabilizer.Rotor, _elevationConfig.RestAngleRad, _elevationConfig.RestSpeedRatio);
+            done = TryMoveRotorToRestAngle(ElevationRotor, _elevationConfig.RestAngleRad, _elevationConfig.RestSpeedRatio);
             if (done)
             {
-                if (BlockValid(_elevationStabilizer.Rotor))
+                if (BlockValid(ElevationRotor))
                 {
-                    _controller.ElevationRotor = _elevationStabilizer.Rotor;
+                    _controller.ElevationRotor = ElevationRotor;
                 }
             }
             else
@@ -1025,9 +1089,9 @@ class TCESTurret
         else
         {
             _controller.AzimuthRotor = null;
-            if (BlockValid(_elevationStabilizer.Rotor))
+            if (BlockValid(ElevationRotor))
             {
-                _controller.ElevationRotor = _elevationStabilizer.Rotor;
+                _controller.ElevationRotor = ElevationRotor;
             }
         }
         return done;
@@ -1064,6 +1128,24 @@ class TCESTurret
         return isShooting;
     }
 
+    public Vector3D TotalCommandedVelocity
+    {
+        get
+        {
+            Vector3D totalVelocityCommand = Vector3D.Zero;
+            if (AzimuthRotor != null)
+            {
+                totalVelocityCommand += _azimuthStabilizer.RotationAxis * AzimuthRotor.TargetVelocityRad;
+            }
+            if (ElevationRotor != null)
+            {
+                totalVelocityCommand += _elevationStabilizer.RotationAxis * ElevationRotor.TargetVelocityRad;
+            }
+
+            return totalVelocityCommand;
+        }
+    }
+
     void HandleExtraRotors()
     {
         if (_controlledExtraRotors.Count == 0)
@@ -1077,33 +1159,28 @@ class TCESTurret
             return;
         }
 
-        Vector3D totalVelocityCommand = Vector3D.Zero;
-        if (_azimuthStabilizer.Rotor != null)
-        {
-            totalVelocityCommand += _azimuthStabilizer.Rotor.WorldMatrix.Up * _azimuthStabilizer.Rotor.TargetVelocityRad;
-        }
-        if (_elevationStabilizer.Rotor != null)
-        {
-            totalVelocityCommand += _elevationStabilizer.Rotor.WorldMatrix.Up * _elevationStabilizer.Rotor.TargetVelocityRad;
-        }
+        Vector3D totalVelocityCommand = TotalCommandedVelocity;
 
         foreach (var r in _controlledExtraRotors)
         {
-            if (!r.IsAttached)
+            if (!r.Rotor.IsAttached)
             {
                 continue;
             }
 
             IMyFunctionalBlock reference;
-            if (r.TopGrid == null || !_gridToToolDict.TryGetValue(r.TopGrid, out reference))
+            if (r.Rotor.TopGrid == null || !_gridToToolDict.TryGetValue(r.Rotor.TopGrid, out reference))
             {
-                // Not theoretically possible, but just to be safe
-                continue;
+                if (!_gridToToolDict.TryGetValue(r.Rotor.CubeGrid, out reference))
+                {
+                    // Not theoretically possible, but just to be safe
+                    continue;
+                }
             }
 
-            AimRotorAtPosition(r, _controller.GetShootDirection(), reference.WorldMatrix.Forward);
-            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.WorldMatrix.Up);
-            r.TargetVelocityRad += commandedVelocity;
+            AimRotorAtPosition(r.Rotor, _controller.GetShootDirection(), reference.WorldMatrix.Forward, r.Multiplier);
+            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.Rotor.WorldMatrix.Up * r.Multiplier);
+            r.Rotor.TargetVelocityRad += commandedVelocity;
         }
     }
 
@@ -1168,13 +1245,25 @@ class TCESSynced
     IMyBlockGroup _group;
     IMyTurretControlBlock _controller;
     List<IMyTurretControlBlock> _foundControllers = new List<IMyTurretControlBlock>();
-    List<IMyMotorStator> _syncedRotors = new List<IMyMotorStator>();
+    List<InvertibleRotor> _syncedRotors = new List<InvertibleRotor>();
+    List<IMyMotorStator> _stagedRotors = new List<IMyMotorStator>();
     List<IMyFunctionalBlock> _syncedTools = new List<IMyFunctionalBlock>();
     List<IMyFunctionalBlock> _controllerTools = new List<IMyFunctionalBlock>();
     IMyMotorStator ParentAzimuthRotor;
     IMyMotorStator ParentElevationRotor;
     const float VelocityMultiplier = 1f / 6f;
     bool _tcesTurretFound = false;
+    bool _invertAzimuth = false;
+    bool _invertElevation = false;
+    TCESTurret _tcesTurret = null;
+
+    IMyTerminalBlock AimReference
+    {
+        get
+        {
+            return _syncedTools.Count == 0 ? null : _syncedTools[0];
+        }
+    }
 
     enum ReturnCode
     {
@@ -1232,20 +1321,39 @@ class TCESSynced
         ReturnCode setupCode = ReturnCode.None;
 
         _controller = null;
-        _syncedRotors.Clear();
+        _stagedRotors.Clear();
         _syncedTools.Clear();
         _foundControllers.Clear();
 
         _group.GetBlocks(null, CollectBlocks);
 
-        if (_syncedRotors.Count == 0)
-        {
-            setupCode |= ReturnCode.NoSyncedRotors;
-        }
+        _syncedTools.Sort((a, b) => a.CustomName.CompareTo(b.CustomName));
 
+
+
+        _syncedRotors.Clear();
         if (_syncedTools.Count == 0)
         {
             setupCode |= ReturnCode.NoSyncedTools;
+        }
+        else
+        {
+            var reference = AimReference;
+            foreach (var rotor in _stagedRotors)
+            {
+                GridConnectionSolver.GridNode node;
+                bool solved = _program.ConnectionSolver.FindConnectionBetween(reference.CubeGrid, (g) => g == rotor.TopGrid || g == rotor.CubeGrid, out node);
+                if (solved)
+                {
+                    bool inverted = node.Grid == rotor.CubeGrid;
+                    _syncedRotors.Add(new InvertibleRotor(rotor, inverted));
+                }
+            }
+        }
+
+        if (_syncedRotors.Count == 0)
+        {
+            setupCode |= ReturnCode.NoSyncedRotors;
         }
 
         if (_foundControllers.Count == 0)
@@ -1277,16 +1385,16 @@ class TCESSynced
         var r = b as IMyMotorStator;
         if (r != null)
         {
-            _syncedRotors.Add(r);
+            _stagedRotors.Add(r);
         }
 
         var func = b as IMyFunctionalBlock;
         if (func != null &&
                 ((b is IMyUserControllableGun && !(b is IMyLargeTurretBase)) ||
-                  b is IMyCameraBlock ||
-                  b is IMyShipToolBase ||
-                  b is IMyLightingBlock ||
-                  b is IMyShipConnector))
+                    b is IMyCameraBlock ||
+                    b is IMyShipToolBase ||
+                    b is IMyLightingBlock ||
+                    b is IMyShipConnector))
         {
             _syncedTools.Add(func);
         }
@@ -1301,19 +1409,24 @@ class TCESSynced
             return;
         }
 
-        TCESTurret tcesTurret;
-        _tcesTurretFound = turretMap.TryGetValue(_controller, out tcesTurret);
+        _tcesTurretFound = turretMap.TryGetValue(_controller, out _tcesTurret);
         if (_tcesTurretFound)
         {
-            ParentAzimuthRotor = tcesTurret.AzimuthRotor;
-            ParentElevationRotor = tcesTurret.ElevationRotor;
+            ParentAzimuthRotor = _tcesTurret.AzimuthRotor;
+            ParentElevationRotor = _tcesTurret.ElevationRotor;
         }
         else
         {
             ParentAzimuthRotor = _controller.AzimuthRotor;
             ParentElevationRotor = _controller.ElevationRotor;
         }
+
+        var reference = _controller.GetDirectionSource();
+        _invertAzimuth = TCESTurret.DetermineIfRotorInverted(reference, ParentAzimuthRotor, _program.ConnectionSolver);
+        _invertElevation = TCESTurret.DetermineIfRotorInverted(reference, ParentElevationRotor, _program.ConnectionSolver);
     }
+
+    float GetInversionMultiplier(bool invert) => invert ? -1f : 1f;
 
     public void Update10()
     {
@@ -1332,21 +1445,28 @@ class TCESSynced
         }
 
         Vector3D totalVelocityCommand = Vector3D.Zero;
-        if (ParentAzimuthRotor != null)
+        if (_tcesTurretFound)
         {
-            totalVelocityCommand += ParentAzimuthRotor.WorldMatrix.Up * ParentAzimuthRotor.TargetVelocityRad;
+            totalVelocityCommand = _tcesTurret.TotalCommandedVelocity;
         }
-        if (ParentElevationRotor != null)
+        else
         {
-            totalVelocityCommand += ParentElevationRotor.WorldMatrix.Up * ParentElevationRotor.TargetVelocityRad;
+            if (ParentAzimuthRotor != null)
+            {
+                totalVelocityCommand += GetInversionMultiplier(_invertAzimuth) * ParentAzimuthRotor.WorldMatrix.Up * ParentAzimuthRotor.TargetVelocityRad;
+            }
+            if (ParentElevationRotor != null)
+            {
+                totalVelocityCommand += GetInversionMultiplier(_invertElevation) * ParentElevationRotor.WorldMatrix.Up * ParentElevationRotor.TargetVelocityRad;
+            }
         }
 
         IMyTerminalBlock reference = _syncedTools[0];
         foreach (var r in _syncedRotors)
         {
-            AimRotorAtPosition(r, _controller.GetShootDirection(), reference.WorldMatrix.Forward);
-            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.WorldMatrix.Up);
-            r.TargetVelocityRad += commandedVelocity * VelocityMultiplier;
+            AimRotorAtPosition(r.Rotor, _controller.GetShootDirection(), reference.WorldMatrix.Forward, r.Multiplier);
+            float commandedVelocity = (float)Vector3D.Dot(totalVelocityCommand, r.Rotor.WorldMatrix.Up * r.Multiplier);
+            r.Rotor.TargetVelocityRad += commandedVelocity * VelocityMultiplier;
         }
 
         bool shouldShoot = GetControllerIsShooting();
@@ -1394,7 +1514,7 @@ class TCESSynced
             Echo("> WARN: Multiple custom turret controllers found");
             for (int ii = 0; ii < _foundControllers.Count; ++ii)
             {
-                Echo($"    {ii+1}: \"{_foundControllers[ii].CustomName}\"");
+                Echo($"    {ii + 1}: \"{_foundControllers[ii].CustomName}\"");
             }
         }
 
@@ -1465,6 +1585,7 @@ void Setup()
     _tcesTurretMap.Clear();
 
     ProcessIni();
+    ConnectionSolver.Initialize(GridTerminalSystem);
     GridTerminalSystem.GetBlockGroups(null, CollectGroups);
 
     foreach (var s in _syncedTurrets)
@@ -2216,18 +2337,119 @@ public class ConfigVector2 : ConfigValue<Vector2>
 }
 
 /// <summary>
+/// Simple class for determing the shortest sequence of mechanical connections between a grid and a desired target
+/// </summary>
+public class GridConnectionSolver
+{
+    Dictionary<IMyCubeGrid, List<IMyCubeGrid>> _gridPeerMap = new Dictionary<IMyCubeGrid, List<IMyCubeGrid>> ();
+    Queue<GridNode> _queue = new Queue<GridNode>();
+    List<IMyCubeGrid> _explored = new List<IMyCubeGrid>();
+
+    public class GridNode
+    {
+        public IMyCubeGrid Grid { get; }
+        public GridNode Parent { get; set; }
+
+        public GridNode(IMyCubeGrid grid, GridNode parent = null)
+        {
+            Grid = grid;
+            Parent = parent;
+        }
+    }
+
+    void AddGridLinkage(IMyCubeGrid from, IMyCubeGrid to)
+    {
+        List<IMyCubeGrid> peers;
+        if (!_gridPeerMap.TryGetValue(from, out peers))
+        {
+            peers = new List<IMyCubeGrid>();
+            _gridPeerMap[from] = peers;
+        }
+
+        if (!peers.Contains(to))
+        {
+            peers.Add(to);
+        }
+    }
+
+    /// <summary>
+    /// Initializes the solver with a map of the current mechanical connections
+    /// </summary>
+    /// <param name="gts">GridTerminalSystem instance</param>
+    public void Initialize(IMyGridTerminalSystem gts)
+    {
+        _gridPeerMap.Clear();
+
+        gts.GetBlocksOfType<IMyMechanicalConnectionBlock>(null, mech =>
+        {
+            if (mech.TopGrid != null)
+            {
+                AddGridLinkage(mech.TopGrid, mech.CubeGrid);
+                AddGridLinkage(mech.CubeGrid, mech.TopGrid);
+            }
+
+            return false;
+        });
+    }
+
+    /// <summary>
+    /// Breadth-first search of grid connection tree
+    /// </summary>
+    /// <param name="start">Grid to begin from</param>
+    /// <param name="evaluate">Function to evaluate if traversal is successful</param>
+    /// <param name="endNode">End node that can be traversed back to start</param>
+    /// <returns>Boolean indicating if a path was found</returns>
+    public bool FindConnectionBetween(IMyCubeGrid start, Func<IMyCubeGrid, bool> evaluate, out GridNode endNode)
+    {
+        endNode = null;
+        _queue.Clear();
+        _explored.Clear();
+
+        var startNode = new GridNode(start);
+        _queue.Enqueue(startNode);
+
+        while (_queue.Count > 0)
+        {
+            GridNode currentNode = _queue.Dequeue();
+            if (evaluate.Invoke(currentNode.Grid))
+            {
+                endNode = currentNode;
+                return true;
+            }
+
+            _explored.Add(currentNode.Grid);
+
+            List<IMyCubeGrid> peers;
+            if (_gridPeerMap.TryGetValue(currentNode.Grid, out peers))
+            {
+                foreach (IMyCubeGrid peer in peers)
+                {
+                    if (!_explored.Contains(peer))
+                    {
+                        var peerNode = new GridNode(peer, currentNode);
+                        _queue.Enqueue(peerNode);
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+}
+
+/// <summary>
 /// Class that tracks runtime history.
 /// </summary>
 public class RuntimeTracker
 {
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
@@ -2307,9 +2529,41 @@ public class RuntimeTracker
 
 public class StabilizedRotor
 {
+    public bool IsInverted { get; set; }
+    
     public float Velocity { get; private set; }
 
     MatrixD _lastOrientation = MatrixD.Identity;
+
+    public Vector3D RotationAxis
+    {
+        get
+        {
+            if (IsInverted)
+            {
+                return CurrentOrientation.Left;
+            }
+            else
+            {
+                return CurrentOrientation.Up;
+            }
+        }
+    }
+
+    public MatrixD CurrentOrientation
+    {
+        get
+        {
+            if (IsInverted)
+            {
+                return _rotor.TopGrid?.WorldMatrix ?? MatrixD.Identity;
+            }
+            else
+            {
+                return _rotor.WorldMatrix;
+            }
+        }
+    }
 
     IMyMotorStator _rotor = null;
     public IMyMotorStator Rotor
@@ -2325,7 +2579,7 @@ public class StabilizedRotor
                 _rotor = value;
                 if (_rotor != null)
                 {
-                    _lastOrientation = _rotor.WorldMatrix;
+                    _lastOrientation = CurrentOrientation;
                 }
             }
         }
@@ -2338,11 +2592,11 @@ public class StabilizedRotor
 
     double CalculateAngularVelocity(double dt)
     {
-        var axis = Vector3D.Cross(_lastOrientation.Forward, Rotor.WorldMatrix.Forward);
+        var axis = Vector3D.Cross(_lastOrientation.Forward, CurrentOrientation.Forward);
         double mag = axis.Length();
         double angle = Math.Asin(MathHelper.Clamp(mag, -1.0, 1.0));
         axis = mag < 1e-12 ? Vector3D.Zero : axis / mag * angle / dt;
-        return Vector3D.Dot(axis, Rotor.WorldMatrix.Up);
+        return Vector3D.Dot(axis, RotationAxis);
     }
 
     public float Update(double dt)
@@ -2354,8 +2608,9 @@ public class StabilizedRotor
         else
         {
             Velocity = (float)(CalculateAngularVelocity(dt) * MathHelper.RadiansPerSecondToRPM);
-            _lastOrientation = Rotor.WorldMatrix.GetOrientation();
+            _lastOrientation = CurrentOrientation.GetOrientation();
         }
+
         return Velocity;
     }
 }
@@ -2366,23 +2621,23 @@ public class StateMachine
     {
         get
         {
-            return State.Id;
+            return CurrentState.Id;
         }
     }
-    public IState State { get; private set; } = null;
+    public State CurrentState { get; private set; } = null;
 
-    Dictionary<Enum, IState> _states = new Dictionary<Enum, IState>();
+    Dictionary<Enum, State> _states = new Dictionary<Enum, State>();
     bool _initialized = false;
 
-    public void AddStates(params IState[] states)
+    public void AddStates(params State[] states)
     {
-        foreach (IState state in states)
+        foreach (State state in states)
         {
             AddState(state);
         }
     }
 
-    public void AddState(IState state)
+    public void AddState(State state)
     {
         if (_initialized)
         {
@@ -2401,14 +2656,14 @@ public class StateMachine
 
     public bool SetState(Enum stateID)
     {
-        IState oldState = State;
-        IState newState;
+        State oldState = CurrentState;
+        State newState;
         bool validState = _states.TryGetValue(stateID, out newState) && (oldState == null || oldState.Id != newState.Id);
         if (validState)
         {
             oldState?.OnLeave?.Invoke();
             newState?.OnEnter?.Invoke();
-            State = newState;
+            CurrentState = newState;
         }
         return validState;
     }
@@ -2428,24 +2683,16 @@ public class StateMachine
         {
             throw new Exception($"StateMachine has not been initialized");
         }
-        State?.OnUpdate?.Invoke();
+        CurrentState?.OnUpdate?.Invoke();
     }
 }
 
-public interface IState
-{
-    Enum Id { get; }
-    Action OnUpdate { get; }
-    Action OnEnter { get; }
-    Action OnLeave { get; }
-}
-
-class State : IState
+public class State
 {
     public Enum Id { get; }
-    public Action OnUpdate { get; }
-    public Action OnEnter { get; }
-    public Action OnLeave { get; }
+    public Action OnUpdate;
+    public Action OnEnter;
+    public Action OnLeave;
     public State(Enum id, Action onUpdate = null, Action onEnter = null, Action onLeave = null)
     {
         Id = id;
