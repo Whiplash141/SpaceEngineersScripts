@@ -51,7 +51,7 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.14.1",
+    Version = "1.14.2",
     Date = "2024/12/28",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
@@ -688,6 +688,8 @@ class TCESTurret
 
         _controlledExtraRotors.Clear();
         _unusedRotors.Clear();
+        _otherTools.Clear();
+        _mainTools.Clear();
 
         foreach (var r in _extraRotors)
         {
@@ -718,6 +720,39 @@ class TCESTurret
             {
                 _setupReturnCode |= ReturnCode.MultipleTurretControllers;
             }
+
+
+            _controller.ClearTools();
+
+            foreach (var t in _tools)
+            {
+                if (BlockValid(t))
+                {
+                    if (_controlledExtraRotors.Count > 0) // Special behavior
+                    {
+
+                        if ((AzimuthRotor != null && AzimuthRotor.IsAttached && (t.CubeGrid == AzimuthRotor.TopGrid || t.CubeGrid == AzimuthRotor.CubeGrid)) ||
+                            (ElevationRotor != null && ElevationRotor.IsAttached && (t.CubeGrid == ElevationRotor.TopGrid || t.CubeGrid == ElevationRotor.CubeGrid)))
+                        {
+                            _mainTools.Add(t);
+                            _controller.AddTool(t);
+                        }
+                        else
+                        {
+                            _otherTools.Add(t);
+                        }
+                    }
+                    else // Default behavior
+                    {
+                        _mainTools.Add(t);
+                        _controller.AddTool(t);
+                    }
+                }
+            }
+
+            var reference = _controller.GetDirectionSource();
+            _azimuthStabilizer.IsInverted = DetermineIfRotorInverted(reference, AzimuthRotor, _p.ConnectionSolver);
+            _elevationStabilizer.IsInverted = DetermineIfRotorInverted(reference, ElevationRotor, _p.ConnectionSolver);
         }
         if (AzimuthRotor == null)
         {
@@ -739,39 +774,6 @@ class TCESTurret
         {
             _setupReturnCode |= ReturnCode.MissingTools;
         }
-
-        _otherTools.Clear();
-        _mainTools.Clear();
-        _controller.ClearTools();
-        foreach (var t in _tools)
-        {
-            if (BlockValid(t))
-            {
-                if (_controlledExtraRotors.Count > 0) // Special behavior
-                {
-
-                    if ((AzimuthRotor != null && AzimuthRotor.IsAttached && (t.CubeGrid == AzimuthRotor.TopGrid || t.CubeGrid == AzimuthRotor.CubeGrid)) ||
-                        (ElevationRotor != null && ElevationRotor.IsAttached && (t.CubeGrid == ElevationRotor.TopGrid || t.CubeGrid == ElevationRotor.CubeGrid)))
-                    {
-                        _mainTools.Add(t);
-                        _controller.AddTool(t);
-                    }
-                    else
-                    {
-                        _otherTools.Add(t);
-                    }
-                }
-                else // Default behavior
-                {
-                    _mainTools.Add(t);
-                    _controller.AddTool(t);
-                }
-            }
-        }
-
-        var reference = _controller.GetDirectionSource();
-        _azimuthStabilizer.IsInverted = DetermineIfRotorInverted(reference, AzimuthRotor, _p.ConnectionSolver);
-        _elevationStabilizer.IsInverted = DetermineIfRotorInverted(reference, ElevationRotor, _p.ConnectionSolver);
     }
 
     public static bool DetermineIfRotorInverted(IMyTerminalBlock reference, IMyMotorStator rotor, GridConnectionSolver solver)
@@ -1050,7 +1052,6 @@ class TCESTurret
                 Echo($"> INFO: {_tools.Count} weapon(s)/tool(s).");
             }
         }
-        Echo("");
     }
     #endregion
 
@@ -1743,11 +1744,13 @@ void OnUpdate60()
     foreach (var controller in _tcesTurrets)
     {
         controller.WriteStatus();
+        Echo("");
     }
 
     foreach (var synced in _syncedTurrets)
     {
         synced.WriteStatus();
+        Echo("");
     }
 
     WriteEcho();
@@ -2541,11 +2544,11 @@ public class StabilizedRotor
         {
             if (IsInverted)
             {
-                return CurrentOrientation.Left;
+                return _rotor.WorldMatrix.Down;
             }
             else
             {
-                return CurrentOrientation.Up;
+                return _rotor.WorldMatrix.Up;
             }
         }
     }
