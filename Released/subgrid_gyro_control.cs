@@ -56,8 +56,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 const string NAME = "Whip's Subgrid Gyro Manager (SuGMa)";
-const string VERSION = "1.3.4";
-const string DATE = "2023/04/18";
+const string VERSION = "1.4.0";
+const string DATE = "2025/02/17";
 
 const string INI_SECTION_SGCS = "Subgrid Gyro Config";
 const string INI_KEY_IGNORE_TAG = "Gyro ignore name tag";
@@ -67,14 +67,15 @@ const string INI_KEY_YAW_GAIN = "Yaw gain";
 const string INI_KEY_ROLL_GAIN = "Roll gain";
 const string INI_KEY_TITLE_SCREEN = "Draw title screen";
 
-public double GyroPitchGain = 60.0;
-public double GyroYawGain = 60.0;
-public double GyroRollGain = 60.0;
+const int MaxInstructionsPerRun = 5000;
+public float GyroPitchGain = 60.0f;
+public float GyroYawGain = 60.0f;
+public float GyroRollGain = 60.0f;
 bool _detectOverConnectors = false;
 string _gyroIgnoreTag = "Ignore";
 bool _drawTitleScreen = true;
 
-const double RPMToRadsPerSecond = Math.PI / 30.0;
+const float RPMToRadsPerSecond = (float)Math.PI / 30.0f;
 bool _setup = false;
 List<IMyShipController> _controllers = new List<IMyShipController>(); 
 List<IMyGyro> _gyros = new List<IMyGyro>(); 
@@ -87,6 +88,11 @@ CircularBuffer<InputState> _inputBuffer = new CircularBuffer<InputState>(6);
 long _lastCubeGridId = -1;
 MyIni _ini = new MyIni();
 SubgridGyroScreenManager _screenManager;
+IEnumerator<bool> _stateMachine;
+int _enumeratorSteps = 0;
+int _lastEnumeratorSteps = 0;
+RuntimeTracker _runtimeTracker;
+bool _setupReady = false;
 
 void Draw()
 {
@@ -100,24 +106,30 @@ Program()
 {
     _screenManager = new SubgridGyroScreenManager(VERSION, this);
     
-    _scheduledSetup = new ScheduledAction(Setup, 0.1);
+    _scheduledSetup = new ScheduledAction(InitiateSetup, 0.1);
+
+    _runtimeTracker = new RuntimeTracker(this);
     
     _scheduler = new Scheduler(this);
     _scheduler.AddScheduledAction(ProcessInputs, 60);
-    _scheduler.AddScheduledAction(DoWork, 10);
+    _scheduler.AddScheduledAction(() => TrySetup(false), 60);
+    _scheduler.AddScheduledAction(StartStateMachine, 10, timeOffset: 0.05);
+    _scheduler.AddScheduledAction(RunStateMachine, 60);
     _scheduler.AddScheduledAction(WriteDetailedInfo, 1);
     _scheduler.AddScheduledAction(Draw, 6);
     _scheduler.AddScheduledAction(_screenManager.RestartDraw, 0.1, timeOffset: 0.5);
     _scheduler.AddScheduledAction(_scheduledSetup);
     
-    Setup();
+    TrySetup(true);
     
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
 
 void Main(string arg, UpdateType updateSource)
 {
+    _runtimeTracker.AddRuntime();
     _scheduler.Update();
+    _runtimeTracker.AddInstructions();
 }
 
 void WriteDetailedInfo()
@@ -138,6 +150,7 @@ void WriteDetailedInfo()
         }
         Echo($"> {_subgridGyros.Count} subgrid gyro(s) found");
         Echo($"> Controller: {(_lastControlled == null ? "(none)" : _lastControlled.CustomName)}");
+        Echo($"> {_lastEnumeratorSteps} tick(s) required to run core logic");
     }
     else
     {
@@ -151,6 +164,9 @@ void WriteDetailedInfo()
             Echo(">> ERROR: No ship controllers\n    found on this ship or attached\n    subgrids");
         }
     }
+
+    Echo("");
+    Echo(_runtimeTracker.Write());
 
     string output = _echoBuilder.ToString();
     base.Echo(output);
@@ -178,20 +194,52 @@ void ProcessInputs()
 
 Vector3D GetAverageRotationInput()
 {
-    Vector3D rotationInput = Vector3D.Zero;
+    InputState avgState = InputState.Zero;
     for (int i = 0; i < _inputBuffer.Capacity; ++i)
     {
         InputState currentState = _inputBuffer.MoveNext();
-        rotationInput += new Vector3(currentState.RotationIndicator, currentState.RollIndicator);
+        avgState += currentState;
     }
-    return rotationInput / _inputBuffer.Capacity;
+    avgState *= 1.0f / _inputBuffer.Capacity;
+
+    return new Vector3D(avgState.RotationIndicator, avgState.RollIndicator);
 }
 
-void DoWork()
-{   
-    if (!_setup)
+void StartStateMachine()
+{
+    if (_stateMachine == null && _setup)
+    {
+        _lastEnumeratorSteps = _enumeratorSteps;
+        _enumeratorSteps = 0;
+        _stateMachine = DoWork();
+    }
+}
+
+void RunStateMachine()
+{
+    if (_stateMachine == null)
+    {
         return;
+    }
     
+    ++_enumeratorSteps;
+
+    bool moreSteps = _stateMachine.MoveNext();
+
+    if (!moreSteps)
+    {
+        _stateMachine.Dispose();
+        _stateMachine = null;
+    }
+}
+
+public bool AtInstructionLimit()
+{
+    return Runtime.CurrentInstructionCount >= MaxInstructionsPerRun;
+}
+
+IEnumerator<bool> DoWork()
+{   
     // Update selected controller
     var controller = GetControlledShipController(_controllers, _lastControlled);
     if (controller == null)
@@ -204,8 +252,38 @@ void DoWork()
 
     _lastControlled = controller;
     
-    // Get gyros
-    GetOffGridGyros(controller.CubeGrid, _gyros, _subgridGyros); 
+    // Get gyros (inlined)
+    if (_lastCubeGridId != controller.CubeGrid.EntityId || _subgridGyros.Count == 0)
+    {
+        _subgridGyros.Clear();
+        foreach (IMyGyro gyro in _gyros)
+        { 
+            if (AtInstructionLimit())
+            {
+                yield return true;
+            }
+            
+            if (!GridTerminalSystem.CanAccess(gyro))
+            {
+                continue;
+            }
+            
+            if (controller.CubeGrid != gyro.CubeGrid)
+            {
+                _subgridGyros.Add(gyro);
+            }
+            else
+            {
+                gyro.GyroOverride = false;
+                gyro.Yaw = 0;
+                gyro.Pitch = 0;
+                gyro.Roll = 0;
+            }
+        }
+
+    }
+    _lastCubeGridId = controller.CubeGrid.EntityId;
+
 
     // Get average rotation state
     Vector3 rotationState = (Vector3)GetAverageRotationInput();
@@ -217,119 +295,60 @@ void DoWork()
     Vector3 rotationVec = new Vector3(rotationClamped.X, rotationClamped.Y, roll);
     
     // Apply controller
-    double pitchCmd = RPMToRadsPerSecond * GyroPitchGain * rotationVec.X;
-    double yawCmd = RPMToRadsPerSecond * GyroYawGain * rotationVec.Y;
-    double rollCmd = RPMToRadsPerSecond * GyroRollGain * rotationVec.Z;
+    Vector3 inputScale = new Vector3(GyroPitchGain, GyroYawGain, GyroRollGain) * RPMToRadsPerSecond;
+    rotationVec *= inputScale;
 
-    // Apply rotation command
-    ApplyGyroOverride(pitchCmd, yawCmd, rollCmd, _subgridGyros, controller.WorldMatrix);
-}
+    // Apply rotation command (inlined)
+    var relativeRotationVec = Vector3D.Rotate(rotationVec, controller.WorldMatrix);
 
-//Whip's ApplyGyroOverride Method v12 - 11/02/2019
-void ApplyGyroOverride(double pitchSpeed, double yawSpeed, double rollSpeed, List<IMyGyro> gyroList, MatrixD worldMatrix)
-{
-    var rotationVec = new Vector3D(pitchSpeed, yawSpeed, rollSpeed); //Removed negation of pitch for this script - 12/07/19 
-    var relativeRotationVec = Vector3D.TransformNormal(rotationVec, worldMatrix);
-    
-    foreach (var thisGyro in gyroList)
+    foreach (var gyro in _gyros)
     {
-        if (!GridTerminalSystem.CanAccess(thisGyro)) { continue; }
-        var transformedRotationVec = Vector3D.TransformNormal(relativeRotationVec, Matrix.Transpose(thisGyro.WorldMatrix));
-        thisGyro.Pitch = (float)transformedRotationVec.X;
-        thisGyro.Yaw = (float)transformedRotationVec.Y;
-        thisGyro.Roll = (float)transformedRotationVec.Z;
-        thisGyro.GyroOverride = true;
-    }
-}
-
-void GetOffGridGyros(IMyCubeGrid grid, List<IMyGyro> sourceList, List<IMyGyro> resultList)
-{
-    if (_lastCubeGridId == grid.EntityId && resultList.Count != 0)
-    {
-        // We have already processed off-grid gyros for this grid
-        return;
-    }
-    
-    resultList.Clear();
-    foreach (IMyGyro gyro in sourceList)
-    {
-        if (!GridTerminalSystem.CanAccess(gyro))
+        if (AtInstructionLimit())
         {
-            continue;
+            yield return true;
+        }
+
+        if (!GridTerminalSystem.CanAccess(gyro)) 
+        { 
+            continue; 
+        }
+        var transformedRotationVec = Vector3D.Rotate(relativeRotationVec, Matrix.Transpose(gyro.WorldMatrix));
+        gyro.Pitch = (float)transformedRotationVec.X;
+        gyro.Yaw = (float)transformedRotationVec.Y;
+        gyro.Roll = (float)transformedRotationVec.Z;
+        gyro.GyroOverride = true;
+    }
+}
+
+void InitiateSetup()
+{
+    _setupReady = true;
+}
+
+void TrySetup(bool force = false)
+{
+    if (force || (_setupReady && _stateMachine == null))
+    {
+        _setupReady = false;
+
+        _gyros.Clear();
+        _subgridGyros.Clear();
+        _controllers.Clear();
+        
+        ParseIni();
+        
+        GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks);
+        
+        if (!_controllers.Contains(_lastControlled))
+        {
+            _lastControlled = null;
         }
         
-        if (grid != gyro.CubeGrid)
+        _setup = true;
+        if (_gyros.Count == 0 || _controllers.Count == 0)
         {
-            resultList.Add(gyro);
+            _setup = false;
         }
-        else
-        {
-            gyro.GyroOverride = false;
-            gyro.Yaw = 0;
-            gyro.Pitch = 0;
-            gyro.Roll = 0;
-        }
-    }
-    _lastCubeGridId = grid.EntityId;
-}
-
-IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastControlled = null)
-{
-    /*
-    Priority:
-    1. Main controller
-    2. Oldest controlled ship controller
-    */
-    IMyShipController firstControlled = null;
-    foreach (IMyShipController ctrl in controllers)
-    {
-        if (ctrl.IsMainCockpit)
-        {
-            return ctrl;
-        }
-
-        if (ctrl.IsUnderControl && ctrl.CanControlShip)
-        {
-            // Grab the first seat that has a player sitting in it
-            // and save it away in-case we don't have a main contoller
-            if (firstControlled == null)
-            {
-                firstControlled = ctrl;
-            }
-        }
-    }
-    
-    // We did not find a main controller, so if the first controlled controller
-    // from last cycle if it is still controlled
-    if (lastControlled != null && (lastControlled.IsUnderControl && lastControlled.CanControlShip))
-    {
-        return lastControlled;
-    }
-
-    // Otherwise we return the first ship controller that we 
-    // found that was controlled.
-    return firstControlled;
-}
-
-void Setup()
-{
-    _gyros.Clear();
-    _subgridGyros.Clear();
-    _controllers.Clear();
-    
-    ParseIni();
-    
-    GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, CollectBlocks);
-    
-    if (!_controllers.Contains(_lastControlled))
-    {
-        _lastControlled = null;
-    }
-    
-    _setup = true;
-    if (_gyros.Count == 0 || _controllers.Count == 0)
-    {
-        _setup = false;
     }
 }
 
@@ -340,9 +359,9 @@ void ParseIni()
     {
         _gyroIgnoreTag = _ini.Get(INI_SECTION_SGCS, INI_KEY_IGNORE_TAG).ToString(_gyroIgnoreTag);
         _detectOverConnectors = _ini.Get(INI_SECTION_SGCS, INI_KEY_SCAN_CONNECTORS).ToBoolean(_detectOverConnectors);
-        GyroPitchGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_PITCH_GAIN).ToDouble(GyroPitchGain);
-        GyroYawGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_YAW_GAIN).ToDouble(GyroYawGain);
-        GyroRollGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_ROLL_GAIN).ToDouble(GyroRollGain);
+        GyroPitchGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_PITCH_GAIN).ToSingle(GyroPitchGain);
+        GyroYawGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_YAW_GAIN).ToSingle(GyroYawGain);
+        GyroRollGain = _ini.Get(INI_SECTION_SGCS, INI_KEY_ROLL_GAIN).ToSingle(GyroRollGain);
         _drawTitleScreen = _ini.Get(INI_SECTION_SGCS, INI_KEY_TITLE_SCREEN).ToBoolean(_drawTitleScreen);
 
     }
@@ -618,34 +637,7 @@ class SubgridGyroScreenManager
     #endregion
 }
 
-public struct InputState
-{
-    public Vector3 MoveIndicator;
-    public Vector2 RotationIndicator;
-    public float RollIndicator;
-
-    public static InputState Zero = new InputState
-    {
-        MoveIndicator = Vector3.Zero,
-        RotationIndicator = Vector2.Zero,
-        RollIndicator = 0,
-    };
-
-    public static InputState FromShipController(IMyShipController controller)
-    {
-        if (!controller.IsUnderControl) 
-        {
-            return InputState.Zero;
-        }
-        
-        return new InputState()
-        {
-            MoveIndicator = controller.MoveIndicator,
-            RotationIndicator = controller.RotationIndicator,
-            RollIndicator = controller.RollIndicator,
-        };
-    }
-}
+#region INCLUDES
 
 /// <summary>
 /// A simple, generic circular buffer class with a fixed capacity.
@@ -702,22 +694,98 @@ public class CircularBuffer<T>
     }
 }
 
+public struct InputState
+{
+    public Vector3 MoveIndicator;
+    public Vector2 RotationIndicator;
+    public float RollIndicator;
+
+    public static readonly InputState Zero = new InputState
+    {
+        MoveIndicator = Vector3.Zero,
+        RotationIndicator = Vector2.Zero,
+        RollIndicator = 0,
+    };
+
+    public static InputState FromShipController(IMyShipController controller)
+    {
+        if (controller == null || !controller.IsUnderControl)
+        {
+            return InputState.Zero;
+        }
+
+        return new InputState()
+        {
+            MoveIndicator = controller.MoveIndicator,
+            RotationIndicator = controller.RotationIndicator,
+            RollIndicator = controller.RollIndicator,
+        };
+    }
+    
+    public static InputState FromCTC(IMyTurretControlBlock controller)
+    {
+        if (controller == null || !controller.IsUnderControl)
+        {
+            return InputState.Zero;
+        }
+
+        return new InputState()
+        {
+            MoveIndicator = controller.MoveIndicator,
+            RotationIndicator = controller.RotationIndicator,
+            RollIndicator = controller.RollIndicator,
+        };
+    }
+    
+    public static InputState operator+(InputState a, InputState b)
+    {
+        return new InputState
+        {
+            MoveIndicator = a.MoveIndicator + b.MoveIndicator,
+            RotationIndicator = a.RotationIndicator + b.RotationIndicator,
+            RollIndicator = a.RollIndicator + b.RollIndicator,
+        };
+    }
+    
+    public static InputState operator*(InputState a, float b)
+    {
+        return new InputState
+        {
+            MoveIndicator = a.MoveIndicator * b,
+            RotationIndicator = a.RotationIndicator * b,
+            RollIndicator = a.RollIndicator * b,
+        };
+    }
+    
+    public static InputState operator*(float b, InputState a)
+    {
+        return a * b;
+    }
+}
+
 #region Scheduler
 /// <summary>
 /// Class for scheduling actions to occur at specific frequencies. Actions can be updated in parallel or in sequence (queued).
 /// </summary>
 public class Scheduler
 {
-    ScheduledAction _currentlyQueuedAction = null;
+    public double CurrentTimeSinceLastRun { get; private set; } = 0;
+    public long CurrentTicksSinceLastRun { get; private set; } = 0;
+
+    QueuedAction _currentlyQueuedAction = null;
     bool _firstRun = true;
-    
+    bool _inUpdate = false;
+
     readonly bool _ignoreFirstRun;
+    readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
     readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
     readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
-    readonly Queue<ScheduledAction> _queuedActions = new Queue<ScheduledAction>();
+    readonly Queue<QueuedAction> _queuedActions = new Queue<QueuedAction>();
     readonly Program _program;
-    
-    const double RUNTIME_TO_REALTIME = (1.0 / 60.0) / 0.0166666;
+
+    public const long TicksPerSecond = 60;
+    public const double TickDurationSeconds = 1.0 / TicksPerSecond;
+    const long ClockTicksPerGameTick = 166666L;
 
     /// <summary>
     /// Constructs a scheduler object with timing based on the runtime of the input program.
@@ -733,24 +801,34 @@ public class Scheduler
     /// </summary>
     public void Update()
     {
-        double deltaTime = Math.Max(0, _program.Runtime.TimeSinceLastRun.TotalSeconds * RUNTIME_TO_REALTIME);
-        
-        if (_ignoreFirstRun && _firstRun)
-            deltaTime = 0;
+        _inUpdate = true;
+        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
 
-        _firstRun = false;
+        if (_firstRun)
+        {
+            if (_ignoreFirstRun)
+            {
+                deltaTicks = 0;
+            }
+            _firstRun = false;
+        }
+
         _actionsToDispose.Clear();
         foreach (ScheduledAction action in _scheduledActions)
         {
-            action.Update(deltaTime);
+            CurrentTicksSinceLastRun = action.TicksSinceLastRun + deltaTicks;
+            CurrentTimeSinceLastRun = action.TimeSinceLastRun + deltaTicks * TickDurationSeconds;
+            action.Update(deltaTicks);
             if (action.JustRan && action.DisposeAfterRun)
             {
                 _actionsToDispose.Add(action);
             }
         }
 
-        // Remove all actions that we should dispose
-        _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        if (_actionsToDispose.Count > 0)
+        {
+            _scheduledActions.RemoveAll((x) => _actionsToDispose.Contains(x));
+        }
 
         if (_currentlyQueuedAction == null)
         {
@@ -762,12 +840,23 @@ public class Scheduler
         // If queued action is populated
         if (_currentlyQueuedAction != null)
         {
-            _currentlyQueuedAction.Update(deltaTime);
+            _currentlyQueuedAction.Update(deltaTicks);
             if (_currentlyQueuedAction.JustRan)
             {
+                if (!_currentlyQueuedAction.DisposeAfterRun)
+                {
+                    _queuedActions.Enqueue(_currentlyQueuedAction);
+                }
                 // Set the queued action to null for the next cycle
                 _currentlyQueuedAction = null;
             }
+        }
+        _inUpdate = false;
+
+        if (_actionsToAdd.Count > 0)
+        {
+            _scheduledActions.AddRange(_actionsToAdd);
+            _actionsToAdd.Clear();
         }
     }
 
@@ -777,7 +866,10 @@ public class Scheduler
     public void AddScheduledAction(Action action, double updateFrequency, bool disposeAfterRun = false, double timeOffset = 0)
     {
         ScheduledAction scheduledAction = new ScheduledAction(action, updateFrequency, disposeAfterRun, timeOffset);
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
@@ -785,39 +877,94 @@ public class Scheduler
     /// </summary>
     public void AddScheduledAction(ScheduledAction scheduledAction)
     {
-        _scheduledActions.Add(scheduledAction);
+        if (!_inUpdate)
+            _scheduledActions.Add(scheduledAction);
+        else
+            _actionsToAdd.Add(scheduledAction);
     }
 
     /// <summary>
     /// Adds an Action to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(Action action, double updateInterval)
+    public void AddQueuedAction(Action action, double updateInterval, bool removeAfterRun = false)
     {
         if (updateInterval <= 0)
         {
             updateInterval = 0.001; // avoids divide by zero
         }
-        ScheduledAction scheduledAction = new ScheduledAction(action, 1.0 / updateInterval, true);
+        QueuedAction scheduledAction = new QueuedAction(action, updateInterval, removeAfterRun);
         _queuedActions.Enqueue(scheduledAction);
     }
 
     /// <summary>
     /// Adds a ScheduledAction to the queue. Queue is FIFO.
     /// </summary>
-    public void AddQueuedAction(ScheduledAction scheduledAction)
+    public void AddQueuedAction(QueuedAction scheduledAction)
     {
         _queuedActions.Enqueue(scheduledAction);
     }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
 }
 
 public class ScheduledAction
 {
     public bool JustRan { get; private set; } = false;
     public bool DisposeAfterRun { get; private set; } = false;
-    public double TimeSinceLastRun { get; private set; } = 0;
-    public readonly double RunInterval;
+    public double TimeSinceLastRun { get { return TicksSinceLastRun * Scheduler.TickDurationSeconds; } }
+    public long TicksSinceLastRun { get; private set; } = 0;
+    public double RunInterval
+    {
+        get
+        {
+            return RunIntervalTicks * Scheduler.TickDurationSeconds;
+        }
+        set
+        {
+            RunIntervalTicks = (long)Math.Round(value * Scheduler.TicksPerSecond);
+        }
+    }
+    public long RunIntervalTicks
+    {
+        get
+        {
+            return _runIntervalTicks;
+        }
+        set
+        {
+            if (value == _runIntervalTicks)
+                return;
 
-    readonly double _runFrequency;
+            _runIntervalTicks = value < 0 ? 0 : value;
+            _runFrequency = value == 0 ? double.MaxValue : Scheduler.TicksPerSecond / _runIntervalTicks;
+        }
+    }
+
+    public double RunFrequency
+    {
+        get
+        {
+            return _runFrequency;
+        }
+        set
+        {
+            if (value == _runFrequency)
+                return;
+
+            if (value == 0)
+                RunIntervalTicks = long.MaxValue;
+            else
+                RunIntervalTicks = (long)Math.Round(Scheduler.TicksPerSecond / value);
+        }
+    }
+
+    long _runIntervalTicks;
+    double _runFrequency;
     readonly Action _action;
 
     /// <summary>
@@ -828,20 +975,19 @@ public class ScheduledAction
     public ScheduledAction(Action action, double runFrequency, bool removeAfterRun = false, double timeOffset = 0)
     {
         _action = action;
-        _runFrequency = runFrequency;
-        RunInterval = 1.0 / _runFrequency;
+        RunFrequency = runFrequency; // Implicitly sets RunInterval
         DisposeAfterRun = removeAfterRun;
-        TimeSinceLastRun = timeOffset;
+        TicksSinceLastRun = (long)Math.Round(timeOffset * Scheduler.TicksPerSecond);
     }
 
-    public void Update(double deltaTime)
+    public void Update(long deltaTicks)
     {
-        TimeSinceLastRun += deltaTime;
+        TicksSinceLastRun += deltaTicks;
 
-        if (TimeSinceLastRun >= RunInterval)
+        if (TicksSinceLastRun >= RunIntervalTicks)
         {
             _action.Invoke();
-            TimeSinceLastRun = 0;
+            TicksSinceLastRun = 0;
 
             JustRan = true;
         }
@@ -850,5 +996,139 @@ public class ScheduledAction
             JustRan = false;
         }
     }
+}
+#endregion
+
+/// <summary>
+/// Class that tracks runtime history.
+/// </summary>
+public class RuntimeTracker
+{
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
+    
+    readonly Queue<double> _runtimes = new Queue<double>();
+    readonly Queue<double> _instructions = new Queue<double>();
+    readonly int _instructionLimit;
+    readonly Program _program;
+    const double MS_PER_TICK = 16.6666;
+    
+    const string Format = "General Runtime Info\n"
+            + "- Avg runtime: {0:n4} ms\n"
+            + "- Last runtime: {1:n4} ms\n"
+            + "- Max runtime: {2:n4} ms\n"
+            + "- Avg instructions: {3:n2}\n"
+            + "- Last instructions: {4:n0}\n"
+            + "- Max instructions: {5:n0}\n"
+            + "- Avg complexity: {6:0.000}%";
+
+    public RuntimeTracker(Program program, int capacity = 100, double sensitivity = 0.005)
+    {
+        _program = program;
+        Capacity = capacity;
+        Sensitivity = sensitivity;
+        _instructionLimit = _program.Runtime.MaxInstructionCount;
+    }
+
+    public void AddRuntime()
+    {
+        double runtime = _program.Runtime.LastRunTimeMs;
+        LastRuntime = runtime;
+        AverageRuntime += (Sensitivity * runtime);
+        int roundedTicksSinceLastRuntime = (int)Math.Round(_program.Runtime.TimeSinceLastRun.TotalMilliseconds / MS_PER_TICK);
+        if (roundedTicksSinceLastRuntime == 1)
+        {
+            AverageRuntime *= (1 - Sensitivity); 
+        }
+        else if (roundedTicksSinceLastRuntime > 1)
+        {
+            AverageRuntime *= Math.Pow((1 - Sensitivity), roundedTicksSinceLastRuntime);
+        }
+
+        _runtimes.Enqueue(runtime);
+        if (_runtimes.Count == Capacity)
+        {
+            _runtimes.Dequeue();
+        }
+        
+        MaxRuntime = _runtimes.Max();
+    }
+
+    public void AddInstructions()
+    {
+        double instructions = _program.Runtime.CurrentInstructionCount;
+        LastInstructions = instructions;
+        AverageInstructions = Sensitivity * (instructions - AverageInstructions) + AverageInstructions;
+        
+        _instructions.Enqueue(instructions);
+        if (_instructions.Count == Capacity)
+        {
+            _instructions.Dequeue();
+        }
+        
+        MaxInstructions = _instructions.Max();
+    }
+
+    public string Write()
+    {
+        return string.Format(
+            Format,
+            AverageRuntime,
+            LastRuntime,
+            MaxRuntime,
+            AverageInstructions,
+            LastInstructions,
+            MaxInstructions,
+            AverageInstructions / _instructionLimit);
+    }
+}
+
+/// <summary>
+/// Selects the active controller from a list using the following priority:
+/// Main controller > Oldest controlled ship controller > Any controlled ship controller.
+/// </summary>
+/// <param name="controllers">List of ship controlers</param>
+/// <param name="lastController">Last actively controlled controller</param>
+/// <returns>Actively controlled ship controller or null if none is controlled</returns>
+public static IMyShipController GetControlledShipController(List<IMyShipController> controllers, IMyShipController lastController = null)
+{
+    IMyShipController currentlyControlled = null;
+    foreach (IMyShipController ctrl in controllers)
+    {
+        if (ctrl.IsMainCockpit)
+        {
+            return ctrl;
+        }
+
+        // Grab the first seat that has a player sitting in it
+        // and save it away in-case we don't have a main contoller
+        if (currentlyControlled == null && ctrl != lastController && ctrl.IsUnderControl && ctrl.CanControlShip)
+        {
+            currentlyControlled = ctrl;
+        }
+    }
+
+    // We did not find a main controller, so if the first controlled controller
+    // from last cycle if it is still controlled
+    if (lastController != null && lastController.IsUnderControl)
+    {
+        return lastController;
+    }
+
+    // Otherwise we return the first ship controller that we
+    // found that was controlled.
+    if (currentlyControlled != null)
+    {
+        return currentlyControlled;
+    }
+
+    // Nothing is under control, return the controller from last cycle.
+    return lastController;
 }
 #endregion
