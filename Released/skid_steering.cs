@@ -54,8 +54,8 @@ bool _drawTitleScreen = true;
 
 const string
     ScriptName = "WMI Skid Steering",
-    Version = "1.5.1",
-    Date = "2024/05/27",
+    Version = "1.5.2",
+    Date = "2026/01/18",
     IniSection = "Skid Steering",
     IniKeyGroupName = "Group name tag",
     IniKeyDrawTitleScreen = "Draw title screen",
@@ -244,7 +244,7 @@ void SetGyroPower(float power, List<IMyGyro> gyros)
 {
     foreach (var g in gyros)
     {
-        g.GyroPower = power;
+        g.GyroPower = power * 0.01f;
     }
 }
 
@@ -694,14 +694,14 @@ static class BlueScreenOfDeath
 /// </summary>
 public class RuntimeTracker
 {
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
@@ -789,10 +789,10 @@ public class Scheduler
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
     QueuedAction _currentlyQueuedAction = null;
-    bool _firstRun = true;
     bool _inUpdate = false;
+    bool _firstRun = true;
+    long _lastTick = 0;
 
-    readonly bool _ignoreFirstRun;
     readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
     readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
     readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
@@ -801,7 +801,6 @@ public class Scheduler
 
     public const long TicksPerSecond = 60;
     public const double TickDurationSeconds = 1.0 / TicksPerSecond;
-    const long ClockTicksPerGameTick = 166666L;
 
     /// <summary>
     /// Constructs a scheduler object with timing based on the runtime of the input program.
@@ -809,7 +808,14 @@ public class Scheduler
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
-        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Resets the internal tick
+    /// </summary>
+    public void Reset()
+    {
+        _firstRun = true;
     }
 
     /// <summary>
@@ -818,14 +824,13 @@ public class Scheduler
     public void Update()
     {
         _inUpdate = true;
-        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
 
+        long currentTick = _program.Runtime.LifetimeTicks;
+        
+        long deltaTicks = Math.Max(0, currentTick - _lastTick);
         if (_firstRun)
         {
-            if (_ignoreFirstRun)
-            {
-                deltaTicks = 0;
-            }
+            deltaTicks = 0;
             _firstRun = false;
         }
 
@@ -867,7 +872,9 @@ public class Scheduler
                 _currentlyQueuedAction = null;
             }
         }
+
         _inUpdate = false;
+        _lastTick = currentTick;
 
         if (_actionsToAdd.Count > 0)
         {
@@ -919,13 +926,6 @@ public class Scheduler
     {
         _queuedActions.Enqueue(scheduledAction);
     }
-}
-
-public class QueuedAction : ScheduledAction
-{
-    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
-        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
-    { }
 }
 
 public class ScheduledAction
@@ -1012,6 +1012,13 @@ public class ScheduledAction
             JustRan = false;
         }
     }
+}
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
 }
 #endregion
 bool AddToListIfType<T>(IMyTerminalBlock block, List<T> list) where T : class, IMyTerminalBlock
