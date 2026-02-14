@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.6.6";
-const string Date = "2024/04/13";
+const string Version = "35.7.0";
+const string Date = "2026/02/14";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -142,7 +142,6 @@ bool _clearSpriteCache = false;
 
 readonly CompositeBoundingSphere _compositeBoundingSphere;
 readonly RadarSurface _radarSurface;
-readonly MyCommandLine _commandLine = new MyCommandLine();
 readonly RadarRunningScreenManager _runningScreenManager;
 #endregion
 
@@ -249,8 +248,7 @@ void Main(string arg, UpdateType updateSource)
 {
     _runtimeTracker.AddRuntime();
 
-    if (_commandLine.TryParse(arg))
-        HandleArguments();
+    HandleArguments(arg);
 
     _scheduler.Update();
 
@@ -270,31 +268,43 @@ void DrawRunningScreen()
     }
 }
 
-void HandleArguments()
+void HandleArguments(string arg)
 {
-    int argCount = _commandLine.ArgumentCount;
+    var args = arg.Split(new char[]{' '}, StringSplitOptions.RemoveEmptyEntries);
 
-    if (argCount == 0)
+    if (args.Count() == 0)
         return;
 
-    switch (_commandLine.Argument(0).ToLowerInvariant())
+    switch (args[0].ToLowerInvariant())
     {
         case "range":
-            if (argCount != 2)
+            if (args.Count() < 2)
             {
                 return;
             }
-
-            float range = 0;
-            if (float.TryParse(_commandLine.Argument(1), out range))
-            {
-                _rangeOverride.Value = range;
-                UpdateRadarRange();
-            }
-            else if (string.Equals(_commandLine.Argument(1), "default") || string.Equals(_commandLine.Argument(1), "auto"))
+            
+            if (args[1] == "default" || args[1] == "auto")
             {
                 _rangeOverride.Reset();
                 UpdateRadarRange();
+            }
+            else if (args[1] == "increment")
+            {
+                float increment = 0;
+            
+                if (args.Count() >= 3 && float.TryParse(args[2], out increment))
+                {
+                    _rangeOverride.Value = MaxRange + increment;
+                }
+            }
+            else
+            {
+                float range = 0;
+                if (float.TryParse(args[1], out range))
+                {
+                    _rangeOverride.Value = range;
+                    UpdateRadarRange();
+                }
             }
             return;
 
@@ -1794,10 +1804,10 @@ public class Scheduler
     public long CurrentTicksSinceLastRun { get; private set; } = 0;
 
     QueuedAction _currentlyQueuedAction = null;
-    bool _firstRun = true;
     bool _inUpdate = false;
+    bool _firstRun = true;
+    long _lastTick = 0;
 
-    readonly bool _ignoreFirstRun;
     readonly List<ScheduledAction> _actionsToAdd = new List<ScheduledAction>();
     readonly List<ScheduledAction> _scheduledActions = new List<ScheduledAction>();
     readonly List<ScheduledAction> _actionsToDispose = new List<ScheduledAction>();
@@ -1806,7 +1816,6 @@ public class Scheduler
 
     public const long TicksPerSecond = 60;
     public const double TickDurationSeconds = 1.0 / TicksPerSecond;
-    const long ClockTicksPerGameTick = 166666L;
 
     /// <summary>
     /// Constructs a scheduler object with timing based on the runtime of the input program.
@@ -1814,7 +1823,14 @@ public class Scheduler
     public Scheduler(Program program, bool ignoreFirstRun = false)
     {
         _program = program;
-        _ignoreFirstRun = ignoreFirstRun;
+    }
+
+    /// <summary>
+    /// Resets the internal tick
+    /// </summary>
+    public void Reset()
+    {
+        _firstRun = true;
     }
 
     /// <summary>
@@ -1823,14 +1839,13 @@ public class Scheduler
     public void Update()
     {
         _inUpdate = true;
-        long deltaTicks = Math.Max(0, _program.Runtime.TimeSinceLastRun.Ticks / ClockTicksPerGameTick);
 
+        long currentTick = _program.Runtime.LifetimeTicks;
+        
+        long deltaTicks = Math.Max(0, currentTick - _lastTick);
         if (_firstRun)
         {
-            if (_ignoreFirstRun)
-            {
-                deltaTicks = 0;
-            }
+            deltaTicks = 0;
             _firstRun = false;
         }
 
@@ -1872,7 +1887,9 @@ public class Scheduler
                 _currentlyQueuedAction = null;
             }
         }
+
         _inUpdate = false;
+        _lastTick = currentTick;
 
         if (_actionsToAdd.Count > 0)
         {
@@ -1924,13 +1941,6 @@ public class Scheduler
     {
         _queuedActions.Enqueue(scheduledAction);
     }
-}
-
-public class QueuedAction : ScheduledAction
-{
-    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
-        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
-    { }
 }
 
 public class ScheduledAction
@@ -2018,6 +2028,13 @@ public class ScheduledAction
         }
     }
 }
+
+public class QueuedAction : ScheduledAction
+{
+    public QueuedAction(Action action, double runInterval, bool removeAfterRun = false)
+        : base(action, 1.0 / runInterval, removeAfterRun: removeAfterRun, timeOffset: 0)
+    { }
+}
 #endregion
 
 /// <summary>
@@ -2025,14 +2042,14 @@ public class ScheduledAction
 /// </summary>
 public class RuntimeTracker
 {
-    public int Capacity { get; set; }
-    public double Sensitivity { get; set; }
-    public double MaxRuntime {get; private set;}
-    public double MaxInstructions {get; private set;}
-    public double AverageRuntime {get; private set;}
-    public double AverageInstructions {get; private set;}
-    public double LastRuntime {get; private set;}
-    public double LastInstructions {get; private set;}
+    public int Capacity;
+    public double Sensitivity;
+    public double MaxRuntime;
+    public double MaxInstructions;
+    public double AverageRuntime;
+    public double AverageInstructions;
+    public double LastRuntime;
+    public double LastInstructions;
     
     readonly Queue<double> _runtimes = new Queue<double>();
     readonly Queue<double> _instructions = new Queue<double>();
