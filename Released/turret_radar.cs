@@ -50,8 +50,8 @@ HEY! DONT EVEN THINK ABOUT TOUCHING BELOW THIS LINE!
 */
 
 #region Fields
-const string Version = "35.7.0";
-const string Date = "2026/02/14";
+const string Version = "35.7.1";
+const string Date = "2026/05/22";
 const string IgcTag = "IGC_IFF_MSG";
 const string IgcPacketTag = "IGC_IFF_PKT"; // For packets of IFF messages
 
@@ -347,10 +347,10 @@ void UpdateRadarRange()
 #endregion
 
 #region IGC Comms
-void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entityId, Vector3D position)
+void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entityId, Vector3D position, double radiusSq)
 {
-    TargetRelation relationship = (targetRelation & TargetRelation.RelationMask);
-    TargetRelation type = (targetRelation & TargetRelation.TypeMask);
+    TargetRelation relationship = targetRelation & TargetRelation.RelationMask;
+    TargetRelation type = targetRelation & TargetRelation.TypeMask;
     bool targetLock = (targetRelation & TargetRelation.Locked) != 0;
 
     if (_myGridIds.Contains(entityId))
@@ -383,6 +383,7 @@ void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entity
         {
             targetData.Relation = relationship;
         }
+        targetData.RadiusSq = Math.Max(radiusSq, targetData.RadiusSq);
     }
     else
     {
@@ -391,6 +392,7 @@ void ProcessDataPacket(long sourceId, TargetRelation targetRelation, long entity
         targetData.MyLock = myLock;
         targetData.Relation = relationship;
         targetData.Type = type;
+        targetData.RadiusSq = radiusSq;
     }
 
     _targetDataDict[entityId] = targetData;
@@ -406,12 +408,12 @@ void ProcessNetworkMessage()
         if (messageData is MyTuple<byte, long, Vector3D, byte>) // For backwards compat.
         {
             var payload = (MyTuple<byte, long, Vector3D, byte>)messageData;
-            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
+            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3, 0);
         }
-        else if (messageData is MyTuple<byte, long, Vector3D, double>) // Item4 is ignored on ingest, it is grid radius
+        else if (messageData is MyTuple<byte, long, Vector3D, double>)
         {
             var payload = (MyTuple<byte, long, Vector3D, double>)messageData;
-            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
+            ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3, payload.Item4);
         }
     }
 
@@ -431,7 +433,7 @@ void ProcessNetworkMessage()
 
             foreach (var payload in payloadArray)
             {
-                ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3);
+                ProcessDataPacket(message.Source, (TargetRelation)payload.Item1, payload.Item2, payload.Item3, payload.Item4);
             }
         }
     }
@@ -460,7 +462,7 @@ void NetworkTargets()
         foreach (var kvp in _broadcastDict)
         {
             TargetData targetData = kvp.Value;
-            var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(targetData.Relation | targetData.Type), kvp.Key, targetData.Position, 0);
+            var myTuple = new MyTuple<byte, long, Vector3D, double>((byte)(targetData.Relation | targetData.Type), kvp.Key, targetData.Position, targetData.RadiusSq);
             _messageBuilder.Add(myTuple);
         }
     }
@@ -526,6 +528,7 @@ void AddTargetData(MyDetectedEntityInfo targetInfo)
         targetData.Type = TargetRelation.Other;
     }
     targetData.Position = targetInfo.Position;
+    targetData.RadiusSq = targetInfo.BoundingBox.HalfExtents.LengthSquared();
 
     _targetDataDict[targetInfo.EntityId] = targetData;
     _broadcastDict[targetInfo.EntityId] = targetData;
@@ -632,6 +635,7 @@ struct TargetData
     public TargetRelation Type;
     public bool TargetLock;
     public bool MyLock;
+    public double RadiusSq;
 }
 #endregion
 
