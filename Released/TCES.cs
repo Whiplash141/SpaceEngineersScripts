@@ -51,8 +51,8 @@ USE THE CUSTOM DATA OF THIS PROGRAMMABLE BLOCK!
 */
 
 public const string
-    Version = "1.14.2",
-    Date = "2024/12/28",
+    Version = "1.15.0",
+    Date = "2026/05/28",
     IniSectionGeneral = "TCES - General",
     IniKeyGroupNameTag = "Group name tag",
     IniKeySyncGroupNameTag = "Synced group name tag",
@@ -63,9 +63,12 @@ public const string
     IniKeyAutoDeviation = "Auto compute deviation angle",
     IniKeyDrawTitleScreen = "Draw title screen",
     IniSectionRotor = "TCES - Rotor",
+    IniSectionTurret = "TCES - Turret Behavior",
+    IniKeyRestOrder = "Rest angle order",
     IniKeyRestAngle = "Rest angle (deg)",
     IniKeyRestSpeed = "Rest speed multiplier",
-    IniKeyEnableStabilization = "Enable stabilization";
+    IniKeyEnableStabilization = "Enable stabilization",
+    IniCommentRestOrder = " Valid values: AzimuthFirst, ElevationFirst";
 
 RuntimeTracker _runtimeTracker;
 long _runCount = 0;
@@ -235,6 +238,22 @@ class TCESTurret
         }
     }
 
+    enum RestOrder
+    {
+        AzimuthFirst,
+        ElevationFirst,
+    }
+
+    class TurretConfig : ConfigSection
+    {
+        public ConfigEnum<RestOrder> RestAngleOrder = new ConfigEnum<RestOrder>(IniKeyRestOrder, RestOrder.AzimuthFirst, IniCommentRestOrder);
+
+        public TurretConfig() : base(IniSectionTurret)
+        {
+            AddValues(RestAngleOrder);
+        }
+    }
+
     class DeadzoneConfig : ConfigSection
     {
         public ConfigInt DeadzoneCount = new ConfigInt("Weapon deadzone count", 0);
@@ -289,6 +308,7 @@ class TCESTurret
     public IMyMotorStator ElevationRotor => _elevationStabilizer.Rotor;
     public IMyTurretControlBlock TurretController => _controller;
 
+    TurretConfig _turretConfig = new TurretConfig();
     DeadzoneConfig _deadzoneConfig = new DeadzoneConfig();
     RotorConfig _azimuthConfig = new RotorConfig();
     RotorConfig _elevationConfig = new RotorConfig();
@@ -321,6 +341,13 @@ class TCESTurret
         Idle
     }
 
+    enum RestState
+    {
+        AzimuthActive,
+        ElevationActive,
+        Idle,
+    }
+
     enum AiTargetingState
     {
         Idle,
@@ -329,6 +356,7 @@ class TCESTurret
     }
 
     StateMachine _rotorControlSM = new StateMachine();
+    StateMachine _restAngleSM = new StateMachine();
     StateMachine _aiControlSM = new StateMachine();
 
     enum ReturnCode
@@ -369,7 +397,7 @@ class TCESTurret
         _rotorControlSM.AddState(new State(ControlState.ManualControl, onUpdate: OnUpdateManualControl));
         _rotorControlSM.AddState(new State(ControlState.AiControl, onUpdate: OnUpdateAiControl, onEnter: OnEnterAiControl, onLeave: OnAiControlBothRotors));
         _rotorControlSM.AddState(new State(ControlState.WaitForRest, onUpdate: OnUpdateRestWait, onEnter: OnEnterRestWait));
-        _rotorControlSM.AddState(new State(ControlState.MoveToRest, onUpdate: OnUpdateMoveToRest));
+        _rotorControlSM.AddState(new State(ControlState.MoveToRest, onUpdate: OnUpdateMoveToRest, onEnter: OnEnterMoveToRest));
         _rotorControlSM.AddState(new State(ControlState.Idle, onEnter: ResetRotors));
         _rotorControlSM.Initialize(ControlState.MoveToRest);
 
@@ -383,6 +411,21 @@ class TCESTurret
         _groupName = group.Name;
         Setup();
         SetBlocks();
+
+        if (_turretConfig.RestAngleOrder == RestOrder.AzimuthFirst)
+        {
+            _restAngleSM.AddState(new State(RestState.AzimuthActive, onUpdate: () => OnAzimuthRotorRest(RestState.ElevationActive)));
+            _restAngleSM.AddState(new State(RestState.ElevationActive, onUpdate: () => OnElevationRotorRest(RestState.Idle)));
+            _restAngleSM.AddState(new State(RestState.Idle));
+        }
+        else
+        {
+            _restAngleSM.AddState(new State(RestState.ElevationActive, onUpdate: () => OnElevationRotorRest(RestState.AzimuthActive)));
+            _restAngleSM.AddState(new State(RestState.AzimuthActive, onUpdate: () => OnAzimuthRotorRest(RestState.Idle)));
+            _restAngleSM.AddState(new State(RestState.Idle));
+        }
+        _restAngleSM.Initialize(RestState.Idle);
+        OnEnterMoveToRest();
 
         if (ElevationRotor != null)
         {
@@ -553,11 +596,18 @@ class TCESTurret
 
     void OnUpdateMoveToRest()
     {
-        bool done = HandleAzimuthAndElevationRestAngles();
-        if (done)
+        _restAngleSM.Update();
+
+        if ((RestState)_restAngleSM.StateId == RestState.Idle)
         {
             _rotorControlSM.SetState(ControlState.Idle);
         }
+    }
+
+    void OnEnterMoveToRest()
+    {
+        var initialRestState = _turretConfig.RestAngleOrder == RestOrder.AzimuthFirst ? RestState.AzimuthActive : RestState.ElevationActive;
+        _restAngleSM.SetState(initialRestState);
     }
     #endregion
 
@@ -828,6 +878,8 @@ class TCESTurret
     {
         PreparseIni(tcb);
 
+        _turretConfig.Update(_ini);
+
         _deadzoneConfig.Update(_ini);
 
         _deadzoneConfig.Deadzones.Clear();
@@ -915,6 +967,11 @@ class TCESTurret
         IMyMotorStator r = b as IMyMotorStator;
         if (r != null && r.TopGrid == null) return false;
         return (b != null) && _p.Me.IsSameConstructAs(b);
+    }
+
+    T NullifyIfInvalid<T>(T b) where T : class, IMyTerminalBlock
+    {
+        return BlockValid(b) ? b : null;
     }
 
     void SetBlocks()
@@ -1057,45 +1114,40 @@ class TCESTurret
 
     #region Rotor Control
     /*
-        * In order to properly set the rest angle, we need to unassign the azinuth
-        * and elevation rotors temporarily from the CTC. However, we can't do this
-        * at the same time, or the CTC will be marked as invalid and will lose
-        * its AI and ability to be manually controlled until the rest angle has been
-        * reached. This is undesireable, so what we will do instead is get thhe
-        * azimuth rotor to its rest angle, then try and get the elevation rotor to
-        * its rest angle
-        */
-    bool HandleAzimuthAndElevationRestAngles()
-    {
+     * In order to properly set the rest angle, we need to unassign the azinuth
+     * and elevation rotors temporarily from the CTC. However, we can't do this
+     * at the same time, or the CTC will be marked as invalid and will lose
+     * its AI and ability to be manually controlled until the rest angle has been
+     * reached. This is undesireable, so what we will do instead is get thhe
+     * azimuth rotor to its rest angle, then try and get the elevation rotor to
+     * its rest angle
+     */
+    void OnAzimuthRotorRest(RestState nextState)
+    {        
+        _controller.AzimuthRotor = null;
+        _controller.ElevationRotor = NullifyIfInvalid(ElevationRotor);
+
         bool done = TryMoveRotorToRestAngle(AzimuthRotor, _azimuthConfig.RestAngleRad, _azimuthConfig.RestSpeedRatio);
         if (done)
         {
-            if (BlockValid(AzimuthRotor))
-            {
-                _controller.AzimuthRotor = AzimuthRotor;
-            }
-            done = TryMoveRotorToRestAngle(ElevationRotor, _elevationConfig.RestAngleRad, _elevationConfig.RestSpeedRatio);
-            if (done)
-            {
-                if (BlockValid(ElevationRotor))
-                {
-                    _controller.ElevationRotor = ElevationRotor;
-                }
-            }
-            else
-            {
-                _controller.ElevationRotor = null;
-            }
+            _controller.AzimuthRotor = NullifyIfInvalid(AzimuthRotor);
+
+            _restAngleSM.SetState(nextState);
         }
-        else
+    }
+
+    void OnElevationRotorRest(RestState nextState)
+    {        
+        _controller.ElevationRotor = null;
+        _controller.AzimuthRotor = NullifyIfInvalid(AzimuthRotor);
+
+        bool done = TryMoveRotorToRestAngle(ElevationRotor, _elevationConfig.RestAngleRad, _elevationConfig.RestSpeedRatio);
+        if (done)
         {
-            _controller.AzimuthRotor = null;
-            if (BlockValid(ElevationRotor))
-            {
-                _controller.ElevationRotor = ElevationRotor;
-            }
+            _controller.ElevationRotor = NullifyIfInvalid(ElevationRotor);
+
+            _restAngleSM.SetState(nextState);
         }
-        return done;
     }
 
     bool TryMoveRotorToRestAngle(IMyMotorStator r, float? restAngleRad, float restSpeed)
@@ -2109,6 +2161,26 @@ public class ConfigBool : ConfigValue<bool>
     protected override bool SetValue(ref MyIniValue val)
     {
         if (!val.TryGetBoolean(out _value))
+        {
+            SetDefault();
+            return false;
+        }
+        return true;
+    }
+}
+
+public class ConfigEnum<TEnum> : ConfigValue<TEnum> where TEnum : struct
+{
+    public ConfigEnum(string name, TEnum defaultValue = default(TEnum), string comment = null)
+    : base (name, defaultValue, comment)
+    {}
+
+    protected override bool SetValue(ref MyIniValue val)
+    {
+        string enumerationStr;
+        if (!val.TryGetString(out enumerationStr) ||
+            !Enum.TryParse(enumerationStr, true, out _value) ||
+            !Enum.IsDefined(typeof(TEnum), _value))
         {
             SetDefault();
             return false;
