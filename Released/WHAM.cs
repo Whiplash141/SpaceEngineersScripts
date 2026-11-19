@@ -1,7 +1,7 @@
 
 #region WHAM
-const string Version = "170.22.2";
-const string Date = "2024/05/03";
+const string Version = "170.23.0";
+const string Date = "2026/11/18";
 const string CompatVersion = "95.0.0";
 
 /*
@@ -219,6 +219,7 @@ List<IMyWarhead> _warheads = new List<IMyWarhead>();
 List<IMyCameraBlock> _cameras = new List<IMyCameraBlock>();
 List<IMyCameraBlock> _homingCameras = new List<IMyCameraBlock>();
 List<IMyGasTank> _gasTanks = new List<IMyGasTank>();
+List<IMyDestroyBlockComponent> _sepCharges = new List<IMyDestroyBlockComponent>();
 List<MyDetectedEntityInfo> _sensorEntities = new List<MyDetectedEntityInfo>();
 
 ImmutableArray<MyTuple<byte, long, Vector3D, double>>.Builder _messageBuilder = ImmutableArray.CreateBuilder<MyTuple<byte, long, Vector3D, double>>();
@@ -1046,6 +1047,7 @@ void ClearLists()
     _cameras.Clear();
     _homingCameras.Clear();
     _gasTanks.Clear();
+    _sepCharges.Clear();
 }
 
 string GetTitle()
@@ -1376,17 +1378,19 @@ bool SetupErrorChecking()
     }
 
     EchoBlockCount(_antennas.Count, "antenna");
-    EchoBlockCount(_artMasses.Count, "art. mass block");
-    EchoBlockCount(_sensors.Count, "sensor");
+    EchoBlockCount(_gyros.Count, "gyro");
     EchoBlockCount(_warheads.Count, "warhead");
     EchoBlockCount(_cameras.Count, "camera");
-    EchoBlockCount(_stageTimers.Count, "stage timer trigger");
-    EchoBlockCount(_rangeTimers.Count, "range timer trigger");
     EchoBlockCount(_unsortedThrusters.Count, "total thruster");
     EchoBlockCount(_mainThrusters.Count, "main thruster");
     EchoBlockCount(_sideThrusters.Count, "side thruster");
     EchoBlockCount(_detachThrusters.Count, "detach thruster");
+    EchoBlockCount(_stageTimers.Count, "stage timer trigger");
+    EchoBlockCount(_rangeTimers.Count, "range timer trigger");
     EchoBlockCount(_gasTanks.Count, "gas tank");
+    EchoBlockCount(_artMasses.Count, "art. mass block");
+    EchoBlockCount(_sensors.Count, "sensor");
+    EchoBlockCount(_sepCharges.Count, "separation charge");
 
     return !setupFailed;
 }
@@ -1452,7 +1456,12 @@ bool CollectBlocks(IMyTerminalBlock block)
     IMyRadioAntenna antenna;
     IMyCameraBlock camera;
     IMyWarhead warhead;
-
+    IMyDestroyBlockComponent sepComponent;
+    if (block.Components.TryGet<IMyDestroyBlockComponent>(out sepComponent))
+    {
+        _sepCharges.Add(sepComponent);
+    }
+    
     AddToListIfType(block, _funcBlocks);
 
     if (AddToListIfType(block, _unsortedThrusters, out thrust))
@@ -1655,6 +1664,11 @@ void OnDetach()
     foreach (var b in _mergeBlocks)
     {
         b.Enabled = false;
+    }
+
+    foreach (var s in _sepCharges)
+    {
+        s.Detach();
     }
 
     foreach (var c in _connectors)
